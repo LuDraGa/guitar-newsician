@@ -1,0 +1,14 @@
+download_dir: outputs/downloads/yt_music_downloader
+filename_template: '%(title)s [%(id)s].%(ext)s'
+audio_format: m4a
+audio_quality: '320'
+rate_limit: ''
+proxy: ''
+embed_metadata: true
+prefer_free_formats: false
+noplaylist: true
+use_cookies_from_browser: null
+cookiefile: null
+yt_player_client: web
+user_agent: null
+ytdlp_extra: {}
