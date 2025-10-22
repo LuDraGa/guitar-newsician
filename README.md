@@ -15,4 +15,14 @@
    1. uses yt-dlp
    2. runs in terminal
    3. has a configuration file for the ytdlp-opts
-   4. dir selector does not work
+   4. **_`<span style="color:#E52B50">`Unique terminal dir selector `</span>`_**
+
+#### Scrapers
+
+- DEF: Scraper extracts specific, targeted data from web pages
+
+#### Crawlers
+
+- DEF: navigates and indexes websites to discover links and pages
+
+#### Crons
