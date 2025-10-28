@@ -1,4 +1,4 @@
-#### The theme of this codebase is to have the various scrapers, downloaders and converter scripts in one place. Mostly just backend, with at best a super simplistic ui(No UX thoughts)
+#### The theme of this codebase is to have the various scrapers, downloaders, converter and analyzer scripts in one place. Mostly just backend, with at best a super simplistic ui(No UX thoughts)
 
 #### Bare Setup
 
@@ -8,6 +8,12 @@
 4. pyyaml: for yaml based configs
 5. python-dotenv: to read envs and work with them
 6. uvicorn: This is the server
+7. m4a -> wav -> midi
+8. essentia vs librosa
+9. msaf, madmom(facing issue with 3.12), pyACA(more experimental so not using currently)
+10. music21
+11. soundfile vs pydub
+12. spleeter vs demucs
 
 #### Downloaders
 
