@@ -1,0 +1,19 @@
+# Audio to WAV Converter Configuration
+
+# Input directory containing song directories
+# Each song directory should have an audio.m4a file
+input_dir: downloads
+
+# WAV conversion settings
+target_sample_rate: 44100
+mono: false
+overwrite: false
+
+# Supported input formats
+supported_formats:
+  - m4a
+  - mp3
+  - flac
+  - aac
+  - ogg
+  - wav

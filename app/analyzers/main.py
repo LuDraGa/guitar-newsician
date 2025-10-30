@@ -1,12 +1,12 @@
 """
 WAV Music Analysis Runner
-Batch analyze WAV files with parallel processing and Rich dashboard output.
+Analyze WAV files with Rich dashboard output (in-place processing).
 """
 
 from __future__ import annotations
 from pathlib import Path
-from typing import List, Optional, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Optional
+import yaml
 from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.panel import Panel
@@ -14,14 +14,15 @@ from rich.table import Table
 from rich.columns import Columns
 from rich.rule import Rule
 from rich.text import Text
+from rich.prompt import Prompt, Confirm
+from rich.live import Live
 from rich import box
 import json
 
-from music_analysis import run_analysis, DEFAULT_OUT_DIR as ANALYSIS_OUT
+from music_analysis import run_analysis, list_analyzers
 
-WAV_EXT = ".wav"
-DEFAULT_WAV_DIR = Path(__file__).parent.parent / "outputs" / "converted" / "audio2wav"
 console = Console()
+CONFIG_PATH = Path(__file__).parent / "config.yaml"
 
 
 # ============================================================================
@@ -29,119 +30,272 @@ console = Console()
 # ============================================================================
 
 
-class AnalysisConfig(BaseModel):
-    """Configuration for batch WAV analysis."""
+class AnalyzerConfig(BaseModel):
+    """Configuration for music analysis."""
 
-    # Input/Output
-    input_path: Path = Field(
-        default=DEFAULT_WAV_DIR, description="WAV file or directory"
-    )
-    output_dir: Path = Field(
-        default=ANALYSIS_OUT, description="Analysis output directory"
-    )
-
-    # Processing
-    recurse: bool = Field(default=False, description="Recurse into subdirectories")
-    skip_existing: bool = Field(
-        default=True, description="Skip files with existing analysis"
-    )
+    input_dir: Path = Field(default=Path("downloads"), description="Input directory with song folders")
+    output_filename: str = Field(default="analysis.json", description="Output filename for analysis")
+    skip_existing: bool = Field(default=True, description="Skip files with existing analysis")
     workers: int = Field(default=4, description="Number of parallel workers")
+    enable_analyzers: Optional[List[str]] = Field(default=None, description="Only run these analyzers")
+    disable_analyzers: Optional[List[str]] = Field(default=None, description="Skip these analyzers")
+    show_dashboard: bool = Field(default=True, description="Show Rich dashboard after analysis")
+    max_chords: int = Field(default=10, description="Max chords to display")
+    max_beats: int = Field(default=10, description="Max beats to display")
+    max_sections: int = Field(default=10, description="Max sections to display")
 
-    # Analyzer filtering
-    enable: Optional[List[str]] = Field(
-        default=None, description="Only run these analyzers"
+
+def load_config() -> AnalyzerConfig:
+    """Load configuration from YAML file."""
+    if not CONFIG_PATH.exists():
+        console.print(f"[yellow]Config not found at {CONFIG_PATH}, using defaults[/yellow]")
+        return AnalyzerConfig()
+
+    with open(CONFIG_PATH, "r") as f:
+        data = yaml.safe_load(f)
+
+    return AnalyzerConfig(**data)
+
+
+def find_analyzable_songs(input_dir: Path) -> List[Path]:
+    """
+    Find all song directories that have audio.wav files (already converted).
+
+    Returns:
+        List of song directory paths that contain audio.wav
+    """
+    if not input_dir.exists():
+        return []
+
+    analyzable = []
+    for item in input_dir.iterdir():
+        if not item.is_dir():
+            continue
+
+        wav_file = item / "audio.wav"
+        if wav_file.exists():
+            analyzable.append(item)
+
+    return sorted(analyzable)
+
+
+def display_song_selection(songs: List[Path], output_filename: str) -> Optional[Path]:
+    """
+    Display Rich TUI for song selection.
+
+    Returns:
+        Selected song directory path, or None if cancelled
+    """
+    if not songs:
+        console.print("[red]No analyzable songs found![/red]")
+        console.print("[yellow]Make sure songs have been converted to WAV first (audio.wav)[/yellow]")
+        return None
+
+    # Create selection table
+    table = Table(
+        title="Available Songs for Analysis",
+        box=box.ROUNDED,
+        show_header=True,
+        header_style="bold cyan"
     )
-    disable: Optional[List[str]] = Field(
-        default=None, description="Skip these analyzers"
+    table.add_column("#", justify="right", style="cyan")
+    table.add_column("Song Directory", style="white")
+    table.add_column("WAV File", style="green")
+    table.add_column("Status", style="yellow")
+
+    for idx, song_dir in enumerate(songs, start=1):
+        wav_file = song_dir / "audio.wav"
+        analysis_file = song_dir / output_filename
+        status = "[dim]analyzed[/dim]" if analysis_file.exists() else "[bright_white]not analyzed[/bright_white]"
+
+        table.add_row(
+            str(idx),
+            song_dir.name,
+            wav_file.name,
+            status
+        )
+
+    console.print(table)
+    console.print()
+
+    # Prompt for selection
+    choice = Prompt.ask(
+        "[bold cyan]Select song to analyze[/bold cyan]",
+        choices=[str(i) for i in range(1, len(songs) + 1)] + ["q"],
+        default="q"
     )
 
-    # Dashboard display
-    show_dashboard: bool = Field(
-        default=True, description="Show Rich dashboard after analysis"
-    )
-    max_chords: int = Field(
-        default=10, description="Max chords to display in dashboard"
-    )
-    max_beats: int = Field(default=10, description="Max beats to display in dashboard")
-    max_sections: int = Field(
-        default=10, description="Max sections to display in dashboard"
-    )
+    if choice == "q":
+        console.print("[yellow]Analysis cancelled[/yellow]")
+        return None
+
+    return songs[int(choice) - 1]
 
 
-# ============================================================================
-# Configuration Presets
-# ============================================================================
-
-# Quick analysis - only essential analyzers, no dashboard
-QUICK_ANALYSIS = AnalysisConfig(
-    skip_existing=True,
-    workers=8,
-    enable=["basic_stats", "tempo_beats"],
-    show_dashboard=False,
-)
-
-# Full analysis - all analyzers with dashboard
-FULL_ANALYSIS = AnalysisConfig(
-    skip_existing=False,
-    workers=4,
-    show_dashboard=True,
-    max_chords=20,
-    max_beats=20,
-    max_sections=15,
-)
-
-# Production analysis - optimized for large batches
-PRODUCTION_ANALYSIS = AnalysisConfig(
-    recurse=True,
-    skip_existing=True,
-    workers=16,
-    show_dashboard=False,
-)
-
-# Chord-focused analysis
-CHORD_ANALYSIS = AnalysisConfig(
-    enable=["basic_stats", "tonal_key", "chords"],
-    show_dashboard=True,
-    max_chords=50,
-)
-
-# Structure-focused analysis
-STRUCTURE_ANALYSIS = AnalysisConfig(
-    enable=["basic_stats", "tempo_beats", "structure_msaf"],
-    show_dashboard=True,
-    max_sections=30,
-)
-
-
-# ============================================================================
-# Core Functions
-# ============================================================================
-
-
-def find_wavs(path: Path, recurse: bool) -> List[Path]:
-    """Find all WAV files in path (file or directory)."""
-    path = Path(path)
-    if path.is_file() and path.suffix.lower() == WAV_EXT:
-        return [path]
-    if path.is_dir():
-        it = path.rglob("*") if recurse else path.iterdir()
-        return sorted(p for p in it if p.is_file() and p.suffix.lower() == WAV_EXT)
-    return []
-
-
-def process_one(
-    wav: Path,
-    analysis_out: Path,
+def analyze_song(
+    song_dir: Path,
+    output_filename: str,
     enable: Optional[List[str]],
     disable: Optional[List[str]],
-    skip_existing: bool,
-) -> Tuple[Path, str, Optional[Path]]:
-    """Process a single WAV file. Returns (source, status, output_path)."""
-    out_json = analysis_out / f"{wav.stem}.analysis.json"
-    if skip_existing and out_json.exists():
-        return (wav, "skip_exists", out_json)
-    out_path = run_analysis(wav, analysis_out, enable=enable, disable=disable)
-    return (wav, "ok", out_path)
+    skip_existing: bool
+) -> Optional[Path]:
+    """
+    Analyze a song's WAV file and save results in the same directory.
+
+    Returns:
+        Path to analysis file if successful, None otherwise
+    """
+    wav_file = song_dir / "audio.wav"
+    output_file = song_dir / output_filename
+
+    if not wav_file.exists():
+        console.print(f"[red]No audio.wav found in {song_dir.name}[/red]")
+        return None
+
+    # Check if analysis already exists
+    if skip_existing and output_file.exists():
+        console.print(f"[yellow]Analysis already exists for {song_dir.name}[/yellow]")
+
+        # Ask if user wants to re-run specific analyzers
+        rerun = Confirm.ask("[cyan]Re-run analysis?[/cyan]", default=False)
+
+        if not rerun:
+            console.print("[dim]Skipping analysis[/dim]")
+            return output_file
+
+        # Load existing analysis to show what's available
+        try:
+            existing_data = json.loads(output_file.read_text(encoding="utf-8"))
+            available_analyzers = [k for k in existing_data.keys() if k != "_meta"]
+
+            console.print()
+            console.print("[cyan]Existing analyzers:[/cyan]")
+
+            # Show existing analyzers with status
+            status_table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+            status_table.add_column("#", justify="right", style="cyan")
+            status_table.add_column("Analyzer", style="white")
+            status_table.add_column("Status", justify="center")
+
+            for idx, name in enumerate(available_analyzers, start=1):
+                analyzer_data = existing_data[name]
+                if analyzer_data.get("ok"):
+                    status = "[green]✓ OK[/green]"
+                else:
+                    status = "[red]✗ Failed[/red]"
+                status_table.add_row(str(idx), name, status)
+
+            console.print(status_table)
+            console.print()
+
+            # Ask which analyzers to re-run
+            console.print("[cyan]Enter analyzer numbers to re-run (comma-separated), or 'all' for all:[/cyan]")
+            console.print("[dim]Example: 1,3,5 or all[/dim]")
+
+            choice = Prompt.ask("Analyzers to re-run", default="all")
+
+            if choice.lower() == "all":
+                enable = None  # Run all
+                console.print("[yellow]Re-running all analyzers[/yellow]")
+            else:
+                # Parse selected numbers
+                try:
+                    selected_indices = [int(x.strip()) for x in choice.split(",")]
+                    enable = [available_analyzers[i-1] for i in selected_indices if 0 < i <= len(available_analyzers)]
+                    console.print(f"[yellow]Re-running: {', '.join(enable)}[/yellow]")
+                except (ValueError, IndexError):
+                    console.print("[red]Invalid selection, running all analyzers[/red]")
+                    enable = None
+
+        except Exception as e:
+            console.print(f"[yellow]Could not read existing analysis: {e}[/yellow]")
+            console.print("[yellow]Running all analyzers[/yellow]")
+            enable = None
+
+    try:
+        console.print(f"[cyan]Analyzing {song_dir.name}...[/cyan]")
+        console.print(f"  Input:  {wav_file.name}")
+        console.print(f"  Output: {output_file.name}")
+        console.print()
+
+        # Get list of analyzers that will run
+        all_analyzers = list_analyzers()
+        enabled_set = set(enable) if enable else None
+        disabled_set = set(disable) if disable else set()
+
+        # Build analyzer status tracking
+        analyzer_status = {}
+        for name, available in all_analyzers:
+            if enabled_set is not None and name not in enabled_set:
+                continue
+            if name in disabled_set:
+                continue
+            if not available:
+                analyzer_status[name] = ("skipped", "dependency missing")
+            else:
+                analyzer_status[name] = ("pending", "")
+
+        def create_status_table():
+            """Create a status table showing analyzer progress."""
+            table = Table(
+                title=f"[bold cyan]Analyzing: {song_dir.name}[/bold cyan]",
+                box=box.ROUNDED,
+                show_header=True,
+                header_style="bold"
+            )
+            table.add_column("Analyzer", style="white")
+            table.add_column("Status", justify="center")
+            table.add_column("Details", style="dim")
+
+            for name, (status, details) in analyzer_status.items():
+                if status == "pending":
+                    status_display = "[dim]⏳ Pending[/dim]"
+                elif status == "running":
+                    status_display = "[yellow]▶ Running[/yellow]"
+                elif status == "completed":
+                    status_display = "[green]✓ Done[/green]"
+                elif status == "failed":
+                    status_display = "[red]✗ Failed[/red]"
+                elif status == "skipped":
+                    status_display = "[dim]⊘ Skipped[/dim]"
+                else:
+                    status_display = status
+
+                table.add_row(name, status_display, details)
+
+            return table
+
+        def progress_callback(analyzer_name: str, status: str, details: str):
+            """Update analyzer status."""
+            analyzer_status[analyzer_name] = (status, details)
+
+        # Run analysis with live progress display
+        with Live(create_status_table(), console=console, refresh_per_second=4) as live:
+            result_path = run_analysis(
+                wav_file,
+                out_dir=song_dir,
+                enable=enable,
+                disable=disable,
+                progress_callback=lambda name, status, details: (
+                    progress_callback(name, status, details),
+                    live.update(create_status_table())
+                )
+            )
+
+        # Rename to configured filename if different
+        if result_path and result_path.name != output_filename:
+            result_path.rename(output_file)
+            result_path = output_file
+
+        console.print()
+        console.print(f"[green]✓ Successfully analyzed {song_dir.name}[/green]")
+        console.print()
+
+        return result_path
+
+    except Exception as e:
+        console.print(f"[red]✗ Failed to analyze {song_dir.name}: {e}[/red]")
+        return None
 
 
 def _sec_to_mmss(x: Optional[float]) -> str:
@@ -339,115 +493,57 @@ def render_dashboard(
     console.print(Rule(style="dim"))
 
 
-def run_batch_analysis(
-    config: AnalysisConfig,
-) -> List[Tuple[Path, str, Optional[Path]]]:
-    """
-    Run batch analysis with given configuration.
-
-    Returns:
-        List of (source_path, status, output_path) tuples
-    """
-    wavs = find_wavs(config.input_path, config.recurse)
-    if not wavs:
-        console.print(f"[yellow]No .wav files found in {config.input_path}[/yellow]")
-        return []
-
-    console.print(f"[cyan]Found {len(wavs)} WAV file(s)[/cyan]")
-
-    results = []
-    with ThreadPoolExecutor(max_workers=max(1, config.workers)) as ex:
-        futs = [
-            ex.submit(
-                process_one,
-                wav=w,
-                analysis_out=config.output_dir,
-                enable=config.enable,
-                disable=config.disable,
-                skip_existing=config.skip_existing,
-            )
-            for w in wavs
-        ]
-        for fu in as_completed(futs):
-            results.append(fu.result())
-
-    ok = sum(1 for _, s, _ in results if s == "ok")
-    skipped = sum(1 for _, s, _ in results if s != "ok")
-    console.print(f"[green]Done. Processed={ok}, Skipped={skipped}[/green]")
-
-    for src, status, outp in results:
-        tag = "OK" if status == "ok" else status
-        console.print(f"[{tag}] {src.name}" + (f" → {outp}" if outp else ""))
-
-    if config.show_dashboard:
-        for src, status, outp in results:
-            if outp and Path(outp).exists():
-                render_dashboard(
-                    Path(outp),
-                    max_chords=config.max_chords,
-                    max_beats=config.max_beats,
-                    max_sections=config.max_sections,
-                )
-
-    return results
-
-
-# ============================================================================
-# Main Entry Point
-# ============================================================================
-
-
 def main():
-    """
-    Main entry point - customize this for your use case.
+    """Main entry point for interactive analysis."""
+    console.print(Panel.fit(
+        "[bold cyan]WAV Music Analyzer[/bold cyan]\n"
+        "Analyze WAV files and generate detailed reports",
+        border_style="cyan"
+    ))
+    console.print()
 
-    Examples:
-        # Use preset
-        run_batch_analysis(FULL_ANALYSIS)
+    # Load config
+    config = load_config()
+    console.print(f"[dim]Input directory: {config.input_dir}[/dim]")
+    console.print(f"[dim]Analyzers: {config.enable_analyzers or 'all'}[/dim]")
+    console.print()
 
-        # Custom config
-        config = AnalysisConfig(
-            input_path=Path("my_wavs"),
-            workers=8,
-            enable=["tempo_beats", "chords"],
-        )
-        run_batch_analysis(config)
+    # Find analyzable songs (only those with audio.wav)
+    songs = find_analyzable_songs(config.input_dir)
 
-        # Modify preset
-        config = QUICK_ANALYSIS.model_copy(update={"input_path": Path("my_wavs")})
-        run_batch_analysis(config)
-    """
+    if not songs:
+        console.print(f"[red]No songs with audio.wav found in {config.input_dir}[/red]")
+        console.print("[yellow]Convert songs to WAV first using the audio2wav converter[/yellow]")
+        return
 
-    # CUSTOMIZE THIS SECTION FOR YOUR USE CASE
-    # =========================================
+    # Display selection
+    selected_song = display_song_selection(songs, config.output_filename)
 
-    # Option 1: Use a preset configuration
-    # config = FULL_ANALYSIS
+    if not selected_song:
+        return
 
-    # Option 2: Custom configuration
-    # config = AnalysisConfig(
-    #     input_path=Path("outputs/converted/audio2wav"),
-    #     output_dir=Path("outputs/analysis/wav_music"),
-    #     recurse=False,
-    #     skip_existing=True,
-    #     workers=4,
-    #     enable=None,  # Run all analyzers
-    #     disable=None,
-    #     show_dashboard=True,
-    #     max_chords=15,
-    #     max_beats=15,
-    #     max_sections=15,
-    # )
-
-    # Option 3: Modify a preset
-    config = FULL_ANALYSIS.model_copy(
-        update={
-            "input_path": Path("outputs/converted/audio2wav"),
-            "workers": 32,
-        }
+    # Analyze
+    result_path = analyze_song(
+        selected_song,
+        config.output_filename,
+        config.enable_analyzers,
+        config.disable_analyzers,
+        config.skip_existing
     )
 
-    run_batch_analysis(config)
+    if not result_path:
+        console.print("[red]Analysis failed[/red]")
+        raise SystemExit(1)
+
+    # Show dashboard
+    if config.show_dashboard and result_path.exists():
+        console.print()
+        render_dashboard(
+            result_path,
+            max_chords=config.max_chords,
+            max_beats=config.max_beats,
+            max_sections=config.max_sections
+        )
 
 
 if __name__ == "__main__":

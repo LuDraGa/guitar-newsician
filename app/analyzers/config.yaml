@@ -1,0 +1,22 @@
+# Music Analysis Configuration
+
+# Input directory containing song directories
+# Each song directory should have an audio.wav file
+input_dir: downloads
+
+# Output filename for analysis results (saved in same directory as WAV)
+output_filename: analysis.json
+
+# Processing settings
+skip_existing: true
+workers: 4
+
+# Analyzer filtering (null = run all)
+enable_analyzers: null  # e.g., ["basic_stats", "tempo_beats", "tonal_key"]
+disable_analyzers: null  # e.g., ["structure_msaf"]
+
+# Dashboard display settings
+show_dashboard: true
+max_chords: 10
+max_beats: 10
+max_sections: 10
