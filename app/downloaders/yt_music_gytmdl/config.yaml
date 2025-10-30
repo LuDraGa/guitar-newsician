@@ -1,0 +1,28 @@
+# YouTube Music Downloader Config (gytmdl-based)
+
+# Output directory
+download_dir: downloads
+
+# Audio quality (itag codes)
+# 141 = 256kbps AAC, 140 = 128kbps AAC, 139 = 48kbps AAC
+# Premium: 251 = Opus ~160kbps (requires cookies)
+# Use 'bestaudio' to let gytmdl pick the best available format automatically
+audio_itag: '141'
+
+# Folder/file naming
+folder_template: '{title} - {artist}'
+file_template: 'audio'
+
+# Cover art
+cover_size: 1200
+cover_format: jpg  # jpg, png, raw
+save_cover_separate: true
+
+# Lyrics
+download_lyrics: true
+
+# Metadata
+create_metadata_json: true
+
+# Optional: cookies file path for premium formats
+cookies_file: null

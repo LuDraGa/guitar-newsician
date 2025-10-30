@@ -8,6 +8,8 @@ dependencies = [
     "essentia>=2.1b6.dev1389",
     "fastapi>=0.119.1",
     "ffmpeg-python>=0.2.0",
+    "gytmdl>=2.1.6",
+    "ipython>=9.6.0",
     "msaf>=0.1.80",
     "pydantic>=2.12.3",
     "pydub>=0.25.1",
@@ -17,3 +19,6 @@ dependencies = [
     "uvicorn>=0.38.0",
     "yt-dlp>=2025.10.14",
 ]
+
+[dependency-groups]
+dev = []

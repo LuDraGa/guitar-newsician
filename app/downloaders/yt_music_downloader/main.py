@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 from typing import Optional, Literal, Dict, Any
 
@@ -27,18 +28,26 @@ try:
 except ImportError as e:
     raise SystemExit("Missing dependency 'yt-dlp'. Install with: uv add yt-dlp") from e
 
+# Local helpers
+try:
+    from .helpers import process_track_lyrics_and_metadata
+except ImportError:
+    # Running as script, not module
+    from helpers import process_track_lyrics_and_metadata
+
 # ---------- Config Model ----------
 
 AudioFmt = Literal["mp3", "m4a", "opus", "flac", "wav", "aac"]
 Browser = Literal["chrome", "chromium", "edge", "firefox", "safari"]
 PlayerClient = Literal["web", "android", "tv"]
+SubtitleFmt = Literal["vtt", "srt", "json3"]
 
 
 class DLConfig(BaseModel):
     download_dir: Path = Field(default=Path("./downloads"))
     filename_template: str = Field(
-        default="%(title)s [%(id)s].%(ext)s",
-        description="yt-dlp outtmpl (no directory).",
+        default="%(title).70s/audio.%(ext)s",
+        description="yt-dlp outtmpl (directory structure). Use %(title)s for title or %(id)s for video ID.",
     )
     audio_format: AudioFmt = "m4a"
     # preferredquality meaning depends on codec. For mp3 it's kbps (e.g. 320).
@@ -50,6 +59,23 @@ class DLConfig(BaseModel):
     embed_metadata: bool = True
     prefer_free_formats: bool = False
     noplaylist: bool = True
+
+    # Subtitle/lyrics options
+    download_subtitles: bool = Field(
+        default=True, description="Download timestamped lyrics/subtitles if available"
+    )
+    subtitle_format: SubtitleFmt = Field(
+        default="vtt", description="Subtitle format (vtt, srt, or json3)"
+    )
+    subtitle_langs: list[str] = Field(
+        default=["en", "en-US", "en-GB"],
+        description="Priority order for subtitle languages",
+    )
+
+    # Metadata options
+    create_metadata: bool = Field(
+        default=True, description="Create metadata.json file with track info"
+    )
 
     use_cookies_from_browser: Optional[Browser] = None  # e.g. "chrome"
     cookiefile: Optional[str] = None  # alternative to browser cookies
@@ -88,6 +114,9 @@ class DLConfig(BaseModel):
             ("proxy", self.proxy or "None"),
             ("embed_metadata", str(self.embed_metadata)),
             ("prefer_free_formats", str(self.prefer_free_formats)),
+            ("download_subtitles", str(self.download_subtitles)),
+            ("subtitle_format", self.subtitle_format),
+            ("create_metadata", str(self.create_metadata)),
             ("ytdlp_extra", str(self.ytdlp_extra) if self.ytdlp_extra else "None"),
         ]
         for k, v in rows:
@@ -198,8 +227,21 @@ def build_ytdlp_opts(cfg: DLConfig, progress_cb):
     ]
     if cfg.embed_metadata:
         postprocessors.append({"key": "FFmpegMetadata"})
+
+    # Subtitle postprocessor to convert to desired format
+    if cfg.download_subtitles:
+        postprocessors.append({
+            "key": "FFmpegSubtitlesConvertor",
+            "format": cfg.subtitle_format,
+        })
+
     fmt = "bestaudio/best"
     outtmpl = str(cfg.download_dir / cfg.filename_template)
+
+    # Subtitle template - save as lyrics.<ext> in same directory
+    # Extract directory part and add lyrics filename
+    base_template = cfg.filename_template.rsplit("/", 1)[0] if "/" in cfg.filename_template else "."
+    subtitle_template = str(cfg.download_dir / base_template / "lyrics")
 
     headers = {}
     if cfg.user_agent:
@@ -209,17 +251,28 @@ def build_ytdlp_opts(cfg: DLConfig, progress_cb):
 
     opts: Dict[str, Any] = {
         "format": "bestaudio/best",
-        "outtmpl": outtmpl,
+        "outtmpl": {"default": outtmpl},
         "noprogress": True,
         "progress_hooks": [progress_cb],
         "prefer_free_formats": cfg.prefer_free_formats,
         "postprocessors": postprocessors,
-        "quiet": True,
+        "quiet": False if cfg.download_subtitles else True,  # Verbose if downloading subs
         "nocheckcertificate": True,
         "noplaylist": cfg.noplaylist,
         "geo_bypass": True,
         "http_headers": headers,
     }
+
+    # Subtitle options
+    if cfg.download_subtitles:
+        opts["writesubtitles"] = True
+        opts["writeautomaticsub"] = True
+        opts["subtitleslangs"] = cfg.subtitle_langs
+        opts["skip_download"] = False
+        opts["listsubtitles"] = False  # Set to True to just list available subs
+        # Set subtitle output template
+        opts["outtmpl"]["subtitle"] = subtitle_template
+
     if cfg.rate_limit:
         opts["ratelimit"] = cfg.rate_limit
     if cfg.proxy:
@@ -237,6 +290,35 @@ def build_ytdlp_opts(cfg: DLConfig, progress_cb):
     if cfg.ytdlp_extra:
         opts.update(cfg.ytdlp_extra)
     return opts
+
+
+def create_metadata_file(info: Dict[str, Any], output_dir: Path) -> None:
+    """Create a metadata.json file with track information."""
+    metadata = {
+        "video_id": info.get("id"),
+        "title": info.get("title"),
+        "artist": info.get("artist") or info.get("uploader") or info.get("channel"),
+        "album": info.get("album"),
+        "track": info.get("track"),
+        "duration": info.get("duration"),
+        "upload_date": info.get("upload_date"),
+        "description": info.get("description"),
+        "thumbnail": info.get("thumbnail"),
+        "webpage_url": info.get("webpage_url"),
+        "view_count": info.get("view_count"),
+        "like_count": info.get("like_count"),
+        "channel": info.get("channel"),
+        "channel_id": info.get("channel_id"),
+        "categories": info.get("categories"),
+        "tags": info.get("tags"),
+    }
+
+    # Remove None values
+    metadata = {k: v for k, v in metadata.items() if v is not None}
+
+    metadata_path = output_dir / "metadata.json"
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
 
 
 # ---------- Main Flow (Rich TUI) ----------
@@ -404,16 +486,107 @@ def main():
             console.print(f"[red]Download failed:[/] {e}")
             return
 
-    # Show result summary
-    title = info.get("title", "Unknown Title")
-    out_file = ytdlp_opts["outtmpl"]
-    console.print(
-        Panel.fit(
-            f"[bold green]Success![/]\nTitle: [white]{title}[/]\nSaved to: [white]{out_file}[/]",
-            border_style="green",
-            title="Result",
+    # Process metadata and lyrics for downloaded track(s)
+    console.print("\n[cyan]Processing metadata and lyrics...[/]\n")
+
+    # Check if this was a playlist download
+    is_playlist = info.get("_type") == "playlist" and "entries" in info
+    tracks_to_process = []
+
+    if is_playlist:
+        console.print(f"[green]Playlist detected: {len(info['entries'])} tracks[/]\n")
+        tracks_to_process = info["entries"]
+    else:
+        tracks_to_process = [info]
+
+    # Process each track
+    for idx, track_info in enumerate(tracks_to_process, 1):
+        if is_playlist:
+            console.print(f"[bold]Track {idx}/{len(tracks_to_process)}:[/] {track_info.get('title', 'Unknown')}")
+
+        # Determine output directory from the downloaded file path
+        output_dir = None
+        title = track_info.get("title", "unknown")
+
+        # Try to get the actual filepath from track info dict
+        if "_filename" in track_info:
+            actual_file = Path(track_info["_filename"])
+            output_dir = actual_file.parent
+        else:
+            # Fallback: Try to find directory by searching for audio file
+            # Search for directories that might match this title
+            if cfg.download_dir.exists():
+                for potential_dir in cfg.download_dir.iterdir():
+                    if potential_dir.is_dir() and "audio.m4a" in [f.name for f in potential_dir.iterdir()]:
+                        # Check if title matches (fuzzy match - yt-dlp sanitizes weirdly)
+                        dir_name = potential_dir.name
+                        # Simple check: does the directory name contain main words from title?
+                        title_words = set(title.lower().split()[:3])  # First 3 words
+                        dir_words = set(dir_name.lower().split()[:3])
+                        if title_words & dir_words:  # If there's any overlap
+                            output_dir = potential_dir
+                            console.print(f"  [dim]Found directory: {dir_name}[/]")
+                            break
+
+        if not output_dir or not output_dir.exists():
+            console.print(f"  [yellow]⚠ Could not find output directory for '{title}', skipping[/]")
+            console.print(f"  [dim]Tried: {cfg.download_dir / title[:70]}[/]")
+            continue
+
+        # Create metadata file if requested
+        if cfg.create_metadata:
+            try:
+                create_metadata_file(track_info, output_dir)
+            except Exception as e:
+                console.print(f"  [yellow]Warning: Failed to create metadata file:[/] {e}")
+
+        # Fetch and save lyrics
+        if cfg.download_subtitles:
+            process_track_lyrics_and_metadata(
+                track_info,
+                output_dir,
+                create_metadata=cfg.create_metadata
+            )
+
+        if is_playlist:
+            console.print()  # Blank line between tracks
+
+    # Show final summary
+    if is_playlist:
+        console.print(
+            Panel.fit(
+                f"[bold green]✓ Playlist complete![/]\n"
+                f"Downloaded {len(tracks_to_process)} tracks\n"
+                f"Location: [white]{cfg.download_dir}[/]",
+                border_style="green",
+                title="Success",
+            )
         )
-    )
+    else:
+        title = info.get("title", "Unknown Title")
+        # Get the output directory we actually used
+        if "_filename" in info:
+            actual_dir = Path(info["_filename"]).parent
+        else:
+            actual_dir = cfg.download_dir / info.get("title", "unknown")[:70]
+
+        result_text = f"[bold green]✓ Success![/]\nTitle: [white]{title}[/]\nSaved to: [white]{actual_dir}[/]"
+
+        # List files in the output directory
+        if actual_dir and actual_dir.exists():
+            files = list(actual_dir.iterdir())
+            if files:
+                result_text += "\n\nFiles:"
+                for f in sorted(files):
+                    result_text += f"\n  • {f.name}"
+
+        console.print(
+            Panel.fit(
+                result_text,
+                border_style="green",
+                title="Result",
+            )
+        )
 
 
 if __name__ == "__main__":
