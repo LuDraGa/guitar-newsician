@@ -599,6 +599,7 @@ def run_analysis(
     out_dir: Path = DEFAULT_OUT_DIR,
     enable: Optional[List[str]] = None,
     disable: Optional[List[str]] = None,
+    progress_callback=None,
 ) -> Path:
     """
     Runs all (or filtered) analyzers on a WAV and writes a single JSON:
@@ -636,7 +637,12 @@ def run_analysis(
                 "ok": False,
                 "error": f"dependency_missing_for_{a.NAME}",
             }
+            if progress_callback:
+                progress_callback(a.NAME, "skipped", "dependency missing")
             continue
+
+        if progress_callback:
+            progress_callback(a.NAME, "running", "")
 
         rep = a.analyze(ctx)
         aggregate[a.NAME] = {
@@ -646,6 +652,10 @@ def run_analysis(
             "error": rep.error,
             "data": rep.data,
         }
+
+        if progress_callback:
+            status = "completed" if rep.ok else "failed"
+            progress_callback(a.NAME, status, rep.error or "")
 
     _write_json(out_path, aggregate)
     return out_path
