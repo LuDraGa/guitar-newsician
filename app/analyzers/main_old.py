@@ -11,7 +11,11 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.columns import Columns
+from rich.rule import Rule
+from rich.text import Text
 from rich.prompt import Prompt, Confirm
+from rich.live import Live
 from rich import box
 import json
 
@@ -150,12 +154,12 @@ def display_song_selection(songs: List[Path]) -> Optional[Path]:
     return songs[int(choice) - 1]
 
 
-def display_file_selection(song_dir: Path) -> Optional[List[tuple[str, Path, Path]]]:
+def display_file_selection(song_dir: Path) -> Optional[List[tuple[str, Path]]]:
     """
     Display file selection menu for a song (base audio and/or stems).
 
     Returns:
-        List of (file_type, file_path, output_path) tuples to analyze, or None if cancelled
+        List of (file_type, file_path) tuples to analyze, or None if cancelled
     """
     wav_file = song_dir / "audio.wav"
     stems_dir = song_dir / "stems"
@@ -184,7 +188,7 @@ def display_file_selection(song_dir: Path) -> Optional[List[tuple[str, Path, Pat
         base_analysis = song_dir / "analysis.json"
         status = "[dim]analyzed[/dim]" if base_analysis.exists() else "[bright_white]not analyzed[/bright_white]"
         table.add_row(str(idx), "audio.wav", "Base Audio", status)
-        options.append(("base", wav_file, base_analysis))
+        options.append(("base", wav_file))
         idx += 1
 
     # Add stems if exist
@@ -192,7 +196,7 @@ def display_file_selection(song_dir: Path) -> Optional[List[tuple[str, Path, Pat
         stem_analysis = song_dir / f"analysis_{stem_file.stem}.json"
         status = "[dim]analyzed[/dim]" if stem_analysis.exists() else "[bright_white]not analyzed[/bright_white]"
         table.add_row(str(idx), stem_file.name, "Stem", status)
-        options.append(("stem", stem_file, stem_analysis))
+        options.append(("stem", stem_file))
         idx += 1
 
     console.print(table)
@@ -232,61 +236,204 @@ def display_file_selection(song_dir: Path) -> Optional[List[tuple[str, Path, Pat
             return None
 
 
-def analyze_files(
-    song_dir: Path,
-    files_to_analyze: List[tuple[str, Path, Path]],
-    config: AnalyzerConfig
-) -> List[Path]:
+def analyze_single_file(
+    file_path: Path,
+    output_path: Path,
+    enable: Optional[List[str]],
+    disable: Optional[List[str]],
+    skip_existing: bool
+) -> Optional[Path]:
     """
-    Analyze selected files.
+    Analyze a single audio file.
 
     Args:
-        song_dir: Song directory
-        files_to_analyze: List of (file_type, file_path, output_path) tuples
-        config: Analyzer configuration
+        file_path: Path to audio file
+        output_path: Path to output JSON
+        enable: List of analyzers to enable
+        disable: List of analyzers to disable
+        skip_existing: Skip if analysis exists
 
     Returns:
-        List of paths to successful analysis files
+        Path to analysis file if successful, None otherwise
     """
-    results = []
+    # Check if analysis already exists
+    if skip_existing and output_path.exists():
+        console.print(f"[yellow]Analysis already exists for {song_dir.name}[/yellow]")
 
-    for file_type, file_path, output_path in files_to_analyze:
-        console.print()
-        console.print(f"[cyan]Analyzing: {file_path.name}[/cyan]")
+        # Ask if user wants to re-run specific analyzers
+        rerun = Confirm.ask("[cyan]Re-run analysis?[/cyan]", default=False)
 
-        # Check if already exists
-        if config.skip_existing and output_path.exists():
-            rerun = Confirm.ask(f"[yellow]Analysis exists for {file_path.name}. Re-run?[/yellow]", default=False)
-            if not rerun:
-                console.print("[dim]Skipping...[/dim]")
-                results.append(output_path)
-                continue
+        if not rerun:
+            console.print("[dim]Skipping analysis[/dim]")
+            return output_file
 
+        # Load existing analysis to show what's available
         try:
-            # Run analysis
-            result_path = run_analysis(
-                file_path,
-                out_dir=song_dir,
-                enable=config.enable_analyzers,
-                disable=config.disable_analyzers,
-            )
+            existing_data = json.loads(output_file.read_text(encoding="utf-8"))
+            available_analyzers = [k for k in existing_data.keys() if k != "_meta"]
 
-            if result_path:
-                # Rename to correct output path if needed
-                if result_path != output_path:
-                    if output_path.exists():
-                        output_path.unlink()
-                    result_path.rename(output_path)
+            console.print()
+            console.print("[cyan]Existing analyzers:[/cyan]")
 
-                results.append(output_path)
-                console.print(f"[green]✓ Analysis complete: {output_path.name}[/green]")
+            # Show existing analyzers with status
+            status_table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+            status_table.add_column("#", justify="right", style="cyan")
+            status_table.add_column("Analyzer", style="white")
+            status_table.add_column("Status", justify="center")
+
+            for idx, name in enumerate(available_analyzers, start=1):
+                analyzer_data = existing_data[name]
+                if analyzer_data.get("ok"):
+                    status = "[green]✓ OK[/green]"
+                else:
+                    status = "[red]✗ Failed[/red]"
+                status_table.add_row(str(idx), name, status)
+
+            console.print(status_table)
+            console.print()
+
+            # Ask which analyzers to re-run
+            console.print("[cyan]Enter analyzer numbers to re-run (comma-separated), or 'all' for all:[/cyan]")
+            console.print("[dim]Example: 1,3,5 or all[/dim]")
+
+            choice = Prompt.ask("Analyzers to re-run", default="all")
+
+            if choice.lower() == "all":
+                enable = None  # Run all
+                console.print("[yellow]Re-running all analyzers[/yellow]")
             else:
-                console.print(f"[red]✗ Analysis failed for {file_path.name}[/red]")
+                # Parse selected numbers
+                try:
+                    selected_indices = [int(x.strip()) for x in choice.split(",")]
+                    enable = [available_analyzers[i-1] for i in selected_indices if 0 < i <= len(available_analyzers)]
+                    console.print(f"[yellow]Re-running: {', '.join(enable)}[/yellow]")
+                except (ValueError, IndexError):
+                    console.print("[red]Invalid selection, running all analyzers[/red]")
+                    enable = None
 
         except Exception as e:
-            console.print(f"[red]✗ Error analyzing {file_path.name}: {e}[/red]")
+            console.print(f"[yellow]Could not read existing analysis: {e}[/yellow]")
+            console.print("[yellow]Running all analyzers[/yellow]")
+            enable = None
 
-    return results
+    try:
+        console.print(f"[cyan]Analyzing {song_dir.name}...[/cyan]")
+        console.print(f"  Mode: {analyze_mode}")
+        console.print(f"  Files: {len(files_to_analyze)}")
+        console.print(f"  Output: {output_file.name}")
+        console.print()
+
+        # For stem mode, analyze each stem separately
+        if analyze_mode == "stems":
+            results = []
+            for file_type, file_path in files_to_analyze:
+                console.print(f"[cyan]Analyzing stem: {file_path.name}...[/cyan]")
+                stem_output = song_dir / f"analysis_{file_path.stem}.json"
+
+                # Skip if exists
+                if skip_existing and stem_output.exists() and not enable:
+                    console.print(f"[yellow]Analysis exists for {file_path.name}, skipping[/yellow]")
+                    results.append(stem_output)
+                    continue
+
+                result = run_analysis(
+                    file_path,
+                    out_dir=song_dir,
+                    enable=enable,
+                    disable=disable,
+                )
+
+                if result:
+                    # Rename to stem-specific name
+                    if result.name != stem_output.name:
+                        result.rename(stem_output)
+                    results.append(stem_output)
+
+            console.print()
+            console.print(f"[green]✓ Analyzed {len(results)} stems[/green]")
+            return output_file if results else None
+
+        # For base or both mode, analyze the base audio.wav file
+        wav_file = files_to_analyze[0][1] if files_to_analyze else wav_file
+
+        # Get list of analyzers that will run
+        all_analyzers = list_analyzers()
+        enabled_set = set(enable) if enable else None
+        disabled_set = set(disable) if disable else set()
+
+        # Build analyzer status tracking
+        analyzer_status = {}
+        for name, available in all_analyzers:
+            if enabled_set is not None and name not in enabled_set:
+                continue
+            if name in disabled_set:
+                continue
+            if not available:
+                analyzer_status[name] = ("skipped", "dependency missing")
+            else:
+                analyzer_status[name] = ("pending", "")
+
+        def create_status_table():
+            """Create a status table showing analyzer progress."""
+            table = Table(
+                title=f"[bold cyan]Analyzing: {song_dir.name}[/bold cyan]",
+                box=box.ROUNDED,
+                show_header=True,
+                header_style="bold"
+            )
+            table.add_column("Analyzer", style="white")
+            table.add_column("Status", justify="center")
+            table.add_column("Details", style="dim")
+
+            for name, (status, details) in analyzer_status.items():
+                if status == "pending":
+                    status_display = "[dim]⏳ Pending[/dim]"
+                elif status == "running":
+                    status_display = "[yellow]▶ Running[/yellow]"
+                elif status == "completed":
+                    status_display = "[green]✓ Done[/green]"
+                elif status == "failed":
+                    status_display = "[red]✗ Failed[/red]"
+                elif status == "skipped":
+                    status_display = "[dim]⊘ Skipped[/dim]"
+                else:
+                    status_display = status
+
+                table.add_row(name, status_display, details)
+
+            return table
+
+        def progress_callback(analyzer_name: str, status: str, details: str):
+            """Update analyzer status."""
+            analyzer_status[analyzer_name] = (status, details)
+
+        # Run analysis with live progress display
+        with Live(create_status_table(), console=console, refresh_per_second=4) as live:
+            result_path = run_analysis(
+                wav_file,
+                out_dir=song_dir,
+                enable=enable,
+                disable=disable,
+                progress_callback=lambda name, status, details: (
+                    progress_callback(name, status, details),
+                    live.update(create_status_table())
+                )
+            )
+
+        # Rename to configured filename if different
+        if result_path and result_path.name != output_filename:
+            result_path.rename(output_file)
+            result_path = output_file
+
+        console.print()
+        console.print(f"[green]✓ Successfully analyzed {song_dir.name}[/green]")
+        console.print()
+
+        return result_path
+
+    except Exception as e:
+        console.print(f"[red]✗ Failed to analyze {song_dir.name}: {e}[/red]")
+        return None
 
 
 def _sec_to_mmss(x: Optional[float]) -> str:
@@ -340,7 +487,6 @@ def render_dashboard(
     )
     header_right.add_row("[bold magenta]Created[/bold magenta]", created or "—")
 
-    from rich.columns import Columns
     console.print(
         Panel(
             Columns([header_left, header_right], equal=True),
@@ -482,7 +628,6 @@ def render_dashboard(
             box=box.ROUNDED,
         )
     )
-    from rich.rule import Rule
     console.print(Rule(style="dim"))
 
 
@@ -502,48 +647,46 @@ def main():
     console.print()
 
     # Find analyzable songs
-    songs = find_analyzable_songs(config.input_dir)
+    songs = find_analyzable_songs(config.input_dir, config.analyze_mode)
 
     if not songs:
-        console.print(f"[red]No songs with audio.wav or stems/ found in {config.input_dir}[/red]")
-        console.print("[yellow]Convert songs to WAV or separate stems first[/yellow]")
+        if config.analyze_mode == "stems":
+            console.print(f"[red]No songs with stems found in {config.input_dir}[/red]")
+            console.print("[yellow]Separate stems first using the stem separator[/yellow]")
+        else:
+            console.print(f"[red]No songs with audio.wav found in {config.input_dir}[/red]")
+            console.print("[yellow]Convert songs to WAV first using the audio2wav converter[/yellow]")
         return
 
-    # Display song selection
-    selected_song = display_song_selection(songs)
+    # Display selection
+    selected_song = display_song_selection(songs, config.output_filename, config.analyze_mode)
 
     if not selected_song:
         return
 
-    # Display file selection
-    files_to_analyze = display_file_selection(selected_song)
+    # Analyze
+    result_path = analyze_song(
+        selected_song,
+        config.output_filename,
+        config.enable_analyzers,
+        config.disable_analyzers,
+        config.skip_existing,
+        config.analyze_mode
+    )
 
-    if not files_to_analyze:
-        return
-
-    # Analyze selected files
-    console.print()
-    console.print(f"[bold cyan]Analyzing {len(files_to_analyze)} file(s)...[/bold cyan]")
-
-    results = analyze_files(selected_song, files_to_analyze, config)
-
-    if not results:
-        console.print("[red]All analyses failed[/red]")
+    if not result_path:
+        console.print("[red]Analysis failed[/red]")
         raise SystemExit(1)
 
-    console.print()
-    console.print(f"[green]✓ Successfully analyzed {len(results)} file(s)[/green]")
-
-    # Show dashboards if requested
-    if config.show_dashboard:
-        for result_path in results:
-            console.print()
-            render_dashboard(
-                result_path,
-                max_chords=config.max_chords,
-                max_beats=config.max_beats,
-                max_sections=config.max_sections
-            )
+    # Show dashboard
+    if config.show_dashboard and result_path.exists():
+        console.print()
+        render_dashboard(
+            result_path,
+            max_chords=config.max_chords,
+            max_beats=config.max_beats,
+            max_sections=config.max_sections
+        )
 
 
 if __name__ == "__main__":
