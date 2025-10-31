@@ -1,11 +1,8 @@
 # Music Analysis Configuration
 
 # Input directory containing song directories
-# Each song directory should have an audio.wav file
+# Each song directory should have an audio.wav file or stems directory
 input_dir: downloads
-
-# Output filename for analysis results (saved in same directory as WAV)
-output_filename: analysis.json
 
 # Processing settings
 skip_existing: true
@@ -20,3 +17,7 @@ show_dashboard: true
 max_chords: 10
 max_beats: 10
 max_sections: 10
+
+# Analysis output naming:
+# - Base audio: analysis.json
+# - Individual stems: analysis_<stem_name>.json (e.g., analysis_vocals.json)
