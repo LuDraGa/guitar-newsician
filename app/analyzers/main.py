@@ -12,6 +12,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.prompt import Prompt, Confirm
+from rich.text import Text
+from rich.columns import Columns
+from rich.rule import Rule
 from rich import box
 import json
 
@@ -340,7 +343,6 @@ def render_dashboard(
     )
     header_right.add_row("[bold magenta]Created[/bold magenta]", created or "—")
 
-    from rich.columns import Columns
     console.print(
         Panel(
             Columns([header_left, header_right], equal=True),
@@ -482,7 +484,6 @@ def render_dashboard(
             box=box.ROUNDED,
         )
     )
-    from rich.rule import Rule
     console.print(Rule(style="dim"))
 
 

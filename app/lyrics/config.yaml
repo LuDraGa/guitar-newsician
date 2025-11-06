@@ -1,0 +1,23 @@
+# Synced Lyrics Fetcher Configuration
+
+# Input directory containing song directories
+# Each song directory should have a metadata.json file with title and artist
+input_dir: downloads
+
+# Lyrics provider settings
+# Available providers: spotify, musixmatch, lrclib, netease, megalobiz
+# Set to null to use all available providers (recommended)
+providers: null
+
+# Allow falling back to unsynced lyrics if synced version not found
+allow_unsynced: false
+
+# Overwrite existing lyrics files
+overwrite: false
+
+# Output filename for lyrics
+output_filename: lyrics.lrc
+
+# Display settings
+show_preview: true
+max_preview_lines: 10
