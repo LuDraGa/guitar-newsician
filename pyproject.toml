@@ -20,6 +20,7 @@ dependencies = [
     "uvicorn>=0.38.0",
     "yt-dlp>=2025.10.14",
     "syncedlyrics>=1.0.0",
+    "openai>=2.7.1",
 ]
 
 [dependency-groups]
