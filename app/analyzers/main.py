@@ -192,7 +192,7 @@ def display_file_selection(song_dir: Path) -> Optional[List[tuple[str, Path, Pat
 
     # Add stems if exist
     for stem_file in stem_files:
-        stem_analysis = song_dir / f"analysis_{stem_file.stem}.json"
+        stem_analysis = stems_dir / f"analysis_{stem_file.stem}.json"
         status = "[dim]analyzed[/dim]" if stem_analysis.exists() else "[bright_white]not analyzed[/bright_white]"
         table.add_row(str(idx), stem_file.name, "Stem", status)
         options.append(("stem", stem_file, stem_analysis))
@@ -266,10 +266,13 @@ def analyze_files(
                 continue
 
         try:
+            # Determine output directory: stems go in stems/, base audio in song root
+            output_dir = output_path.parent
+
             # Run analysis
             result_path = run_analysis(
                 file_path,
-                out_dir=song_dir,
+                out_dir=output_dir,
                 enable=config.enable_analyzers,
                 disable=config.disable_analyzers,
             )

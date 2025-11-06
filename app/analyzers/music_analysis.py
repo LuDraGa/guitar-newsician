@@ -293,6 +293,7 @@ class StructureMSAFAnalyzer(Analyzer):
 
     def _run(self, ctx: AnalysisContext) -> Dict[str, Any]:
         import tempfile
+        import shutil
 
         est_times, est_labels = msaf.run.process(
             str(ctx.wav_path),
@@ -301,6 +302,17 @@ class StructureMSAFAnalyzer(Analyzer):
         )
         times = [float(t) for t in est_times]
         labels = [str(l) for l in est_labels]
+
+        # Cleanup MSAF temporary files (JAMS and estimations directory)
+        # These are redundant - all useful data is in our analysis.json
+        estimations_dir = ctx.wav_path.parent / "estimations"
+        if estimations_dir.exists():
+            shutil.rmtree(estimations_dir, ignore_errors=True)
+
+        # Cleanup root-level features cache file
+        features_tmp = Path.cwd() / ".features_msaf_tmp.json"
+        if features_tmp.exists():
+            features_tmp.unlink(missing_ok=True)
 
         # build segments [start,end,label]
         segs = []
