@@ -71,7 +71,7 @@ class LibraryService:
                 pass
 
         # Check for converted file
-        converted_file = song_folder / "converted.wav"
+        converted_file = song_folder / "audio.wav"
         has_converted = converted_file.exists()
 
         # Check for analysis

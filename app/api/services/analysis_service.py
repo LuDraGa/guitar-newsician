@@ -20,6 +20,40 @@ class AnalysisService:
     def __init__(self):
         self._analysis_cache: dict[str, dict] = {}
 
+    def _cleanup_msaf_artifacts(self, song_folder: Path, analysis_input: Path):
+        """
+        Clean up MSAF temporary artifacts after analysis.
+
+        MSAF creates:
+        - song_folder/estimations/*.jams (estimation files)
+        - .features_msaf_tmp.json (features cache, location varies)
+        """
+        import shutil
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # 1. Clean up estimations directory (MSAF creates this)
+        estimations_dir = song_folder / "estimations"
+        if estimations_dir.exists():
+            try:
+                shutil.rmtree(estimations_dir)
+                logger.info(f"Cleaned up MSAF estimations directory: {estimations_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup estimations dir: {e}")
+
+        # 2. Clean up features cache file (may be in multiple locations)
+        # Check song folder first, then parent directories up to downloads
+        for check_dir in [song_folder, song_folder.parent, Path.cwd()]:
+            features_tmp = check_dir / ".features_msaf_tmp.json"
+            if features_tmp.exists():
+                try:
+                    features_tmp.unlink()
+                    logger.info(f"Cleaned up MSAF features cache: {features_tmp}")
+                    break  # Only delete first found
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup features cache: {e}")
+
     async def analyze(
         self,
         job_id: str,
@@ -33,7 +67,7 @@ class AnalysisService:
         """Analyze audio file with specified analyzers.
 
         Now saves analysis results in song folder structure:
-            Input: downloads/Song Title/converted.wav
+            Input: downloads/Song Title/audio.wav
             Output: downloads/Song Title/analysis.json
 
             Or for stems:
@@ -115,10 +149,10 @@ class AnalysisService:
                     analysis_json_path.rename(desired_path)
                     analysis_json_path = desired_path
 
-                return results, str(analysis_json_path)
+                return results, str(analysis_json_path), out_dir
 
             loop = asyncio.get_event_loop()
-            analysis_results, final_analysis_path = await loop.run_in_executor(None, _run_analysis)
+            analysis_results, final_analysis_path, out_dir = await loop.run_in_executor(None, _run_analysis)
 
             job_manager.update_job(
                 job_id,
@@ -131,11 +165,20 @@ class AnalysisService:
                 # For stems: input is downloads/Song/stems/vocals.wav
                 song_folder = input_file.parent.parent  # Go up two levels
             else:
-                # For main track: input is downloads/Song/converted.wav
+                # For main track: input is downloads/Song/audio.wav
                 song_folder = input_file.parent
 
             # Analysis file was already saved by run_analysis
             analysis_file = Path(final_analysis_path)
+
+            # Clean up MSAF artifacts
+            try:
+                self._cleanup_msaf_artifacts(song_folder, input_file)
+            except Exception as e:
+                # Don't fail analysis if cleanup fails
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"MSAF cleanup failed but analysis succeeded: {e}")
 
             # Extract song info
             song_id = get_song_id_from_path(song_folder)

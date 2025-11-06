@@ -30,7 +30,7 @@ class ConvertService:
         Now saves converted file in the same song folder as the input file.
         For example:
             Input: downloads/Song Title/audio.m4a
-            Output: downloads/Song Title/converted.wav
+            Output: downloads/Song Title/audio.wav
         """
         try:
             job_manager.update_job(
@@ -52,11 +52,11 @@ class ConvertService:
                 # Custom output dir specified
                 out_dir = Path(output_dir)
                 out_dir.mkdir(parents=True, exist_ok=True)
-                output_file = out_dir / f"converted.{output_format}"
+                output_file = out_dir / f"audio.{output_format}"
             else:
                 # Save in same folder as input (song folder structure)
                 song_folder = input_file.parent
-                output_file = song_folder / f"converted.{output_format}"
+                output_file = song_folder / f"audio.{output_format}"
 
             job_manager.update_job(
                 job_id,
