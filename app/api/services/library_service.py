@@ -31,11 +31,20 @@ class LibraryService:
         audio_extensions = [".m4a", ".mp3", ".wav", ".flac", ".opus", ".aac", ".ogg"]
         for item in downloads_dir.iterdir():
             if item.is_file() and item.suffix.lower() in audio_extensions:
+                # Get file creation time as download_date fallback
+                from datetime import datetime
+                try:
+                    ctime = item.stat().st_ctime
+                    download_date = datetime.fromtimestamp(ctime).isoformat()
+                except:
+                    download_date = None
+
                 # Create minimal song info for loose files
                 song_info = {
                     "song_id": item.stem,
                     "song_folder": str(downloads_dir),
                     "title": item.stem,
+                    "download_date": download_date,
                     "audio_file": str(item),
                     "has_audio": True,
                     "has_converted": False,
@@ -51,6 +60,7 @@ class LibraryService:
 
     def _get_song_info(self, song_folder: Path) -> Optional[Dict[str, Any]]:
         """Get detailed information about a song from its folder."""
+        from datetime import datetime
         config = get_config()
 
         # Find audio file
@@ -70,6 +80,16 @@ class LibraryService:
             except:
                 pass
 
+        # Get download_date from metadata or fallback to file creation time
+        download_date = metadata.get("download_date")
+        if not download_date:
+            try:
+                # Fallback: use audio file creation time
+                ctime = audio_file.stat().st_ctime
+                download_date = datetime.fromtimestamp(ctime).isoformat()
+            except:
+                download_date = None
+
         # Check for converted file
         converted_file = song_folder / "audio.wav"
         has_converted = converted_file.exists()
@@ -87,7 +107,7 @@ class LibraryService:
         # Get stem files if they exist
         stem_files = {}
         if has_stems:
-            for stem_type in ["vocals", "drums", "bass", "other"]:
+            for stem_type in ["vocals", "drums", "bass", "other", "guitar", "piano"]:
                 stem_file = stems_folder / f"{stem_type}.wav"
                 if stem_file.exists():
                     stem_files[stem_type] = str(stem_file)
@@ -110,6 +130,7 @@ class LibraryService:
             "title": metadata.get("title", song_id),
             "artist": metadata.get("artist", "Unknown Artist"),
             "duration": metadata.get("duration"),
+            "download_date": download_date,
             "audio_file": str(audio_file),
             "converted_file": str(converted_file) if has_converted else None,
             "analysis_file": str(analysis_file) if has_analysis else None,

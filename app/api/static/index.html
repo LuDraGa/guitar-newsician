@@ -137,8 +137,23 @@
             background: rgba(102, 126, 234, 0.1);
         }
 
+        th[draggable="true"]::before {
+            content: '⋮⋮ ';
+            opacity: 0.3;
+            margin-right: 5px;
+            font-size: 0.8em;
+        }
+
+        th[draggable="true"]:hover::before {
+            opacity: 0.7;
+        }
+
         th.dragging {
             opacity: 0.5;
+        }
+
+        th.drag-over {
+            border-left: 3px solid #667eea;
         }
 
         tbody tr {
@@ -1747,11 +1762,12 @@
             if (saved) {
                 try {
                     columnOrder = JSON.parse(saved);
-                    updateTableHeaders();
                 } catch (e) {
                     console.error('Failed to load column order:', e);
                 }
             }
+            // Always call updateTableHeaders to ensure event listeners are attached
+            updateTableHeaders();
         }
 
         function saveColumnOrder() {
@@ -1760,21 +1776,30 @@
 
         function updateTableHeaders() {
             const headerRow = document.getElementById('table-header');
+            const labels = {
+                title: 'Title',
+                artist: 'Artist',
+                duration: 'Duration',
+                download_date: 'Download Date',
+                status: 'Status',
+                actions: 'Actions'
+            };
+
             const headers = columnOrder.map(col => {
-                const labels = {
-                    title: 'Title',
-                    artist: 'Artist',
-                    duration: 'Duration',
-                    download_date: 'Download Date',
-                    status: 'Status',
-                    actions: 'Actions'
-                };
                 const draggable = col !== 'actions' ? 'draggable="true"' : '';
-                const handlers = col !== 'actions' ?
-                    'ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)"' : '';
-                return `<th ${draggable} data-column="${col}" ${handlers}>${labels[col]}</th>`;
+                return `<th ${draggable} data-column="${col}">${labels[col]}</th>`;
             }).join('');
             headerRow.innerHTML = headers;
+
+            // Attach event listeners to draggable headers
+            headerRow.querySelectorAll('th[draggable="true"]').forEach(th => {
+                th.addEventListener('dragstart', dragStart);
+                th.addEventListener('dragover', dragOver);
+                th.addEventListener('drop', drop);
+                th.addEventListener('dragend', (e) => {
+                    e.target.classList.remove('dragging');
+                });
+            });
         }
 
         function dragStart(event) {
@@ -1787,6 +1812,14 @@
         function dragOver(event) {
             event.preventDefault();
             event.dataTransfer.dropEffect = 'move';
+
+            // Add visual feedback for drop target
+            const th = event.target.closest('th');
+            if (th && th.dataset.column !== draggedColumn) {
+                document.querySelectorAll('th').forEach(h => h.classList.remove('drag-over'));
+                th.classList.add('drag-over');
+            }
+
             return false;
         }
 
@@ -1796,7 +1829,10 @@
 
             const targetColumn = event.target.closest('th')?.dataset.column;
             if (!targetColumn || !draggedColumn || draggedColumn === targetColumn) {
-                document.querySelectorAll('th').forEach(th => th.classList.remove('dragging'));
+                document.querySelectorAll('th').forEach(th => {
+                    th.classList.remove('dragging');
+                    th.classList.remove('drag-over');
+                });
                 return false;
             }
 
@@ -1813,7 +1849,10 @@
                 renderSongsTable();
             }
 
-            document.querySelectorAll('th').forEach(th => th.classList.remove('dragging'));
+            document.querySelectorAll('th').forEach(th => {
+                th.classList.remove('dragging');
+                th.classList.remove('drag-over');
+            });
             return false;
         }
 
