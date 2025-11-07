@@ -49,22 +49,22 @@ class StemSeparationRequest(BaseModel):
     """Request to separate audio into stems."""
 
     input_path: str = Field(..., description="Path to input audio file")
-    model: Literal["htdemucs", "htdemucs_ft", "mdx_extra"] = Field(
-        "htdemucs", description="Demucs model to use"
+    model: Literal["htdemucs", "htdemucs_ft", "htdemucs_6s", "mdx_extra"] = Field(
+        "htdemucs_6s", description="Demucs model to use"
     )
-    stems: list[Literal["vocals", "drums", "bass", "other"]] = Field(
-        ["vocals", "drums", "bass", "other"], description="Stems to extract"
+    stems: list[Literal["vocals", "drums", "bass", "other", "guitar", "piano"]] = Field(
+        ["vocals", "drums", "bass", "other", "guitar", "piano"], description="Stems to extract"
     )
     output_dir: Optional[str] = Field(None, description="Custom output directory")
-    shifts: int = Field(1, description="Number of random shifts for better separation")
+    shifts: int = Field(2, description="Number of random shifts for better separation")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "input_path": "/downloads/song.wav",
-                "model": "htdemucs",
-                "stems": ["vocals", "drums", "bass", "other"],
-                "shifts": 1,
+                "model": "htdemucs_6s",
+                "stems": ["vocals", "drums", "bass", "other", "guitar", "piano"],
+                "shifts": 2,
             }
         }
 

@@ -129,6 +129,16 @@
             font-size: 0.9em;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            cursor: move;
+            user-select: none;
+        }
+
+        th[draggable="true"]:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        th.dragging {
+            opacity: 0.5;
         }
 
         tbody tr {
@@ -643,6 +653,15 @@
         <!-- Top Actions Bar -->
         <div class="actions-bar">
             <input type="text" id="search-input" placeholder="🔍 Search songs by title or artist...">
+            <select id="filter-status" onchange="applyFilters()" style="padding: 12px 18px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: #fff; font-size: 0.95em; cursor: pointer;">
+                <option value="all">All Status</option>
+                <option value="raw">Raw Only</option>
+                <option value="converted">Has WAV</option>
+                <option value="analysis">Has Analysis</option>
+                <option value="stems">Has Stems</option>
+                <option value="lyrics">Has Lyrics</option>
+                <option value="synced">Has Synced</option>
+            </select>
             <button class="btn" onclick="showDownloadModal()">📥 Download New Song</button>
             <button class="btn btn-secondary" onclick="showSettingsModal()">⚙️ Settings</button>
             <button class="btn btn-secondary" onclick="refreshLibrary()">🔄 Refresh</button>
@@ -652,12 +671,13 @@
         <div class="table-container">
             <table id="songs-table">
                 <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>Artist</th>
-                        <th>Duration</th>
-                        <th>Status</th>
-                        <th>Actions</th>
+                    <tr id="table-header">
+                        <th draggable="true" data-column="title" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)">Title</th>
+                        <th draggable="true" data-column="artist" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)">Artist</th>
+                        <th draggable="true" data-column="duration" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)">Duration</th>
+                        <th draggable="true" data-column="download_date" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)">Download Date</th>
+                        <th draggable="true" data-column="status" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)">Status</th>
+                        <th data-column="actions">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="songs-tbody">
@@ -811,27 +831,57 @@
     <script>
         const API_BASE = '/api/v1';
         let songs = [];
+        let filteredSongs = [];
         let currentSong = null;
         let jobs = [];
         let jobPollingInterval = null;
         let config = {};
+        let columnOrder = ['title', 'artist', 'duration', 'download_date', 'status', 'actions'];
 
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
             await loadConfig();
             await refreshLibrary();
             startJobPolling();
+            loadColumnOrder();
         });
 
         // Search functionality
         document.getElementById('search-input').addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase();
-            const rows = document.querySelectorAll('#songs-tbody tr');
-            rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
-                row.style.display = text.includes(query) ? '' : 'none';
-            });
+            applyFilters();
         });
+
+        // Apply filters and search
+        function applyFilters() {
+            const query = document.getElementById('search-input').value.toLowerCase();
+            const statusFilter = document.getElementById('filter-status').value;
+
+            filteredSongs = songs.filter(song => {
+                // Search filter
+                const searchText = `${song.title} ${song.artist}`.toLowerCase();
+                const matchesSearch = !query || searchText.includes(query);
+
+                // Status filter
+                let matchesStatus = true;
+                if (statusFilter === 'raw') {
+                    matchesStatus = !song.has_converted && !song.has_analysis && !song.has_stems;
+                } else if (statusFilter === 'converted') {
+                    matchesStatus = song.has_converted;
+                } else if (statusFilter === 'analysis') {
+                    matchesStatus = song.has_analysis;
+                } else if (statusFilter === 'stems') {
+                    matchesStatus = song.has_stems;
+                } else if (statusFilter === 'lyrics') {
+                    matchesStatus = song.has_lyrics;
+                } else if (statusFilter === 'synced') {
+                    matchesStatus = song.has_synced_lyrics;
+                }
+
+                return matchesSearch && matchesStatus;
+            });
+
+            renderSongsTable();
+        }
 
         // Library Management
         async function refreshLibrary() {
@@ -839,7 +889,7 @@
                 const response = await fetch(`${API_BASE}/library/scan`);
                 const data = await response.json();
                 songs = data.songs;
-                renderSongsTable();
+                applyFilters();
                 showToast(`Loaded ${songs.length} songs from library`, 'success');
             } catch (error) {
                 showToast('Failed to load library: ' + error.message, 'error');
@@ -850,24 +900,49 @@
             const tbody = document.getElementById('songs-tbody');
             const emptyState = document.getElementById('empty-state');
 
-            if (songs.length === 0) {
+            const displaySongs = filteredSongs.length > 0 || songs.length === 0 ? filteredSongs : songs;
+
+            if (displaySongs.length === 0) {
                 tbody.innerHTML = '';
                 emptyState.style.display = 'block';
                 return;
             }
 
             emptyState.style.display = 'none';
-            tbody.innerHTML = songs.map(song => `
-                <tr onclick="selectSong('${song.song_id}')" id="row-${song.song_id}">
-                    <td><strong>${song.title}</strong></td>
-                    <td>${song.artist || 'Unknown'}</td>
-                    <td>${formatDuration(song.duration)}</td>
-                    <td>${renderStatusBadges(song)}</td>
-                    <td>
-                        <button class="btn" style="padding: 6px 12px; font-size: 0.8em;" onclick="event.stopPropagation(); selectSong('${song.song_id}')">View</button>
-                    </td>
-                </tr>
-            `).join('');
+            tbody.innerHTML = displaySongs.map(song => {
+                const cells = columnOrder.map(col => {
+                    if (col === 'title') return `<td><strong>${song.title}</strong></td>`;
+                    if (col === 'artist') return `<td>${song.artist || 'Unknown'}</td>`;
+                    if (col === 'duration') return `<td>${formatDuration(song.duration)}</td>`;
+                    if (col === 'download_date') return `<td>${formatDownloadDate(song.download_date)}</td>`;
+                    if (col === 'status') return `<td>${renderStatusBadges(song)}</td>`;
+                    if (col === 'actions') return `<td><button class="btn" style="padding: 6px 12px; font-size: 0.8em;" onclick="event.stopPropagation(); selectSong('${song.song_id}')">View</button></td>`;
+                    return '<td></td>';
+                }).join('');
+
+                return `<tr onclick="selectSong('${song.song_id}')" id="row-${song.song_id}">${cells}</tr>`;
+            }).join('');
+        }
+
+        function formatDownloadDate(dateStr) {
+            if (!dateStr) return '-';
+            try {
+                const date = new Date(dateStr);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+                if (diffDays === 0) return 'Today';
+                if (diffDays === 1) return 'Yesterday';
+                if (diffDays < 7) return `${diffDays} days ago`;
+                if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+                if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
+
+                // Format: MMM DD, YYYY
+                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            } catch {
+                return dateStr.substring(0, 10); // Fallback to YYYY-MM-DD
+            }
         }
 
         function renderStatusBadges(song) {
@@ -1222,7 +1297,7 @@
             }
 
             const stems = currentSong.stem_files || {};
-            const stemTypes = ['vocals', 'drums', 'bass', 'other'];
+            const stemTypes = ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'];
 
             container.innerHTML = `
                 <div class="info-grid">
@@ -1387,8 +1462,9 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         input_path: currentSong.converted_file,
-                        model: 'htdemucs',
-                        stems: ['vocals', 'drums', 'bass', 'other']
+                        model: 'htdemucs_6s',
+                        stems: ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'],
+                        shifts: 2
                     })
                 });
 
@@ -1661,6 +1737,84 @@
                 toast.style.opacity = '0';
                 setTimeout(() => toast.remove(), 300);
             }, 4000);
+        }
+
+        // Column Reordering with Drag & Drop
+        let draggedColumn = null;
+
+        function loadColumnOrder() {
+            const saved = localStorage.getItem('columnOrder');
+            if (saved) {
+                try {
+                    columnOrder = JSON.parse(saved);
+                    updateTableHeaders();
+                } catch (e) {
+                    console.error('Failed to load column order:', e);
+                }
+            }
+        }
+
+        function saveColumnOrder() {
+            localStorage.setItem('columnOrder', JSON.stringify(columnOrder));
+        }
+
+        function updateTableHeaders() {
+            const headerRow = document.getElementById('table-header');
+            const headers = columnOrder.map(col => {
+                const labels = {
+                    title: 'Title',
+                    artist: 'Artist',
+                    duration: 'Duration',
+                    download_date: 'Download Date',
+                    status: 'Status',
+                    actions: 'Actions'
+                };
+                const draggable = col !== 'actions' ? 'draggable="true"' : '';
+                const handlers = col !== 'actions' ?
+                    'ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="drop(event)"' : '';
+                return `<th ${draggable} data-column="${col}" ${handlers}>${labels[col]}</th>`;
+            }).join('');
+            headerRow.innerHTML = headers;
+        }
+
+        function dragStart(event) {
+            draggedColumn = event.target.dataset.column;
+            event.target.classList.add('dragging');
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/html', event.target.innerHTML);
+        }
+
+        function dragOver(event) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            return false;
+        }
+
+        function drop(event) {
+            event.stopPropagation();
+            event.preventDefault();
+
+            const targetColumn = event.target.closest('th')?.dataset.column;
+            if (!targetColumn || !draggedColumn || draggedColumn === targetColumn) {
+                document.querySelectorAll('th').forEach(th => th.classList.remove('dragging'));
+                return false;
+            }
+
+            // Swap columns in order array
+            const draggedIndex = columnOrder.indexOf(draggedColumn);
+            const targetIndex = columnOrder.indexOf(targetColumn);
+
+            if (draggedIndex !== -1 && targetIndex !== -1) {
+                columnOrder.splice(draggedIndex, 1);
+                columnOrder.splice(targetIndex, 0, draggedColumn);
+
+                saveColumnOrder();
+                updateTableHeaders();
+                renderSongsTable();
+            }
+
+            document.querySelectorAll('th').forEach(th => th.classList.remove('dragging'));
+            return false;
         }
 
         // Close modals on Escape
