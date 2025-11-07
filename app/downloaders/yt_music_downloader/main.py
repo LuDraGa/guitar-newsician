@@ -294,6 +294,8 @@ def build_ytdlp_opts(cfg: DLConfig, progress_cb):
 
 def create_metadata_file(info: Dict[str, Any], output_dir: Path) -> None:
     """Create a metadata.json file with track information."""
+    from datetime import datetime
+
     metadata = {
         "video_id": info.get("id"),
         "title": info.get("title"),
@@ -311,6 +313,7 @@ def create_metadata_file(info: Dict[str, Any], output_dir: Path) -> None:
         "channel_id": info.get("channel_id"),
         "categories": info.get("categories"),
         "tags": info.get("tags"),
+        "download_date": datetime.now().isoformat(),
     }
 
     # Remove None values
