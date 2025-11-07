@@ -156,6 +156,19 @@
             border-left: 3px solid #667eea;
         }
 
+        th.sortable {
+            cursor: pointer !important;
+            position: relative;
+        }
+
+        th.sortable:hover {
+            background: rgba(102, 126, 234, 0.15) !important;
+        }
+
+        th.sortable:active {
+            background: rgba(102, 126, 234, 0.25) !important;
+        }
+
         tbody tr {
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             transition: all 0.2s;
@@ -852,6 +865,8 @@
         let jobPollingInterval = null;
         let config = {};
         let columnOrder = ['title', 'artist', 'duration', 'download_date', 'status', 'actions'];
+        let sortColumn = null;
+        let sortDirection = 'asc'; // 'asc' or 'desc'
 
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
@@ -895,7 +910,62 @@
                 return matchesSearch && matchesStatus;
             });
 
+            // Apply sorting if active
+            if (sortColumn) {
+                sortSongs(sortColumn, sortDirection);
+            }
+
             renderSongsTable();
+        }
+
+        // Sort songs by column
+        function sortSongs(column, direction) {
+            filteredSongs.sort((a, b) => {
+                let valueA, valueB;
+
+                switch(column) {
+                    case 'title':
+                    case 'artist':
+                        valueA = (a[column] || '').toLowerCase();
+                        valueB = (b[column] || '').toLowerCase();
+                        break;
+                    case 'duration':
+                        valueA = a.duration || 0;
+                        valueB = b.duration || 0;
+                        break;
+                    case 'download_date':
+                        valueA = a.download_date ? new Date(a.download_date).getTime() : 0;
+                        valueB = b.download_date ? new Date(b.download_date).getTime() : 0;
+                        break;
+                    case 'status':
+                        // Sort by number of completed features
+                        valueA = [a.has_converted, a.has_analysis, a.has_stems, a.has_lyrics].filter(Boolean).length;
+                        valueB = [b.has_converted, b.has_analysis, b.has_stems, b.has_lyrics].filter(Boolean).length;
+                        break;
+                    default:
+                        return 0;
+                }
+
+                if (valueA < valueB) return direction === 'asc' ? -1 : 1;
+                if (valueA > valueB) return direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+
+        // Toggle sort for a column
+        function toggleSort(column) {
+            if (column === 'actions') return; // Don't sort actions column
+
+            if (sortColumn === column) {
+                // Toggle direction
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                // New column, default to ascending
+                sortColumn = column;
+                sortDirection = 'asc';
+            }
+
+            applyFilters(); // This will apply sorting and re-render
         }
 
         // Library Management
@@ -1787,18 +1857,39 @@
 
             const headers = columnOrder.map(col => {
                 const draggable = col !== 'actions' ? 'draggable="true"' : '';
-                return `<th ${draggable} data-column="${col}">${labels[col]}</th>`;
+                const sortable = col !== 'actions' ? 'sortable' : '';
+                let sortIndicator = '';
+                if (sortColumn === col) {
+                    sortIndicator = sortDirection === 'asc' ? ' ↑' : ' ↓';
+                }
+                return `<th ${draggable} data-column="${col}" class="${sortable}">${labels[col]}${sortIndicator}</th>`;
             }).join('');
             headerRow.innerHTML = headers;
 
-            // Attach event listeners to draggable headers
-            headerRow.querySelectorAll('th[draggable="true"]').forEach(th => {
-                th.addEventListener('dragstart', dragStart);
-                th.addEventListener('dragover', dragOver);
-                th.addEventListener('drop', drop);
-                th.addEventListener('dragend', (e) => {
-                    e.target.classList.remove('dragging');
-                });
+            // Attach event listeners to all headers
+            headerRow.querySelectorAll('th').forEach(th => {
+                const col = th.dataset.column;
+
+                // Add drag-and-drop handlers for draggable headers
+                if (th.draggable) {
+                    th.addEventListener('dragstart', dragStart);
+                    th.addEventListener('dragover', dragOver);
+                    th.addEventListener('drop', drop);
+                    th.addEventListener('dragend', (e) => {
+                        e.target.classList.remove('dragging');
+                    });
+                }
+
+                // Add click handler for sorting (except actions column)
+                if (col !== 'actions') {
+                    th.addEventListener('click', (e) => {
+                        // Only trigger sort if not dragging
+                        if (!e.target.classList.contains('dragging')) {
+                            toggleSort(col);
+                        }
+                    });
+                    th.style.cursor = 'pointer';
+                }
             });
         }
 
