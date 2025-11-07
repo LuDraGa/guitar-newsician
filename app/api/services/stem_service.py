@@ -37,10 +37,10 @@ class StemService:
         self,
         job_id: str,
         input_path: str,
-        model: str = "htdemucs",
+        model: str = "htdemucs_6s",
         stems: list[str] = None,
         output_dir: Optional[str] = None,
-        shifts: int = 1,
+        shifts: int = 2,
         segment: Optional[float] = 7.8,
         overlap: float = 0.25,
         device: str = "auto",
@@ -92,7 +92,7 @@ class StemService:
 
             ensure_dir(final_stems_dir)
 
-            stems_to_extract = stems or ["vocals", "drums", "bass", "other"]
+            stems_to_extract = stems or ["vocals", "drums", "bass", "other", "guitar", "piano"]
 
             logger.info(f"Starting stem separation for {input_file.name}")
             logger.info(f"Model: {model}, Device: {device}, Shifts: {shifts}")

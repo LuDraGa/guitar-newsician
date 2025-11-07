@@ -14,7 +14,7 @@ model: htdemucs_6s
 # Processing settings
 segment: 7.8          # Segment size in seconds (None = auto, typically 7.8s for htdemucs)
 overlap: 0.25         # Overlap between segments (0.0-0.99)
-shifts: 1             # Test-time augmentation shifts (higher = better quality but slower)
+shifts: 2             # Test-time augmentation shifts (higher = better quality but slower)
 
 # Device settings
 # Options: auto, cuda, cpu
