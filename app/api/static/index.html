@@ -669,6 +669,221 @@
         ::-webkit-scrollbar-thumb:hover {
             background: rgba(102, 126, 234, 0.7);
         }
+
+        /* Stems Mixer Styles */
+        .stems-mixer-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .master-transport {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .transport-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .transport-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 1.2em;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .transport-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .transport-btn:active {
+            transform: scale(0.95);
+        }
+
+        .transport-btn.secondary {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .transport-time {
+            font-family: 'Courier New', monospace;
+            font-size: 1.1em;
+            color: #667eea;
+            min-width: 120px;
+        }
+
+        .seek-bar-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .seek-bar {
+            flex: 1;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .seek-bar-progress {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.1s linear;
+        }
+
+        .seek-bar-handle {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 14px;
+            height: 14px;
+            background: white;
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+            left: 0%;
+            transition: left 0.1s linear;
+        }
+
+        .stems-channels-section {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .stems-channels-header {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .stems-channels {
+            display: flex;
+            gap: 12px;
+            overflow-x: auto;
+            padding-bottom: 10px;
+        }
+
+        .stem-channel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 12px;
+            min-width: 90px;
+            max-width: 90px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+            transition: all 0.3s;
+        }
+
+        .stem-channel:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(102, 126, 234, 0.4);
+        }
+
+        .stem-channel.unavailable {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .stem-name {
+            font-size: 0.85em;
+            font-weight: 600;
+            text-align: center;
+            color: #e0e0e0;
+            text-transform: capitalize;
+            word-break: break-word;
+        }
+
+        .stem-icon {
+            font-size: 1.5em;
+            margin-bottom: 5px;
+        }
+
+        .stem-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            width: 100%;
+        }
+
+        .stem-btn {
+            width: 100%;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.05);
+            color: #a0a0a0;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .stem-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.3);
+            color: #e0e0e0;
+        }
+
+        .stem-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: #667eea;
+            color: white;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }
+
+        .stem-btn.mute.active {
+            background: #f44336;
+            border-color: #f44336;
+        }
+
+        .stem-level-meter {
+            width: 100%;
+            height: 80px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .stem-level-fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 0%;
+            background: linear-gradient(to top, #4caf50 0%, #ffeb3b 60%, #f44336 90%);
+            transition: height 0.1s ease-out;
+        }
     </style>
 </head>
 <body>
@@ -867,6 +1082,258 @@
         let columnOrder = ['title', 'artist', 'duration', 'download_date', 'status', 'actions'];
         let sortColumn = null;
         let sortDirection = 'asc'; // 'asc' or 'desc'
+        let stemsMixer = null;
+
+        // Stems Mixer Class
+        class StemsMixer {
+            constructor(songId, stemFiles) {
+                this.songId = songId;
+                this.stemFiles = stemFiles; // { vocals: url, drums: url, ... }
+                this.audioElements = {};
+                this.stemStates = {}; // { vocals: { muted: false, soloed: false }, ... }
+                this.isPlaying = false;
+                this.currentTime = 0;
+                this.duration = 0;
+                this.updateInterval = null;
+                this.isSeeking = false;
+
+                this.init();
+            }
+
+            init() {
+                // Create hidden audio elements for each stem
+                const container = document.createElement('div');
+                container.id = 'stems-audio-container';
+                container.style.display = 'none';
+                document.body.appendChild(container);
+
+                Object.entries(this.stemFiles).forEach(([stemName, url]) => {
+                    const audio = document.createElement('audio');
+                    audio.id = `stem-audio-${stemName}`;
+                    audio.src = url;
+                    audio.preload = 'auto';
+
+                    // Set up event listeners
+                    audio.addEventListener('loadedmetadata', () => {
+                        if (this.duration === 0) {
+                            this.duration = audio.duration;
+                            this.updateTransportDisplay();
+                        }
+                    });
+
+                    audio.addEventListener('ended', () => {
+                        this.stop();
+                    });
+
+                    audio.addEventListener('error', (e) => {
+                        console.error(`Error loading stem ${stemName}:`, e);
+                    });
+
+                    container.appendChild(audio);
+                    this.audioElements[stemName] = audio;
+                    this.stemStates[stemName] = { muted: false, soloed: false };
+                });
+            }
+
+            play() {
+                if (this.isPlaying) return;
+
+                this.isPlaying = true;
+
+                // Synchronize all audio elements to the same time
+                Object.values(this.audioElements).forEach(audio => {
+                    audio.currentTime = this.currentTime;
+                });
+
+                // Start playing all elements
+                const playPromises = Object.values(this.audioElements).map(audio => {
+                    return audio.play().catch(err => {
+                        console.error('Play failed:', err);
+                    });
+                });
+
+                Promise.all(playPromises).then(() => {
+                    this.startTimeUpdate();
+                    this.updatePlayButton();
+                });
+            }
+
+            pause() {
+                if (!this.isPlaying) return;
+
+                this.isPlaying = false;
+                Object.values(this.audioElements).forEach(audio => audio.pause());
+                this.stopTimeUpdate();
+                this.updatePlayButton();
+            }
+
+            stop() {
+                this.pause();
+                this.currentTime = 0;
+                Object.values(this.audioElements).forEach(audio => {
+                    audio.currentTime = 0;
+                });
+                this.updateTransportDisplay();
+            }
+
+            togglePlay() {
+                if (this.isPlaying) {
+                    this.pause();
+                } else {
+                    this.play();
+                }
+            }
+
+            seek(time) {
+                this.currentTime = Math.max(0, Math.min(time, this.duration));
+
+                Object.values(this.audioElements).forEach(audio => {
+                    audio.currentTime = this.currentTime;
+                });
+
+                this.updateTransportDisplay();
+            }
+
+            seekToPercent(percent) {
+                const time = (percent / 100) * this.duration;
+                this.seek(time);
+            }
+
+            startTimeUpdate() {
+                this.stopTimeUpdate();
+                this.updateInterval = setInterval(() => {
+                    if (!this.isSeeking && this.audioElements[Object.keys(this.audioElements)[0]]) {
+                        // Use the first available audio element as the time source
+                        const firstAudio = Object.values(this.audioElements)[0];
+                        this.currentTime = firstAudio.currentTime;
+
+                        // Sync other audio elements if they drift
+                        Object.values(this.audioElements).forEach(audio => {
+                            if (Math.abs(audio.currentTime - this.currentTime) > 0.3) {
+                                audio.currentTime = this.currentTime;
+                            }
+                        });
+
+                        this.updateTransportDisplay();
+                    }
+                }, 100);
+            }
+
+            stopTimeUpdate() {
+                if (this.updateInterval) {
+                    clearInterval(this.updateInterval);
+                    this.updateInterval = null;
+                }
+            }
+
+            toggleMute(stemName) {
+                if (!this.stemStates[stemName]) return;
+
+                this.stemStates[stemName].muted = !this.stemStates[stemName].muted;
+                this.applyAudioStates();
+                this.updateStemButton(stemName, 'mute');
+            }
+
+            toggleSolo(stemName) {
+                if (!this.stemStates[stemName]) return;
+
+                this.stemStates[stemName].soloed = !this.stemStates[stemName].soloed;
+                this.applyAudioStates();
+
+                // Update all solo buttons
+                Object.keys(this.stemStates).forEach(name => {
+                    this.updateStemButton(name, 'solo');
+                });
+            }
+
+            applyAudioStates() {
+                const anySoloed = Object.values(this.stemStates).some(state => state.soloed);
+
+                Object.entries(this.stemStates).forEach(([stemName, state]) => {
+                    const audio = this.audioElements[stemName];
+                    if (!audio) return;
+
+                    // If any stem is soloed, mute all non-soloed stems
+                    // Otherwise, only mute explicitly muted stems
+                    if (anySoloed) {
+                        audio.muted = !state.soloed;
+                    } else {
+                        audio.muted = state.muted;
+                    }
+                });
+
+                // Update mute button states based on actual mute status
+                Object.keys(this.stemStates).forEach(name => {
+                    this.updateStemButton(name, 'mute');
+                });
+            }
+
+            updateStemButton(stemName, buttonType) {
+                const button = document.getElementById(`stem-${buttonType}-${stemName}`);
+                if (!button) return;
+
+                if (buttonType === 'mute') {
+                    const audio = this.audioElements[stemName];
+                    if (audio && audio.muted) {
+                        button.classList.add('active');
+                    } else {
+                        button.classList.remove('active');
+                    }
+                } else if (buttonType === 'solo') {
+                    if (this.stemStates[stemName].soloed) {
+                        button.classList.add('active');
+                    } else {
+                        button.classList.remove('active');
+                    }
+                }
+            }
+
+            updatePlayButton() {
+                const btn = document.getElementById('master-play-btn');
+                if (btn) {
+                    btn.textContent = this.isPlaying ? '⏸' : '▶';
+                }
+            }
+
+            updateTransportDisplay() {
+                const timeDisplay = document.getElementById('transport-time');
+                const progress = document.getElementById('seek-bar-progress');
+                const handle = document.getElementById('seek-bar-handle');
+
+                if (timeDisplay) {
+                    const current = this.formatTime(this.currentTime);
+                    const total = this.formatTime(this.duration);
+                    timeDisplay.textContent = `${current} / ${total}`;
+                }
+
+                if (progress && handle && this.duration > 0) {
+                    const percent = (this.currentTime / this.duration) * 100;
+                    progress.style.width = `${percent}%`;
+                    handle.style.left = `${percent}%`;
+                }
+            }
+
+            formatTime(seconds) {
+                if (!seconds || isNaN(seconds)) return '0:00';
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            destroy() {
+                this.stop();
+                this.stopTimeUpdate();
+
+                // Remove audio elements
+                const container = document.getElementById('stems-audio-container');
+                if (container) {
+                    container.remove();
+                }
+
+                this.audioElements = {};
+                this.stemStates = {};
+            }
+        }
 
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
@@ -1053,6 +1520,12 @@
         }
 
         async function selectSong(songId) {
+            // Clean up existing mixer when switching songs
+            if (stemsMixer) {
+                stemsMixer.destroy();
+                stemsMixer = null;
+            }
+
             // Remove previous selection
             document.querySelectorAll('#songs-tbody tr').forEach(row => {
                 row.classList.remove('selected');
@@ -1378,33 +1851,126 @@
 
             if (!currentSong.has_stems) {
                 container.innerHTML = '<p style="color: #a0a0a0;">No stems available. Separate stems first.</p>';
+                // Destroy existing mixer if any
+                if (stemsMixer) {
+                    stemsMixer.destroy();
+                    stemsMixer = null;
+                }
                 return;
             }
 
             const stems = currentSong.stem_files || {};
             const stemTypes = ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'];
 
+            // Stem icons mapping
+            const stemIcons = {
+                vocals: '🎤',
+                drums: '🥁',
+                bass: '🎸',
+                other: '🎹',
+                guitar: '🎸',
+                piano: '🎹'
+            };
+
+            // Build available stems for mixer
+            const availableStems = {};
+            stemTypes.forEach(type => {
+                if (stems[type]) {
+                    availableStems[type] = `${API_BASE}/library/songs/${currentSong.song_id}/stems/${type}`;
+                }
+            });
+
+            // Create mixer UI
             container.innerHTML = `
-                <div class="info-grid">
-                    ${stemTypes.map(type => `
-                        <div class="info-item">
-                            <div class="info-label">${type.charAt(0).toUpperCase() + type.slice(1)}</div>
-                            <div class="info-value" style="font-size: 0.8em; word-break: break-all;">
-                                ${stems[type] ? `
-                                    <div style="margin-bottom: 8px;">✅ Available</div>
-                                    <div style="font-size: 0.7em; color: #a0a0a0; margin-bottom: 8px;">${stems[type]}</div>
-                                    <audio controls style="width: 100%; height: 32px; margin-top: 5px;">
-                                        <source src="${API_BASE}/library/songs/${currentSong.song_id}/stems/${type}" type="audio/wav">
-                                    </audio>
-                                ` : '❌ Not found'}
+                <div class="stems-mixer-container">
+                    <!-- Master Transport Controls -->
+                    <div class="master-transport">
+                        <div class="transport-controls">
+                            <button class="transport-btn" id="master-play-btn" onclick="stemsMixer?.togglePlay()" title="Play/Pause">
+                                ▶
+                            </button>
+                            <button class="transport-btn secondary" onclick="stemsMixer?.stop()" title="Stop">
+                                ⏹
+                            </button>
+                            <div class="seek-bar-container">
+                                <div class="seek-bar" id="master-seek-bar" onclick="handleSeekBarClick(event)">
+                                    <div class="seek-bar-progress" id="seek-bar-progress"></div>
+                                    <div class="seek-bar-handle" id="seek-bar-handle"></div>
+                                </div>
                             </div>
+                            <div class="transport-time" id="transport-time">0:00 / 0:00</div>
                         </div>
-                    `).join('')}
+                    </div>
+
+                    <!-- Stems Channels Section -->
+                    <div class="stems-channels-section">
+                        <div class="stems-channels-header">
+                            🎚️ Stem Channels
+                            <span style="font-size: 0.8em; color: #a0a0a0; font-weight: normal;">
+                                ${Object.keys(availableStems).length} stems available
+                            </span>
+                        </div>
+                        <div class="stems-channels">
+                            ${stemTypes.map(type => {
+                                const isAvailable = stems[type];
+                                return `
+                                    <div class="stem-channel ${isAvailable ? '' : 'unavailable'}">
+                                        <div class="stem-icon">${stemIcons[type] || '🎵'}</div>
+                                        <div class="stem-name">${type}</div>
+                                        ${isAvailable ? `
+                                            <div class="stem-controls">
+                                                <button
+                                                    class="stem-btn mute"
+                                                    id="stem-mute-${type}"
+                                                    onclick="stemsMixer?.toggleMute('${type}')"
+                                                    title="Mute ${type}">
+                                                    M
+                                                </button>
+                                                <button
+                                                    class="stem-btn solo"
+                                                    id="stem-solo-${type}"
+                                                    onclick="stemsMixer?.toggleSolo('${type}')"
+                                                    title="Solo ${type}">
+                                                    S
+                                                </button>
+                                            </div>
+                                        ` : `
+                                            <div style="font-size: 0.7em; color: #666; text-align: center;">
+                                                Not available
+                                            </div>
+                                        `}
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+
+                    ${currentSong.has_stem_analysis ?
+                        '<p style="color: #4caf50; margin-top: 15px; font-size: 0.9em;">✅ Stem analysis available</p>' :
+                        '<p style="color: #a0a0a0; margin-top: 15px; font-size: 0.9em;">No stem analysis yet.</p>'}
                 </div>
-                ${currentSong.has_stem_analysis ?
-                    '<p style="color: #4caf50; margin-top: 15px;">✅ Stem analysis available</p>' :
-                    '<p style="color: #a0a0a0; margin-top: 15px;">No stem analysis yet.</p>'}
             `;
+
+            // Initialize the stems mixer
+            if (Object.keys(availableStems).length > 0) {
+                // Destroy existing mixer if any
+                if (stemsMixer) {
+                    stemsMixer.destroy();
+                }
+                stemsMixer = new StemsMixer(currentSong.song_id, availableStems);
+            }
+        }
+
+        // Handle seek bar clicks
+        function handleSeekBarClick(event) {
+            if (!stemsMixer) return;
+
+            const seekBar = document.getElementById('master-seek-bar');
+            const rect = seekBar.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const percent = (x / rect.width) * 100;
+
+            stemsMixer.seekToPercent(Math.max(0, Math.min(100, percent)));
         }
 
         async function renderLyricsTab() {
@@ -1463,6 +2029,11 @@
         }
 
         function switchTab(tabName) {
+            // Pause mixer when switching away from stems tab
+            if (stemsMixer && tabName !== 'stems') {
+                stemsMixer.pause();
+            }
+
             // Update tab buttons
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
             event.target.classList.add('active');
