@@ -726,6 +726,61 @@
             min-width: 120px;
         }
 
+        .playback-speed-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .playback-speed-label {
+            font-size: 0.75em;
+            color: #a0a0a0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .playback-speed-value {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #667eea;
+            font-weight: 600;
+            min-width: 45px;
+            text-align: center;
+        }
+
+        .playback-speed-slider {
+            -webkit-appearance: none;
+            width: 100px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            outline: none;
+        }
+
+        .playback-speed-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .playback-speed-slider::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
         .seek-bar-container {
             flex: 1;
             display: flex;
@@ -884,6 +939,323 @@
             background: linear-gradient(to top, #4caf50 0%, #ffeb3b 60%, #f44336 90%);
             transition: height 0.1s ease-out;
         }
+
+        /* Volume Slider */
+        .stem-volume-container {
+            width: 100%;
+            margin-top: 10px;
+            padding: 0 5px;
+        }
+
+        .stem-volume-label {
+            font-size: 0.65em;
+            color: #a0a0a0;
+            text-align: center;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stem-volume-slider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .stem-volume-slider:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .stem-volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s;
+        }
+
+        .stem-volume-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.6);
+        }
+
+        .stem-volume-slider::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s;
+        }
+
+        .stem-volume-slider::-moz-range-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.6);
+        }
+
+        .stem-volume-value {
+            font-size: 0.7em;
+            color: #667eea;
+            text-align: center;
+            margin-top: 3px;
+            font-weight: 600;
+        }
+
+        /* Studio Tab Layout */
+        .studio-container {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+            transition: all 0.3s ease;
+        }
+
+        .studio-main {
+            flex: 1;
+            min-width: 0;
+            transition: all 0.3s ease;
+        }
+
+        .studio-side-panel {
+            width: 350px;
+            display: flex;
+            flex-direction: column;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+            transition: all 0.3s ease;
+            height: fit-content;
+            max-height: 100%;
+        }
+
+        .studio-side-panel.collapsed {
+            width: 44px;
+            min-width: 44px;
+        }
+
+        .studio-side-panel.collapsed .panel-content {
+            display: none;
+        }
+
+        .studio-side-panel.collapsed .panel-header-title {
+            display: none;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s;
+        }
+
+        .panel-header:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .panel-header-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.95em;
+            font-weight: 600;
+            color: #e0e0e0;
+        }
+
+        .panel-toggle-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            color: #e0e0e0;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.2s;
+        }
+
+        .panel-toggle-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(102, 126, 234, 0.5);
+        }
+
+        .studio-side-panel.collapsed .panel-toggle-btn {
+            transform: rotate(180deg);
+        }
+
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+            scroll-behavior: smooth;
+        }
+
+        /* Lyrics Controls */
+        .lyrics-controls {
+            display: flex;
+            gap: 10px;
+            padding: 10px 15px;
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .lyrics-control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .lyrics-control-label {
+            font-size: 0.75em;
+            color: #a0a0a0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .lyrics-toggle {
+            position: relative;
+            width: 40px;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .lyrics-toggle.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: #667eea;
+        }
+
+        .lyrics-toggle-handle {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 14px;
+            height: 14px;
+            background: white;
+            border-radius: 50%;
+            transition: all 0.3s;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .lyrics-toggle.active .lyrics-toggle-handle {
+            transform: translateX(20px);
+        }
+
+        .lyrics-slider {
+            -webkit-appearance: none;
+            width: 80px;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            outline: none;
+        }
+
+        .lyrics-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 10px;
+            height: 10px;
+            background: #667eea;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .lyrics-slider::-moz-range-thumb {
+            width: 10px;
+            height: 10px;
+            background: #667eea;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+
+        /* Lyrics Line Styles */
+        .lyrics-line {
+            padding: 8px 15px;
+            transition: all 0.3s;
+            opacity: 0.5;
+        }
+
+        .lyrics-line.active {
+            opacity: 1;
+            background: linear-gradient(90deg, rgba(102, 126, 234, 0.2) 0%, transparent 100%);
+            border-left: 3px solid #667eea;
+            padding-left: 12px;
+            transform: translateX(3px);
+        }
+
+        .lyrics-line.upcoming {
+            opacity: 0.7;
+        }
+
+        .studio-fallback {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+            min-height: 300px;
+        }
+
+        .studio-fallback-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        .studio-fallback-text {
+            color: #a0a0a0;
+            font-size: 1.1em;
+            margin-bottom: 15px;
+        }
+
+        /* Responsive Layout */
+        @media (max-width: 1024px) {
+            .studio-side-panel {
+                width: 280px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .studio-container {
+                flex-direction: column;
+            }
+
+            .studio-side-panel {
+                width: 100%;
+                max-height: 400px;
+            }
+
+            .studio-side-panel.collapsed {
+                width: 100%;
+                max-height: 44px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -955,8 +1327,7 @@
             <div class="tabs">
                 <button class="tab active" onclick="switchTab('info')">ℹ️ Info</button>
                 <button class="tab" onclick="switchTab('analysis')">📊 Analysis</button>
-                <button class="tab" onclick="switchTab('stems')">🎸 Stems</button>
-                <button class="tab" onclick="switchTab('lyrics')">📝 Lyrics</button>
+                <button class="tab" onclick="switchTab('studio')">🎙️ Studio</button>
             </div>
 
             <!-- Tab Contents -->
@@ -972,15 +1343,9 @@
                 </div>
             </div>
 
-            <div id="tab-stems" class="tab-content">
-                <div id="stems-content">
-                    <p style="color: #a0a0a0;">No stems available. Separate stems first.</p>
-                </div>
-            </div>
-
-            <div id="tab-lyrics" class="tab-content">
-                <div id="lyrics-content">
-                    <p style="color: #a0a0a0;">No lyrics available.</p>
+            <div id="tab-studio" class="tab-content">
+                <div id="studio-content">
+                    <p style="color: #a0a0a0;">Loading studio...</p>
                 </div>
             </div>
         </div>
@@ -1083,6 +1448,9 @@
         let sortColumn = null;
         let sortDirection = 'asc'; // 'asc' or 'desc'
         let stemsMixer = null;
+        let lyricsAutoScroll = true;
+        let lyricsLookahead = 0.3; // seconds ahead of playback
+        let lyricsData = null;
 
         // Stems Mixer Class
         class StemsMixer {
@@ -1096,6 +1464,7 @@
                 this.duration = 0;
                 this.updateInterval = null;
                 this.isSeeking = false;
+                this.playbackRate = 1.0;
 
                 this.init();
             }
@@ -1131,7 +1500,7 @@
 
                     container.appendChild(audio);
                     this.audioElements[stemName] = audio;
-                    this.stemStates[stemName] = { muted: false, soloed: false };
+                    this.stemStates[stemName] = { muted: false, soloed: false, volume: 1.0 };
                 });
             }
 
@@ -1215,6 +1584,7 @@
                         });
 
                         this.updateTransportDisplay();
+                        updateLyricsHighlight();
                     }
                 }, 100);
             }
@@ -1260,12 +1630,51 @@
                     } else {
                         audio.muted = state.muted;
                     }
+
+                    // Apply volume
+                    audio.volume = state.volume;
                 });
 
                 // Update mute button states based on actual mute status
                 Object.keys(this.stemStates).forEach(name => {
                     this.updateStemButton(name, 'mute');
                 });
+            }
+
+            setVolume(stemName, volume) {
+                if (!this.stemStates[stemName]) return;
+
+                // Clamp volume between 0 and 1
+                volume = Math.max(0, Math.min(1, volume));
+                this.stemStates[stemName].volume = volume;
+
+                const audio = this.audioElements[stemName];
+                if (audio) {
+                    audio.volume = volume;
+                }
+
+                // Update volume display
+                const volumeDisplay = document.getElementById(`stem-volume-value-${stemName}`);
+                if (volumeDisplay) {
+                    volumeDisplay.textContent = `${Math.round(volume * 100)}%`;
+                }
+            }
+
+            setPlaybackRate(rate) {
+                // Clamp rate between 0.1 and 3.0
+                rate = Math.max(0.1, Math.min(3.0, rate));
+                this.playbackRate = rate;
+
+                // Apply to all audio elements
+                Object.values(this.audioElements).forEach(audio => {
+                    audio.playbackRate = rate;
+                });
+
+                // Update display
+                const rateDisplay = document.getElementById('playback-rate-value');
+                if (rateDisplay) {
+                    rateDisplay.textContent = `${rate.toFixed(2)}x`;
+                }
             }
 
             updateStemButton(stemName, buttonType) {
@@ -1572,11 +1981,8 @@
             // Analysis Tab
             renderAnalysisTab();
 
-            // Stems Tab
-            renderStemsTab();
-
-            // Lyrics Tab
-            renderLyricsTab();
+            // Studio Tab (combines stems + lyrics)
+            renderStudioTab();
         }
 
         function renderActions() {
@@ -1846,119 +2252,355 @@
             }
         }
 
-        function renderStemsTab() {
-            const container = document.getElementById('stems-content');
+        async function renderStudioTab() {
+            const container = document.getElementById('studio-content');
 
-            if (!currentSong.has_stems) {
-                container.innerHTML = '<p style="color: #a0a0a0;">No stems available. Separate stems first.</p>';
-                // Destroy existing mixer if any
-                if (stemsMixer) {
-                    stemsMixer.destroy();
-                    stemsMixer = null;
-                }
-                return;
+            // Destroy existing mixer if any
+            if (stemsMixer) {
+                stemsMixer.destroy();
+                stemsMixer = null;
             }
 
-            const stems = currentSong.stem_files || {};
-            const stemTypes = ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'];
+            const hasStems = currentSong.has_stems;
+            const hasLyrics = currentSong.has_lyrics || currentSong.has_synced_lyrics;
 
-            // Stem icons mapping
-            const stemIcons = {
-                vocals: '🎤',
-                drums: '🥁',
-                bass: '🎸',
-                other: '🎹',
-                guitar: '🎸',
-                piano: '🎹'
-            };
+            // Build stems mixer HTML if stems available
+            let stemsMixerHtml = '';
+            if (hasStems) {
+                const stems = currentSong.stem_files || {};
+                const stemTypes = ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'];
+                const stemIcons = {
+                    vocals: '🎤',
+                    drums: '🥁',
+                    bass: '🎸',
+                    other: '🎹',
+                    guitar: '🎸',
+                    piano: '🎹'
+                };
 
-            // Build available stems for mixer
-            const availableStems = {};
-            stemTypes.forEach(type => {
-                if (stems[type]) {
-                    availableStems[type] = `${API_BASE}/library/songs/${currentSong.song_id}/stems/${type}`;
-                }
-            });
+                // Build available stems for mixer
+                const availableStems = {};
+                stemTypes.forEach(type => {
+                    if (stems[type]) {
+                        availableStems[type] = `${API_BASE}/library/songs/${currentSong.song_id}/stems/${type}`;
+                    }
+                });
 
-            // Create mixer UI
-            container.innerHTML = `
-                <div class="stems-mixer-container">
-                    <!-- Master Transport Controls -->
-                    <div class="master-transport">
-                        <div class="transport-controls">
-                            <button class="transport-btn" id="master-play-btn" onclick="stemsMixer?.togglePlay()" title="Play/Pause">
-                                ▶
-                            </button>
-                            <button class="transport-btn secondary" onclick="stemsMixer?.stop()" title="Stop">
-                                ⏹
-                            </button>
-                            <div class="seek-bar-container">
-                                <div class="seek-bar" id="master-seek-bar" onclick="handleSeekBarClick(event)">
-                                    <div class="seek-bar-progress" id="seek-bar-progress"></div>
-                                    <div class="seek-bar-handle" id="seek-bar-handle"></div>
-                                </div>
-                            </div>
-                            <div class="transport-time" id="transport-time">0:00 / 0:00</div>
-                        </div>
-                    </div>
-
-                    <!-- Stems Channels Section -->
-                    <div class="stems-channels-section">
-                        <div class="stems-channels-header">
-                            🎚️ Stem Channels
-                            <span style="font-size: 0.8em; color: #a0a0a0; font-weight: normal;">
-                                ${Object.keys(availableStems).length} stems available
-                            </span>
-                        </div>
-                        <div class="stems-channels">
-                            ${stemTypes.map(type => {
-                                const isAvailable = stems[type];
-                                return `
-                                    <div class="stem-channel ${isAvailable ? '' : 'unavailable'}">
-                                        <div class="stem-icon">${stemIcons[type] || '🎵'}</div>
-                                        <div class="stem-name">${type}</div>
-                                        ${isAvailable ? `
-                                            <div class="stem-controls">
-                                                <button
-                                                    class="stem-btn mute"
-                                                    id="stem-mute-${type}"
-                                                    onclick="stemsMixer?.toggleMute('${type}')"
-                                                    title="Mute ${type}">
-                                                    M
-                                                </button>
-                                                <button
-                                                    class="stem-btn solo"
-                                                    id="stem-solo-${type}"
-                                                    onclick="stemsMixer?.toggleSolo('${type}')"
-                                                    title="Solo ${type}">
-                                                    S
-                                                </button>
-                                            </div>
-                                        ` : `
-                                            <div style="font-size: 0.7em; color: #666; text-align: center;">
-                                                Not available
-                                            </div>
-                                        `}
+                stemsMixerHtml = `
+                    <div class="stems-mixer-container">
+                        <!-- Master Transport Controls -->
+                        <div class="master-transport">
+                            <div class="transport-controls">
+                                <button class="transport-btn" id="master-play-btn" onclick="stemsMixer?.togglePlay()" title="Play/Pause">
+                                    ▶
+                                </button>
+                                <button class="transport-btn secondary" onclick="stemsMixer?.stop()" title="Stop">
+                                    ⏹
+                                </button>
+                                <div class="seek-bar-container">
+                                    <div class="seek-bar" id="master-seek-bar" onclick="handleSeekBarClick(event)">
+                                        <div class="seek-bar-progress" id="seek-bar-progress"></div>
+                                        <div class="seek-bar-handle" id="seek-bar-handle"></div>
                                     </div>
-                                `;
-                            }).join('')}
+                                </div>
+                                <div class="transport-time" id="transport-time">0:00 / 0:00</div>
+                            </div>
+                            <div class="playback-speed-control">
+                                <span class="playback-speed-label">Speed</span>
+                                <input
+                                    type="range"
+                                    class="playback-speed-slider"
+                                    id="playback-rate-slider"
+                                    min="10"
+                                    max="300"
+                                    value="100"
+                                    oninput="stemsMixer?.setPlaybackRate(this.value / 100)"
+                                    title="Playback speed (0.1x - 3x)">
+                                <span class="playback-speed-value" id="playback-rate-value">1.00x</span>
+                            </div>
+                        </div>
+
+                        <!-- Stems Channels Section -->
+                        <div class="stems-channels-section">
+                            <div class="stems-channels-header">
+                                🎚️ Stem Channels
+                                <span style="font-size: 0.8em; color: #a0a0a0; font-weight: normal;">
+                                    ${Object.keys(availableStems).length} stems available
+                                </span>
+                            </div>
+                            <div class="stems-channels">
+                                ${stemTypes.map(type => {
+                                    const isAvailable = stems[type];
+                                    return `
+                                        <div class="stem-channel ${isAvailable ? '' : 'unavailable'}">
+                                            <div class="stem-icon">${stemIcons[type] || '🎵'}</div>
+                                            <div class="stem-name">${type}</div>
+                                            ${isAvailable ? `
+                                                <div class="stem-controls">
+                                                    <button
+                                                        class="stem-btn mute"
+                                                        id="stem-mute-${type}"
+                                                        onclick="stemsMixer?.toggleMute('${type}')"
+                                                        title="Mute ${type}">
+                                                        M
+                                                    </button>
+                                                    <button
+                                                        class="stem-btn solo"
+                                                        id="stem-solo-${type}"
+                                                        onclick="stemsMixer?.toggleSolo('${type}')"
+                                                        title="Solo ${type}">
+                                                        S
+                                                    </button>
+                                                </div>
+                                                <div class="stem-volume-container">
+                                                    <div class="stem-volume-label">Vol</div>
+                                                    <input
+                                                        type="range"
+                                                        class="stem-volume-slider"
+                                                        id="stem-volume-${type}"
+                                                        min="0"
+                                                        max="100"
+                                                        value="100"
+                                                        oninput="stemsMixer?.setVolume('${type}', this.value / 100)"
+                                                        title="Volume for ${type}">
+                                                    <div class="stem-volume-value" id="stem-volume-value-${type}">100%</div>
+                                                </div>
+                                            ` : `
+                                                <div style="font-size: 0.7em; color: #666; text-align: center;">
+                                                    Not available
+                                                </div>
+                                            `}
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
                         </div>
                     </div>
+                `;
 
-                    ${currentSong.has_stem_analysis ?
-                        '<p style="color: #4caf50; margin-top: 15px; font-size: 0.9em;">✅ Stem analysis available</p>' :
-                        '<p style="color: #a0a0a0; margin-top: 15px; font-size: 0.9em;">No stem analysis yet.</p>'}
+                // Initialize the stems mixer after rendering
+                setTimeout(() => {
+                    if (Object.keys(availableStems).length > 0) {
+                        stemsMixer = new StemsMixer(currentSong.song_id, availableStems);
+                    }
+                }, 100);
+            } else {
+                // Fallback: Show simple audio player
+                stemsMixerHtml = `
+                    <div class="studio-fallback">
+                        <div class="studio-fallback-icon">🎵</div>
+                        <div class="studio-fallback-text">No stems available</div>
+                        <p style="color: #666; font-size: 0.9em; margin-bottom: 20px;">
+                            Separate stems to use the mixer
+                        </p>
+                        ${currentSong.audio_file ? `
+                            <audio controls style="width: 100%; max-width: 500px;">
+                                <source src="${API_BASE}/library/songs/${currentSong.song_id}/audio" type="audio/mpeg">
+                            </audio>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            // Build lyrics panel HTML
+            let lyricsPanelHtml = '';
+            if (hasLyrics) {
+                // Load lyrics state from localStorage
+                const panelCollapsed = localStorage.getItem('studio-lyrics-collapsed') === 'true';
+
+                lyricsPanelHtml = `
+                    <div class="studio-side-panel ${panelCollapsed ? 'collapsed' : ''}" id="lyrics-panel">
+                        <div class="panel-header" onclick="toggleLyricsPanel()">
+                            <div class="panel-header-title">
+                                <span>📝</span>
+                                <span>Lyrics</span>
+                            </div>
+                            <button class="panel-toggle-btn" onclick="event.stopPropagation(); toggleLyricsPanel();">
+                                ⮜
+                            </button>
+                        </div>
+                        <div class="panel-content" id="lyrics-panel-content">
+                            <p style="color: #a0a0a0; padding: 20px;">Loading lyrics...</p>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Render the studio layout
+            container.innerHTML = `
+                <div class="studio-container">
+                    <div class="studio-main">
+                        ${stemsMixerHtml}
+                    </div>
+                    ${lyricsPanelHtml}
                 </div>
             `;
 
-            // Initialize the stems mixer
-            if (Object.keys(availableStems).length > 0) {
-                // Destroy existing mixer if any
-                if (stemsMixer) {
-                    stemsMixer.destroy();
-                }
-                stemsMixer = new StemsMixer(currentSong.song_id, availableStems);
+            // Load lyrics asynchronously AFTER rendering the DOM
+            if (hasLyrics) {
+                loadLyricsIntoPanel();
             }
+        }
+
+        async function loadLyricsIntoPanel() {
+            const panel = document.getElementById('lyrics-panel-content');
+            if (!panel || !currentSong) {
+                console.error('Panel or currentSong not found', { panel, currentSong });
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/library/songs/${currentSong.song_id}/lyrics`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const lyrics = await response.json();
+
+                let lyricsHtml = '';
+
+                if (lyrics.synced) {
+                    // Parse LRC format with timestamps in seconds
+                    const lrcLines = lyrics.synced.split('\n').filter(line => line.trim());
+                    const parsedLines = lrcLines.map((line, index) => {
+                        const match = line.match(/\[(\d+):(\d+\.\d+)\](.*)/);
+                        if (match) {
+                            const [, minutes, seconds, text] = match;
+                            const timeInSeconds = parseInt(minutes) * 60 + parseFloat(seconds);
+                            const timestamp = `${minutes.padStart(2, '0')}:${seconds.padStart(5, '0')}`;
+                            return { timestamp, text: text.trim(), timeInSeconds, index };
+                        }
+                        return null;
+                    }).filter(Boolean);
+
+                    // Store parsed lyrics data globally
+                    lyricsData = parsedLines;
+
+                    lyricsHtml = `
+                        <div class="lyrics-controls">
+                            <div class="lyrics-control-group">
+                                <span class="lyrics-control-label">Auto-scroll</span>
+                                <div class="lyrics-toggle ${lyricsAutoScroll ? 'active' : ''}" id="lyrics-autoscroll-toggle" onclick="toggleLyricsAutoScroll()">
+                                    <div class="lyrics-toggle-handle"></div>
+                                </div>
+                            </div>
+                            <div class="lyrics-control-group">
+                                <span class="lyrics-control-label">Offset</span>
+                                <input
+                                    type="range"
+                                    class="lyrics-slider"
+                                    id="lyrics-lookahead-slider"
+                                    min="0"
+                                    max="100"
+                                    value="${lyricsLookahead * 100}"
+                                    oninput="setLyricsLookahead(this.value / 100)"
+                                    title="Highlight offset (0-1s)">
+                                <span style="font-size: 0.7em; color: #667eea;">${lyricsLookahead.toFixed(1)}s</span>
+                            </div>
+                        </div>
+                        <div id="lyrics-scroll-container" style="max-height: 100%; overflow-y: auto; padding: 0;">
+                            ${parsedLines.map(line => `
+                                <div class="lyrics-line" data-time="${line.timeInSeconds}" data-index="${line.index}">
+                                    <div style="font-size: 0.85em; color: #e0e0e0; line-height: 1.6; padding: 8px 15px;">
+                                        ${line.text || '<i style="color: #666;">♪</i>'}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                } else if (lyrics.plain) {
+                    lyricsData = null;
+                    lyricsHtml = `
+                        <div style="padding: 15px; padding-bottom: 5px;">
+                            <span class="badge badge-warning" style="font-size: 0.7em;">Plain</span>
+                        </div>
+                        <div style="max-height: 100%; overflow-y: auto; padding: 15px; padding-top: 10px; white-space: pre-wrap; line-height: 1.7; font-size: 0.9em; color: #e0e0e0;">
+                            ${lyrics.plain}
+                        </div>
+                    `;
+                } else {
+                    lyricsData = null;
+                    lyricsHtml = '<p style="color: #a0a0a0; padding: 20px;">No lyrics found.</p>';
+                }
+
+                panel.innerHTML = lyricsHtml;
+            } catch (error) {
+                console.error('Failed to load lyrics:', error);
+                lyricsData = null;
+                panel.innerHTML = `
+                    <p style="color: #666; padding: 20px; font-size: 0.85em;">
+                        Failed to load lyrics
+                    </p>
+                    <button class="btn" onclick="fetchLyrics()" style="margin: 0 20px; padding: 8px 16px; font-size: 0.8em;">
+                        📝 Fetch Lyrics
+                    </button>
+                `;
+            }
+        }
+
+        function toggleLyricsAutoScroll() {
+            lyricsAutoScroll = !lyricsAutoScroll;
+            const toggle = document.getElementById('lyrics-autoscroll-toggle');
+            if (toggle) {
+                toggle.classList.toggle('active', lyricsAutoScroll);
+            }
+            localStorage.setItem('lyrics-autoscroll', lyricsAutoScroll);
+        }
+
+        function setLyricsLookahead(value) {
+            lyricsLookahead = value;
+            const display = document.querySelector('#lyrics-lookahead-slider + span');
+            if (display) {
+                display.textContent = `${lyricsLookahead.toFixed(1)}s`;
+            }
+            localStorage.setItem('lyrics-lookahead', lyricsLookahead);
+        }
+
+        function updateLyricsHighlight() {
+            if (!lyricsData || !stemsMixer || !lyricsAutoScroll) return;
+
+            const currentTime = stemsMixer.currentTime + lyricsLookahead;
+            const lines = document.querySelectorAll('.lyrics-line');
+
+            let activeIndex = -1;
+
+            // Find the active line
+            for (let i = lyricsData.length - 1; i >= 0; i--) {
+                if (currentTime >= lyricsData[i].timeInSeconds) {
+                    activeIndex = i;
+                    break;
+                }
+            }
+
+            // Update line classes
+            lines.forEach((line, index) => {
+                line.classList.remove('active', 'upcoming');
+                if (index === activeIndex) {
+                    line.classList.add('active');
+                    // Auto-scroll to active line
+                    if (lyricsAutoScroll) {
+                        const container = document.getElementById('lyrics-scroll-container');
+                        if (container) {
+                            const lineTop = line.offsetTop;
+                            const containerHeight = container.clientHeight;
+                            const scrollTo = lineTop - (containerHeight / 2) + (line.clientHeight / 2);
+                            container.scrollTo({ top: scrollTo, behavior: 'smooth' });
+                        }
+                    }
+                } else if (index === activeIndex + 1) {
+                    line.classList.add('upcoming');
+                }
+            });
+        }
+
+        function toggleLyricsPanel() {
+            const panel = document.getElementById('lyrics-panel');
+            if (!panel) return;
+
+            panel.classList.toggle('collapsed');
+            const isCollapsed = panel.classList.contains('collapsed');
+            localStorage.setItem('studio-lyrics-collapsed', isCollapsed);
         }
 
         // Handle seek bar clicks
@@ -1973,64 +2615,9 @@
             stemsMixer.seekToPercent(Math.max(0, Math.min(100, percent)));
         }
 
-        async function renderLyricsTab() {
-            const container = document.getElementById('lyrics-content');
-
-            if (!currentSong.has_lyrics && !currentSong.has_synced_lyrics) {
-                container.innerHTML = '<p style="color: #a0a0a0;">No lyrics available. <button class="btn" onclick="fetchLyrics()" style="margin-left: 10px; padding: 8px 16px; font-size: 0.85em;">📝 Fetch Lyrics</button></p>';
-                return;
-            }
-
-            try {
-                const response = await fetch(`${API_BASE}/library/songs/${currentSong.song_id}/lyrics`);
-                const lyrics = await response.json();
-
-                let lyricsHtml = '';
-
-                if (lyrics.synced) {
-                    // Parse LRC format: [mm:ss.xx]text
-                    const lrcLines = lyrics.synced.split('\n').filter(line => line.trim());
-                    const parsedLines = lrcLines.map(line => {
-                        const match = line.match(/\[(\d+):(\d+\.\d+)\](.*)/);
-                        if (match) {
-                            const [, minutes, seconds, text] = match;
-                            const timestamp = `${minutes.padStart(2, '0')}:${seconds.padStart(5, '0')}`;
-                            return { timestamp, text: text.trim() };
-                        }
-                        return null;
-                    }).filter(Boolean);
-
-                    lyricsHtml = `
-                        <div style="margin-bottom: 15px;">
-                            <span class="badge badge-success">Synced Lyrics Available</span>
-                        </div>
-                        <div class="lyrics-container" style="max-height: 500px; overflow-y: auto; padding: 15px; background: rgba(255, 255, 255, 0.03); border-radius: 8px;">
-                            ${parsedLines.map(line => `<div style="margin-bottom: 6px; display: flex; align-items: flex-start;"><span style="color: #667eea; font-family: monospace; margin-right: 15px; min-width: 60px;">${line.timestamp}</span><span style="color: #e0e0e0; line-height: 1.6;">${line.text || '<i style="color: #666;">♪ Instrumental ♪</i>'}</span></div>`).join('')}
-                        </div>
-                    `;
-                } else if (lyrics.plain) {
-                    lyricsHtml = `
-                        <div style="margin-bottom: 15px;">
-                            <span class="badge badge-warning">Plain Lyrics</span>
-                        </div>
-                        <div class="lyrics-container" style="max-height: 500px; overflow-y: auto; padding: 15px; background: rgba(255, 255, 255, 0.03); border-radius: 8px; white-space: pre-wrap; line-height: 1.8; color: #e0e0e0;">
-                            ${lyrics.plain}
-                        </div>
-                    `;
-                } else {
-                    lyricsHtml = '<p style="color: #a0a0a0;">No lyrics found.</p>';
-                }
-
-                container.innerHTML = lyricsHtml;
-            } catch (error) {
-                console.error('Failed to load lyrics:', error);
-                container.innerHTML = '<p style="color: #f44336;">Failed to load lyrics: ' + error.message + '</p>';
-            }
-        }
-
         function switchTab(tabName) {
-            // Pause mixer when switching away from stems tab
-            if (stemsMixer && tabName !== 'stems') {
+            // Pause mixer when switching away from studio tab
+            if (stemsMixer && tabName !== 'studio') {
                 stemsMixer.pause();
             }
 
