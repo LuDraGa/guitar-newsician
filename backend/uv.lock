@@ -425,7 +425,7 @@ name = "coloredlogs"
 version = "15.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "humanfriendly", marker = "(python_full_version < '3.11' and sys_platform != 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')" },
+    { name = "humanfriendly", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cc/c7/eed8f27100517e8c0e6b923d5f0845d0cb99763da6fdee00478f91db7325/coloredlogs-15.0.1.tar.gz", hash = "sha256:7c991aa71a4577af2f82600d8f8f3a89f936baeaf9b50a9c197da014e5bf16b0", size = 278520 }
 wheels = [
@@ -713,6 +713,17 @@ dependencies = [
     { name = "treetable" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d5/9d/9a13947db237375486c0690f4741dd2b7e1eee20e0ffcb55dbd1b21cc600/dora_search-0.1.12.tar.gz", hash = "sha256:2956fd2c4c7e4b9a4830e83f0d4cf961be45cfba1a2f0570281e91d15ac516fb", size = 87111 }
+
+[[package]]
+name = "dotenv"
+version = "0.9.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dotenv" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/b7/545d2c10c1fc15e48653c91efde329a790f2eecfbbf2bd16003b5db2bab0/dotenv-0.9.9-py2.py3-none-any.whl", hash = "sha256:29cf74a087b31dafdb5a446b6d7e11cbce8ed2741540e2339c69fbef92c94ce9", size = 1892 },
+]
 
 [[package]]
 name = "einops"
@@ -2170,12 +2181,12 @@ name = "onnxruntime"
 version = "1.23.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "coloredlogs", marker = "(python_full_version < '3.11' and sys_platform != 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')" },
-    { name = "flatbuffers", marker = "(python_full_version < '3.11' and sys_platform != 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')" },
-    { name = "numpy", marker = "(python_full_version < '3.11' and sys_platform != 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')" },
-    { name = "packaging", marker = "(python_full_version < '3.11' and sys_platform != 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')" },
-    { name = "protobuf", marker = "(python_full_version < '3.11' and sys_platform != 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')" },
-    { name = "sympy", marker = "(python_full_version < '3.11' and sys_platform != 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')" },
+    { name = "coloredlogs", marker = "python_full_version < '3.11'" },
+    { name = "flatbuffers", marker = "python_full_version < '3.11'" },
+    { name = "numpy", marker = "python_full_version < '3.11'" },
+    { name = "packaging", marker = "python_full_version < '3.11'" },
+    { name = "protobuf", marker = "python_full_version < '3.11'" },
+    { name = "sympy", marker = "python_full_version < '3.11'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cd/6d/738e50c47c2fd285b1e6c8083f15dac1a5f6199213378a5f14092497296d/onnxruntime-1.23.2-cp310-cp310-win_amd64.whl", hash = "sha256:0be6a37a45e6719db5120e9986fcd30ea205ac8103fd1fb74b6c33348327a0cc", size = 13467651 },
@@ -3592,7 +3603,7 @@ name = "tflite-runtime"
 version = "2.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", marker = "(python_full_version < '3.11' and sys_platform != 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')" },
+    { name = "numpy", marker = "python_full_version < '3.11'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9e/1f/aade0d066bacbe697946ae21f0467a702d81adb939bb64515e9abebae9ed/tflite_runtime-2.14.0-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:bb11df4283e281cd609c621ac9470ad0cb5674408593272d7593a2c6bde8a808", size = 2413436 },
@@ -3832,6 +3843,7 @@ dependencies = [
     { name = "basic-pitch" },
     { name = "coremltools" },
     { name = "demucs" },
+    { name = "dotenv" },
     { name = "essentia" },
     { name = "fastapi" },
     { name = "ffmpeg-python" },
@@ -3855,6 +3867,7 @@ requires-dist = [
     { name = "basic-pitch", specifier = ">=0.3.0" },
     { name = "coremltools", specifier = ">=8.3.0" },
     { name = "demucs", specifier = ">=4.0.1" },
+    { name = "dotenv", specifier = ">=0.9.9" },
     { name = "essentia", specifier = ">=2.1b6.dev1389" },
     { name = "fastapi", specifier = ">=0.119.1" },
     { name = "ffmpeg-python", specifier = ">=0.2.0" },

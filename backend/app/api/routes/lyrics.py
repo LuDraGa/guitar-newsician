@@ -41,7 +41,7 @@ async def fetch_lyrics(request: LyricsFetchRequest):
             try:
                 logger.info(f"Attempting YTMusic lyrics fetch for video_id: {video_id}")
                 from ytmusicapi import YTMusic
-                from backend.downloaders.yt_music_downloader.helpers import fetch_lyrics as fetch_ytmusic_lyrics
+                from app.downloaders.yt_music_downloader.helpers import fetch_lyrics as fetch_ytmusic_lyrics
 
                 ytmusic = YTMusic()
                 ytm_synced, ytm_plain = fetch_ytmusic_lyrics(video_id, ytmusic)
@@ -65,7 +65,7 @@ async def fetch_lyrics(request: LyricsFetchRequest):
         if not synced_lyrics:
             try:
                 logger.info(f"Attempting syncedlyrics fetch for {request.song_id}")
-                from backend.lyrics.synced_lyrics import fetch_synced_lyrics, has_syncedlyrics
+                from app.lyrics.synced_lyrics import fetch_synced_lyrics, has_syncedlyrics
 
                 if has_syncedlyrics():
                     title = metadata.get("title", song_info.get("title", ""))

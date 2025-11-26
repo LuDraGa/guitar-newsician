@@ -99,7 +99,7 @@ class DownloadService:
     def _fetch_lyrics(self, video_id: str, output_dir: Path, metadata: Dict[str, Any] = None) -> Dict[str, bool]:
         """Fetch and save lyrics using cascading strategy: YTMusic first, then syncedlyrics."""
         from ytmusicapi import YTMusic
-        from backend.downloaders.yt_music_downloader.helpers import fetch_lyrics
+        from app.downloaders.yt_music_downloader.helpers import fetch_lyrics
         import logging
 
         logger = logging.getLogger(__name__)
@@ -132,7 +132,7 @@ class DownloadService:
         if not synced_lyrics and metadata:
             try:
                 logger.info("Attempting syncedlyrics fetch as fallback")
-                from backend.lyrics.synced_lyrics import fetch_synced_lyrics, has_syncedlyrics
+                from app.lyrics.synced_lyrics import fetch_synced_lyrics, has_syncedlyrics
 
                 if has_syncedlyrics():
                     title = metadata.get("title", "")

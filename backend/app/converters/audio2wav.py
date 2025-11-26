@@ -42,6 +42,12 @@ def load_config() -> ConverterConfig:
     with open(CONFIG_PATH, "r") as f:
         data = yaml.safe_load(f)
 
+    # Resolve input_dir relative to config file location if it's relative
+    if "input_dir" in data:
+        input_path = Path(data["input_dir"])
+        if not input_path.is_absolute():
+            data["input_dir"] = str((CONFIG_PATH.parent / input_path).resolve())
+
     return ConverterConfig(**data)
 
 

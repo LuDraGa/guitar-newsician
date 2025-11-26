@@ -2,7 +2,8 @@
 
 # Input directory containing song directories
 # Each song directory should have an audio.m4a file
-input_dir: downloads
+# Path is relative to project root (3 levels up: converters -> app -> backend -> root)
+input_dir: ../../../downloads
 
 # WAV conversion settings
 target_sample_rate: 44100

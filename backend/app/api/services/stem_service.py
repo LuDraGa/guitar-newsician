@@ -14,7 +14,7 @@ from demucs.pretrained import get_model
 from demucs.apply import apply_model
 
 # Import helpers from the module
-from backend.stem_separators.stem_separator import (
+from app.stem_separators.stem_separator import (
     _load_audio_pydub,
     _save_audio_pydub,
     _pick_segment_seconds,
@@ -76,12 +76,16 @@ class StemService:
                 message="Initializing stem separation...",
             )
 
-            input_file = Path(input_path)
-            if not input_file.exists():
-                raise FileNotFoundError(f"Input file not found: {input_path}")
-
             # Get config
             config = get_config()
+
+            # Resolve input path relative to downloads dir if it's not absolute
+            input_file = Path(input_path)
+            if not input_file.is_absolute():
+                input_file = config.downloads_dir / input_file
+
+            if not input_file.exists():
+                raise FileNotFoundError(f"Input file not found: {input_file}")
 
             # Determine output directory
             if output_dir:
