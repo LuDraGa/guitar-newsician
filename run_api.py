@@ -25,7 +25,7 @@ if __name__ == "__main__":
     print(f"📖 API docs: http://{host if host != '0.0.0.0' else 'localhost'}:{port}/docs")
 
     uvicorn.run(
-        "app.api.main:app",
+        "backend.api.main:app",
         host=host,
         port=port,
         reload=reload,

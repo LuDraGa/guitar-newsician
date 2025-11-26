@@ -102,7 +102,7 @@ class AnalysisService:
             analyzers_to_run = [analyzer_name_map.get(a, a) for a in api_analyzers]
 
             # Import analyzer module (lazy import)
-            from app.analyzers.music_analysis import run_analysis
+            from backend.analyzers.music_analysis import run_analysis
 
             job_manager.update_job(
                 job_id,

@@ -1,0 +1,6 @@
+node_modules
+dist
+build
+.vercel
+*.config.js
+*.config.ts
