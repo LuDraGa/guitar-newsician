@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Import fonts from Google Fonts */
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  /* Global dark theme styles */
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-dark-400 text-gray-100 antialiased;
+  }
+
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Custom scrollbar for dark theme */
+  ::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-dark-300;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-accent-700 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-accent-600;
+  }
+}
+
+@layer utilities {
+  /* Text gradient utility with accent */
+  .text-gradient {
+    @apply bg-gradient-to-r from-white via-accent-200 to-accent-400 bg-clip-text text-transparent;
+  }
+
+  /* Glassmorphism utility */
+  .glass {
+    @apply backdrop-blur-md bg-white/5 border border-white/10;
+  }
+
+  /* Floating nav glass */
+  .nav-glass {
+    @apply backdrop-blur-xl bg-dark-300/80 border border-white/10;
+  }
+}

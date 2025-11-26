@@ -14,7 +14,7 @@ from demucs.pretrained import get_model
 from demucs.apply import apply_model
 
 # Import helpers from the module
-from app.stem_separators.stem_separator import (
+from backend.stem_separators.stem_separator import (
     _load_audio_pydub,
     _save_audio_pydub,
     _pick_segment_seconds,
