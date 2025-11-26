@@ -6,18 +6,24 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
 
-load_dotenv()
+# Find project root (parent of backend/)
+_current_file = Path(__file__).resolve()
+_backend_dir = _current_file.parent.parent.parent  # backend/app/api -> backend/
+_project_root = _backend_dir.parent  # backend/ -> project root
+
+# Load .env from project root
+load_dotenv(_project_root / ".env")
 
 
 class WereCodeConfig(BaseModel):
     """Global configuration for WereCode API."""
 
-    # Base directories
+    # Base directories (resolved relative to project root)
     downloads_dir: Path = Field(
-        default_factory=lambda: Path(os.getenv("DOWNLOADS_DIR", "downloads"))
+        default_factory=lambda: _project_root / Path(os.getenv("DOWNLOADS_DIR", "downloads"))
     )
     outputs_dir: Path = Field(
-        default_factory=lambda: Path(os.getenv("OUTPUTS_DIR", "outputs"))
+        default_factory=lambda: _project_root / Path(os.getenv("OUTPUTS_DIR", "outputs"))
     )
 
     # File organization

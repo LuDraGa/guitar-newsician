@@ -24,6 +24,7 @@ dependencies = [
     "yt-dlp>=2025.10.14",
     "openai>=2.7.1",
     "coremltools>=8.3.0",
+    "dotenv>=0.9.9",
 ]
 
 [dependency-groups]

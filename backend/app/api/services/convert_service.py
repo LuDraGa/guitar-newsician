@@ -40,12 +40,16 @@ class ConvertService:
                 message="Loading audio file...",
             )
 
-            input_file = Path(input_path)
-            if not input_file.exists():
-                raise FileNotFoundError(f"Input file not found: {input_path}")
-
             # Get config
             config = get_config()
+
+            # Resolve input path relative to downloads dir if it's not absolute
+            input_file = Path(input_path)
+            if not input_file.is_absolute():
+                input_file = config.downloads_dir / input_file
+
+            if not input_file.exists():
+                raise FileNotFoundError(f"Input file not found: {input_file}")
 
             # Determine output path - save in same folder as input
             if output_dir:

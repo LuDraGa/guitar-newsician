@@ -82,12 +82,16 @@ class AnalysisService:
                 message="Initializing analysis...",
             )
 
-            input_file = Path(input_path)
-            if not input_file.exists():
-                raise FileNotFoundError(f"Input file not found: {input_path}")
-
             # Get config
             config = get_config()
+
+            # Resolve input path relative to downloads dir if it's not absolute
+            input_file = Path(input_path)
+            if not input_file.is_absolute():
+                input_file = config.downloads_dir / input_file
+
+            if not input_file.exists():
+                raise FileNotFoundError(f"Input file not found: {input_file}")
 
             # Map API analyzer names to actual analyzer names in music_analysis.py
             analyzer_name_map = {
@@ -102,7 +106,7 @@ class AnalysisService:
             analyzers_to_run = [analyzer_name_map.get(a, a) for a in api_analyzers]
 
             # Import analyzer module (lazy import)
-            from backend.analyzers.music_analysis import run_analysis
+            from app.analyzers.music_analysis import run_analysis
 
             job_manager.update_job(
                 job_id,

@@ -136,6 +136,13 @@ def load_config(path: Path) -> DLConfig:
             raw = yaml.safe_load(f) or {}
     else:
         raw = {}
+
+    # Resolve download_dir relative to config file location if it's relative
+    if "download_dir" in raw:
+        download_path = Path(raw["download_dir"])
+        if not download_path.is_absolute():
+            raw["download_dir"] = str((path.parent / download_path).resolve())
+
     return DLConfig(**raw)
 
 

@@ -2,7 +2,8 @@
 
 # Input directory containing song directories
 # Each song directory should have an audio.wav file or stems directory
-input_dir: downloads
+# Path is relative to project root (3 levels up: analyzers -> app -> backend -> root)
+input_dir: ../../../downloads
 
 # Processing settings
 skip_existing: true
