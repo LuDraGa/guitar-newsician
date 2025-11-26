@@ -31,10 +31,10 @@ export function LandingPage() {
                 Features
               </a>
               <a
-                href="#docs"
+                href="#how-it-works"
                 className="text-sm text-gray-400 transition-colors hover:text-white"
               >
-                Docs
+                How It Works
               </a>
               <a
                 href="#pricing"
@@ -44,7 +44,7 @@ export function LandingPage() {
               </a>
             </div>
             <Button size="sm" className="rounded-full">
-              Get Started
+              Try Free
             </Button>
           </div>
         </div>
@@ -61,33 +61,32 @@ export function LandingPage() {
             {/* Badge */}
             <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-accent-500/20 bg-accent-500/5 px-3 py-1.5 text-xs font-mono backdrop-blur-sm">
               <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent-400" />
-              <span className="text-accent-300 tracking-wide">Now in Beta</span>
+              <span className="text-accent-300 tracking-wide">AI-Powered Music Learning</span>
             </div>
 
             {/* Main Heading - Display Font */}
             <h1 className="mb-5 font-display text-5xl font-bold leading-[1.15] tracking-[-0.02em] text-white sm:text-6xl lg:text-7xl">
-              Music Analysis
+              Learn Any Song
               <br />
-              <span className="text-gradient">Reimagined</span>
+              <span className="text-gradient">Your Way</span>
             </h1>
 
             {/* Subheading - Body Font */}
             <p className="mx-auto mb-8 max-w-xl text-base leading-[1.7] tracking-[-0.01em] text-gray-400 sm:text-lg sm:leading-[1.75]">
-              Download, analyze, and dissect music with AI-powered stem separation,
-              tempo detection, and synchronized lyrics—all in one platform.
+              Drop a YouTube link. Get guitar tabs, backing tracks, isolated stems, and AI-generated transcriptions. Practice like never before.
             </p>
 
             {/* CTA */}
             <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Button size="md" className="w-full sm:w-auto rounded-full px-8">
-                Get Started Free
+                Try with Any Song
               </Button>
               <Button
                 size="md"
                 variant="outline"
                 className="w-full sm:w-auto rounded-full px-8"
               >
-                View Demo →
+                See How It Works →
               </Button>
             </div>
 
@@ -125,10 +124,10 @@ export function LandingPage() {
         <Container>
           <div className="mb-10 text-center">
             <h2 className="mb-3 font-display text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl">
-              Everything you need
+              From YouTube to Your Instrument
             </h2>
             <p className="text-base leading-relaxed tracking-[-0.01em] text-gray-400 sm:text-lg">
-              Powerful tools for music analysis and manipulation
+              Everything you need to learn, practice, and master any song
             </p>
           </div>
 
@@ -154,12 +153,12 @@ export function LandingPage() {
                     </svg>
                   </div>
                   <h3 className="font-display text-2xl font-bold text-white">
-                    AI Stem Separation
+                    Isolate Any Instrument
                   </h3>
                 </div>
                 <p className="text-gray-400">
-                  Separate any song into vocals, drums, bass, and instruments with
-                  state-of-the-art AI models. Crystal clear isolation in seconds.
+                  AI-powered stem separation extracts vocals, drums, bass, and instruments.
+                  Create backing tracks, practice along, or learn each part individually.
                 </p>
               </div>
               <div className="mt-8 h-48 rounded-2xl bg-gradient-to-br from-accent-500/10 via-gray-900/50 to-dark-300" />
@@ -184,11 +183,11 @@ export function LandingPage() {
                   </svg>
                 </div>
                 <h3 className="font-display text-xl font-bold text-white">
-                  Deep Analysis
+                  Auto-Generate Tabs & Chords
                 </h3>
               </div>
               <p className="text-sm text-gray-400">
-                Detect tempo, key, chords, and song structure with precision
+                AI transcribes notes, detects chords, and creates guitar tabs automatically
               </p>
             </BentoCard>
 
@@ -211,11 +210,11 @@ export function LandingPage() {
                   </svg>
                 </div>
                 <h3 className="font-display text-base font-bold text-white">
-                  Lightning Fast
+                  Karaoke Mode
                 </h3>
               </div>
               <p className="font-mono text-xs text-gray-500">
-                Background processing
+                Synced lyrics
               </p>
             </BentoCard>
 
@@ -233,16 +232,16 @@ export function LandingPage() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
+                      d="M13 10V3L4 14h7v7l9-11h-7z"
                     />
                   </svg>
                 </div>
                 <h3 className="font-display text-base font-bold text-white">
-                  Synced Lyrics
+                  Fast Processing
                 </h3>
               </div>
               <p className="font-mono text-xs text-gray-500">
-                Timestamped playback
+                Background AI jobs
               </p>
             </BentoCard>
 
@@ -265,11 +264,11 @@ export function LandingPage() {
                   </svg>
                 </div>
                 <h3 className="font-display text-xl font-bold text-white">
-                  Professional Mixer
+                  Practice Studio
                 </h3>
               </div>
               <p className="text-sm text-gray-400">
-                Multi-track playback with mute, solo, and volume controls
+                Mix stems on the fly—mute drums, isolate bass, adjust tempo for perfect practice
               </p>
             </BentoCard>
 
@@ -292,10 +291,10 @@ export function LandingPage() {
                   </svg>
                 </div>
                 <h3 className="font-display text-base font-bold text-white">
-                  Easy Import
+                  YouTube Import
                 </h3>
               </div>
-              <p className="font-mono text-xs text-gray-500">YouTube Music</p>
+              <p className="font-mono text-xs text-gray-500">Any song, any URL</p>
             </BentoCard>
 
             {/* API */}
@@ -312,15 +311,15 @@ export function LandingPage() {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                      d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
                     />
                   </svg>
                 </div>
                 <h3 className="font-display text-base font-bold text-white">
-                  REST API
+                  Export All
                 </h3>
               </div>
-              <p className="font-mono text-xs text-gray-500">Full OpenAPI</p>
+              <p className="font-mono text-xs text-gray-500">MIDI, stems, tabs</p>
             </BentoCard>
           </div>
         </Container>
@@ -332,13 +331,13 @@ export function LandingPage() {
           <div className="relative overflow-hidden rounded-3xl border border-accent-500/20 bg-gradient-to-br from-accent-500/10 via-dark-200 to-dark-300 p-16 text-center backdrop-blur-sm">
             <div className="relative z-10">
               <h2 className="mb-4 font-display text-4xl font-bold text-white sm:text-5xl">
-                Ready to transform your music?
+                Master your favorite songs
               </h2>
               <p className="mb-8 text-lg text-gray-300">
-                Start analyzing music for free. No credit card required.
+                Drop a YouTube link and start learning. No credit card required.
               </p>
               <Button size="lg" className="min-w-[200px] rounded-full shadow-2xl">
-                Get Started Now
+                Try with Any Song
               </Button>
             </div>
             {/* Decorative gradient */}
@@ -360,18 +359,18 @@ export function LandingPage() {
                 </span>
               </div>
               <p className="text-sm text-gray-500">
-                Music analysis & transcription platform
+                AI-powered music learning platform
               </p>
             </div>
             <div className="flex gap-8 font-mono text-sm text-gray-500">
-              <a href="#" className="transition-colors hover:text-accent-400">
+              <a href="#features" className="transition-colors hover:text-accent-400">
                 Features
               </a>
-              <a href="#" className="transition-colors hover:text-accent-400">
-                Documentation
+              <a href="#how-it-works" className="transition-colors hover:text-accent-400">
+                How It Works
               </a>
-              <a href="#" className="transition-colors hover:text-accent-400">
-                API
+              <a href="#pricing" className="transition-colors hover:text-accent-400">
+                Pricing
               </a>
               <a href="#" className="transition-colors hover:text-accent-400">
                 GitHub
