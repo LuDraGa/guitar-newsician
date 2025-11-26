@@ -7,10 +7,10 @@ wheels/
 *.egg-info
 
 # Mac Desktop Services
-.DS_Store
+*.DS_Store
 
 # Virtual environments
-.venv
+*.venv
 
 # Environment variables
 .env
@@ -26,3 +26,5 @@ outputs/
 # Logs
 *.log
 werecode.log
+
+*node_modules*
