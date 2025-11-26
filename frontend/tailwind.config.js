@@ -75,6 +75,22 @@ export default {
           'monospace',
         ],
       },
+      letterSpacing: {
+        tighter: '-0.05em',
+        tight: '-0.025em',
+        normal: '0',
+        wide: '0.025em',
+        wider: '0.05em',
+        widest: '0.1em',
+      },
+      lineHeight: {
+        none: '1',
+        tight: '1.15',
+        snug: '1.375',
+        normal: '1.5',
+        relaxed: '1.7',
+        loose: '2',
+      },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
         'gradient-conic': 'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))',
