@@ -1,5 +1,5 @@
 import { ReactNode, useEffect } from 'react'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import { Panel, PanelGroup, ResizeHandle } from './ResizablePanels'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/utils'
 
@@ -53,10 +53,11 @@ export function PanelLayout({
             className="fixed inset-0 z-40"
           >
             <PanelGroup direction="horizontal">
-              {/* Transcription Panel - Slides from left edge */}
-              {hasTranscription && (
+              {/* Transcription Panel - Conditionally rendered */}
+              {hasTranscription ? (
                 <>
                   <Panel
+                    id="transcription"
                     defaultSize={20}
                     minSize={15}
                     maxSize={40}
@@ -65,10 +66,10 @@ export function PanelLayout({
                     <AnimatePresence mode="wait">
                       <motion.div
                         key="transcription"
-                        initial={{ x: '-100%' }}
-                        animate={{ x: 0 }}
-                        exit={{ x: '-100%' }}
-                        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        transition={{ duration: 0.2 }}
                         className="h-full"
                       >
                         <div className="panel-glass h-full border-r border-white/10 shadow-2xl">
@@ -77,14 +78,16 @@ export function PanelLayout({
                       </motion.div>
                     </AnimatePresence>
                   </Panel>
-                  <ResizeHandle />
+                  <ResizeHandle leftPanelId="transcription" rightPanelId="studio" />
                 </>
-              )}
+              ) : null}
 
               {/* Studio Panel */}
               <Panel
+                id="studio"
                 defaultSize={hasTranscription ? 80 : 100}
                 minSize={hasTranscription ? 60 : 70}
+                className={!hasTranscription ? 'flex-1' : ''}
               >
                 <div className="panel-glass h-full shadow-2xl">
                   {studio}
@@ -95,13 +98,5 @@ export function PanelLayout({
         )}
       </AnimatePresence>
     </div>
-  )
-}
-
-function ResizeHandle() {
-  return (
-    <PanelResizeHandle className="group relative w-1 bg-transparent transition-colors hover:bg-accent-500/30">
-      <div className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 bg-white/5 transition-colors group-hover:bg-accent-500/50" />
-    </PanelResizeHandle>
   )
 }
