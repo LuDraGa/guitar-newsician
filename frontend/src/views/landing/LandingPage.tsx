@@ -65,8 +65,8 @@ export function LandingPage() {
             </div>
 
             {/* Main Heading - Display Font */}
-            <h1 className="mb-5 font-display text-5xl font-bold leading-[1.15] tracking-[-0.02em] text-white sm:text-6xl lg:text-7xl">
-              Learn Any Song
+            <h1 className="mb-5 font-display text-5xl font-bold leading-[1.15] tracking-[-0.02em] text-white sm:text-6xl lg:text-6xl">
+              Demistify Any Music
               <br />
               <span className="text-gradient">Your Way</span>
             </h1>
@@ -187,7 +187,7 @@ export function LandingPage() {
                 </h3>
               </div>
               <p className="text-sm text-gray-400">
-                AI transcribes notes, detects chords, and creates guitar tabs automatically
+                AI transcribes notes, detects chords, and creates albeit imperfectly. <br/>So the AI also assists with editing the tabs and chords.
               </p>
             </BentoCard>
 

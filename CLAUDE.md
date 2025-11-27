@@ -75,7 +75,7 @@ WereCode/
 
 ### Execution Documentation
 
-**IMPORTANT**: When performing significant changes or long-tail tasks, create a markdown execution document in `execution_docs/` directory. Label properly: `execution_docs/YYYY-MM-DD_task-name.md`
+**IMPORTANT**: When performing significant changes or long-tail tasks, create a markdown execution document in `docs/execution_docs/` directory. Label properly: `execution_docs/YYYY-MM-DD_task-name.md`
 
 ### Code Patterns
 

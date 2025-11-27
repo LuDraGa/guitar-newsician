@@ -55,4 +55,12 @@
   .nav-glass {
     @apply backdrop-blur-xl bg-dark-300/80 border border-white/10;
   }
+
+  /* Panel glass - for studio and transcription panels */
+  .panel-glass {
+    @apply backdrop-blur-xl bg-dark-400/90 border-l border-accent-500/20;
+    box-shadow:
+      0 0 0 1px rgba(6, 182, 212, 0.1) inset,
+      0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  }
 }
