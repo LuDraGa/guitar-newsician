@@ -297,7 +297,7 @@ export function LibraryPage() {
       </div>
 
       {/* Scrollable Content Area */}
-      <div className="relative flex-1 overflow-y-auto">
+      <div className={cn("relative flex-1", viewMode === 'cards' && "overflow-y-auto")}>
         <Container className="pb-8">
           <motion.div
             initial={{ opacity: 0, y: 10 }}
