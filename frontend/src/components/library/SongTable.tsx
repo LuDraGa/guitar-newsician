@@ -92,47 +92,47 @@ export function SongTable({ songs, onSongClick, className }: SongTableProps) {
 
   return (
     <div className={cn('nav-glass overflow-hidden rounded-2xl shadow-lg', className)}>
-      <div className="overflow-x-auto">
+      <div className="max-h-[calc(100vh-280px)] overflow-auto">
         <table className="w-full">
-          <thead>
-            <tr className="border-b border-white/5">
-              <th className="px-6 py-4 text-left">
+          <thead className="sticky top-0 z-10 bg-gradient-to-b from-dark-200/60 via-dark-300/80 to-dark-300/95 backdrop-blur-2xl shadow-[0_8px_32px_0_rgba(0,0,0,0.4)]">
+            <tr className="border-b border-white/10">
+              <th className="px-6 py-5 text-left">
                 <button
                   onClick={() => handleSort('title')}
-                  className="flex items-center gap-2 font-display text-sm font-semibold text-gray-400 transition-colors hover:text-accent-400"
+                  className="flex items-center gap-2 font-display text-sm font-medium text-gray-300 transition-all duration-200 hover:text-white hover:-translate-y-0.5"
                 >
                   Title
                   <SortIcon field="title" />
                 </button>
               </th>
-              <th className="px-6 py-4 text-left">
+              <th className="px-6 py-5 text-left">
                 <button
                   onClick={() => handleSort('artist')}
-                  className="flex items-center gap-2 font-display text-sm font-semibold text-gray-400 transition-colors hover:text-accent-400"
+                  className="flex items-center gap-2 font-display text-sm font-medium text-gray-300 transition-all duration-200 hover:text-white hover:-translate-y-0.5"
                 >
                   Artist
                   <SortIcon field="artist" />
                 </button>
               </th>
-              <th className="px-6 py-4 text-left">
+              <th className="px-6 py-5 text-left">
                 <button
                   onClick={() => handleSort('duration')}
-                  className="flex items-center gap-2 font-display text-sm font-semibold text-gray-400 transition-colors hover:text-accent-400"
+                  className="flex items-center gap-2 font-display text-sm font-medium text-gray-300 transition-all duration-200 hover:text-white hover:-translate-y-0.5"
                 >
                   Duration
                   <SortIcon field="duration" />
                 </button>
               </th>
-              <th className="px-6 py-4 text-left">
+              <th className="px-6 py-5 text-left">
                 <button
                   onClick={() => handleSort('download_date')}
-                  className="flex items-center gap-2 font-display text-sm font-semibold text-gray-400 transition-colors hover:text-accent-400"
+                  className="flex items-center gap-2 font-display text-sm font-medium text-gray-300 transition-all duration-200 hover:text-white hover:-translate-y-0.5"
                 >
                   Added
                   <SortIcon field="download_date" />
                 </button>
               </th>
-              <th className="px-6 py-4 text-left font-display text-sm font-semibold text-gray-400">
+              <th className="px-6 py-5 text-left font-display text-sm font-medium text-gray-300">
                 Status
               </th>
             </tr>
