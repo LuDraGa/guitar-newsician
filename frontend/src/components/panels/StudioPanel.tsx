@@ -8,6 +8,8 @@ import { StemMixer } from '@/components/studio/StemMixer'
 import { StemVisualizer } from '@/components/studio/StemVisualizer'
 import { LyricsPanel } from '@/components/studio/LyricsPanel'
 import { PlaybackControls } from '@/components/studio/PlaybackControls'
+import { ToastContainer } from '@/components/ui/Toast'
+import { JobTracker } from '@/components/ui/JobTracker'
 
 // Types
 import {
@@ -23,6 +25,8 @@ import {
 
 // Hooks and utilities
 import { useSimpleAudioPlayback } from '@/hooks/useSimpleAudioPlayback'
+import { useToast } from '@/hooks/useToast'
+import { useJobTracker } from '@/hooks/useJobTracker'
 import { parseLRC } from '@/utils/lrcParser'
 
 // API
@@ -50,6 +54,12 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
       volume: 0.8,
     }))
   )
+
+  // Toast notifications
+  const toast = useToast()
+
+  // Job tracking
+  const { activeJobs, addJob, removeJob } = useJobTracker()
 
   // Audio playback hook (using simple HTMLAudioElement version)
   const audio = useSimpleAudioPlayback({
@@ -264,10 +274,11 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
         input_path: song.audio_file,
         output_format: 'wav',
       })
-      alert(`Conversion job started: ${response.job_id}`)
+      toast.info('Conversion Started', `Job ID: ${response.job_id.slice(-6)}`, 3000)
+      addJob(response.job_id)
     } catch (error) {
       console.error('[StudioPanel] Convert failed:', error)
-      alert(`Conversion failed: ${error}`)
+      toast.error('Conversion Failed', error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -276,29 +287,31 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
       const inputPath = song.converted_file || song.audio_file
       const response = await analysisApi.analyze({
         input_path: inputPath,
-        preset: 'default',
+        preset: 'full',
       })
-      alert(`Analysis job started: ${response.job_id}`)
+      toast.info('Analysis Started', `Running full analysis suite...`, 3000)
+      addJob(response.job_id)
     } catch (error) {
       console.error('[StudioPanel] Analysis failed:', error)
-      alert(`Analysis failed: ${error}`)
+      toast.error('Analysis Failed', error instanceof Error ? error.message : String(error))
     }
   }
 
-  const handleSeparateStems = async (model: '2stem' | '4stem' | '6stem') => {
+  const handleSeparateStems = async () => {
     try {
       const inputPath = song.converted_file || song.audio_file
-      const stemsMap = { '2stem': 2, '4stem': 4, '6stem': 6 }
 
       const response = await stemsApi.separate({
         input_path: inputPath,
-        model: `htdemucs`,
-        stems: stemsMap[model],
+        model: 'htdemucs_6s',
+        stems: ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'],
+        shifts: 2,
       })
-      alert(`Stem separation job started: ${response.job_id}`)
+      toast.info('Stem Separation Started', `Extracting 6 stems with 2 shifts...`, 3000)
+      addJob(response.job_id)
     } catch (error) {
       console.error('[StudioPanel] Stem separation failed:', error)
-      alert(`Stem separation failed: ${error}`)
+      toast.error('Stem Separation Failed', error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -431,6 +444,27 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
         onMetronomeToggle={handleMetronomeToggle}
         onMasterVolumeChange={handleMasterVolumeChange}
       />
+
+      {/* Toast Notifications */}
+      <ToastContainer toasts={toast.toasts} onClose={toast.removeToast} />
+
+      {/* Job Trackers */}
+      <div className="fixed bottom-6 right-6 z-[9998] w-96 space-y-3">
+        {activeJobs.map((jobId) => (
+          <JobTracker
+            key={jobId}
+            jobId={jobId}
+            onComplete={(job) => {
+              const jobType = job.job_type?.replace('_', ' ') || 'Job'
+              toast.success('Job Completed', `${jobType} finished successfully`)
+              setTimeout(() => removeJob(jobId), 5000)
+            }}
+            onError={(job) => {
+              toast.error('Job Failed', job.error || 'Unknown error occurred')
+            }}
+          />
+        ))}
+      </div>
     </div>
   )
 }

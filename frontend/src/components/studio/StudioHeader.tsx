@@ -7,7 +7,7 @@ interface StudioHeaderProps {
   onClose: () => void
   onConvert?: () => void
   onAnalyze?: () => void
-  onSeparateStems?: (model: '2stem' | '4stem' | '6stem') => void
+  onSeparateStems?: () => void
   onDelete?: () => void
   className?: string
 }
@@ -22,7 +22,6 @@ export function StudioHeader({
   className,
 }: StudioHeaderProps) {
   const [actionsOpen, setActionsOpen] = useState(false)
-  const [stemsMenuOpen, setStemsMenuOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   // Close dropdown when clicking outside
@@ -30,7 +29,6 @@ export function StudioHeader({
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setActionsOpen(false)
-        setStemsMenuOpen(false)
       }
     }
 
@@ -110,63 +108,23 @@ export function StudioHeader({
 
             {/* Separate Stems */}
             {onSeparateStems && (
-              <div className="relative">
-                <button
-                  onClick={() => setStemsMenuOpen(!stemsMenuOpen)}
-                  className="flex w-full items-center justify-between gap-3 px-4 py-3 font-sans text-sm text-gray-300 transition-colors hover:bg-accent-500/10 hover:text-accent-400"
-                >
-                  <div className="flex items-center gap-3">
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-                      />
-                    </svg>
-                    Separate Stems
-                  </div>
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-
-                {/* Stems Submenu */}
-                {stemsMenuOpen && (
-                  <div className="absolute left-full top-0 ml-1 min-w-[150px] rounded-lg border border-white/10 bg-dark-300/95 backdrop-blur-xl shadow-xl">
-                    <button
-                      onClick={() => {
-                        onSeparateStems('2stem')
-                        setActionsOpen(false)
-                        setStemsMenuOpen(false)
-                      }}
-                      className="flex w-full items-center gap-2 px-4 py-2 font-mono text-xs text-gray-300 transition-colors hover:bg-accent-500/10 hover:text-accent-400 first:rounded-t-lg"
-                    >
-                      2 Stems
-                    </button>
-                    <button
-                      onClick={() => {
-                        onSeparateStems('4stem')
-                        setActionsOpen(false)
-                        setStemsMenuOpen(false)
-                      }}
-                      className="flex w-full items-center gap-2 px-4 py-2 font-mono text-xs text-gray-300 transition-colors hover:bg-accent-500/10 hover:text-accent-400"
-                    >
-                      4 Stems
-                    </button>
-                    <button
-                      onClick={() => {
-                        onSeparateStems('6stem')
-                        setActionsOpen(false)
-                        setStemsMenuOpen(false)
-                      }}
-                      className="flex w-full items-center gap-2 px-4 py-2 font-mono text-xs text-gray-300 transition-colors hover:bg-accent-500/10 hover:text-accent-400 last:rounded-b-lg"
-                    >
-                      6 Stems
-                    </button>
-                  </div>
-                )}
-              </div>
+              <button
+                onClick={() => {
+                  onSeparateStems()
+                  setActionsOpen(false)
+                }}
+                className="flex w-full items-center gap-3 px-4 py-3 font-sans text-sm text-gray-300 transition-colors hover:bg-accent-500/10 hover:text-accent-400"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                  />
+                </svg>
+                Separate Stems (6-stem)
+              </button>
             )}
 
             {/* Delete */}
