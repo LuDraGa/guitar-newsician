@@ -22,7 +22,7 @@ import {
 } from '@/components/studio/types'
 
 // Hooks and utilities
-import { useSimpleAudioPlayback } from '@/hooks/useSimpleAudioPlayback'
+import { useAudioPlayback } from '@/hooks/useAudioPlayback'
 import { parseLRC } from '@/utils/lrcParser'
 
 // API
@@ -43,7 +43,7 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
 
   // Initialize stems state
   const [stems, setStems] = useState<StemState[]>(
-    (availableStems.length > 0 ? availableStems : ['vocals'] as StemType[]).map((type) => ({
+    (availableStems.length > 0 ? availableStems : (['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'] as StemType[])).map((type) => ({
       type,
       muted: false,
       solo: false,
@@ -51,8 +51,8 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
     }))
   )
 
-  // Audio playback hook (using simple HTMLAudioElement version)
-  const audio = useSimpleAudioPlayback({
+  // Audio playback hook
+  const audio = useAudioPlayback({
     onTimeUpdate: (time) => {
       setPlaybackState((prev) => ({ ...prev, currentTime: time }))
     },
@@ -91,53 +91,34 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
   const [lyrics, setLyrics] = useState<LyricLine[] | null>(null)
   const [staticLyrics, setStaticLyrics] = useState<string | undefined>(undefined)
   const [isLoadingData, setIsLoadingData] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
 
   // Load audio, lyrics, and analysis data on mount
   useEffect(() => {
     async function loadData() {
       setIsLoadingData(true)
-      setLoadError(null)
 
       try {
-        if (!song.has_audio && !song.has_converted && !song.has_stems) {
-          setLoadError('No audio file available for this song')
-          return
-        }
-
-        // Load audio - prefer stems for mixing, fallback to full mix
+        // Load audio
         if (song.has_stems && availableStems.length > 0) {
-          console.log('[StudioPanel] Loading individual stems:', availableStems)
-
-          // Load all stems in parallel (but show progress)
+          // Load all stems
           for (const stemType of availableStems) {
             const stemUrl = await libraryApi.getStemUrl(song.song_id, stemType)
-            console.log(`[StudioPanel] Loading stem ${stemType}...`)
             await audio.loadStem(stemType, stemUrl)
-            console.log(`[StudioPanel] ✓ Loaded ${stemType}`)
           }
-        } else {
-          // No stems available - load full mix
-          console.log('[StudioPanel] Loading full mix (no stems available)')
+        } else if (song.has_audio) {
+          // Load full mix
           const audioUrl = await libraryApi.getAudioUrl(song.song_id)
           await audio.loadFullMix(audioUrl)
         }
 
-        // Wait a bit for duration to update
-        await new Promise(resolve => setTimeout(resolve, 100))
-
         // Update duration from loaded audio
-        console.log('[StudioPanel] Final duration:', audio.duration)
-        setPlaybackState((prev) => ({ ...prev, duration: audio.duration || song.duration || 0 }))
-
-        // Set initial master volume
-        audio.setMasterVolume(0.8)
-        audio.setMaxVolume(1.0)
+        setPlaybackState((prev) => ({ ...prev, duration: audio.duration }))
 
         // Load lyrics
         if (song.has_synced_lyrics || song.has_lyrics) {
           try {
             const lyricsData = await libraryApi.getLyrics(song.song_id)
+
             if (lyricsData.synced) {
               const parsedLyrics = parseLRC(lyricsData.synced)
               setLyrics(parsedLyrics)
@@ -145,12 +126,21 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
               setStaticLyrics(lyricsData.plain)
             }
           } catch (error) {
-            console.error('[StudioPanel] Failed to load lyrics:', error)
+            console.error('Failed to load lyrics:', error)
+          }
+        }
+
+        // Load analysis data (for future use - overlays, etc.)
+        if (song.has_analysis) {
+          try {
+            await libraryApi.getAnalysis(song.song_id)
+            // TODO: Use analysis data for beat/chord/section overlays
+          } catch (error) {
+            console.error('Failed to load analysis:', error)
           }
         }
       } catch (error) {
-        console.error('[StudioPanel] Failed to load studio data:', error)
-        setLoadError(error instanceof Error ? error.message : 'Failed to load audio')
+        console.error('Failed to load studio data:', error)
       } finally {
         setIsLoadingData(false)
       }
@@ -163,13 +153,13 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
     }
   }, [song.song_id])
 
-  // Sync playback state from audio hook
+  // Sync playback state
   useEffect(() => {
     setPlaybackState((prev) => ({
       ...prev,
       isPlaying: audio.isPlaying,
       currentTime: audio.currentTime,
-      duration: audio.duration || prev.duration,
+      duration: audio.duration,
     }))
   }, [audio.isPlaying, audio.currentTime, audio.duration])
 
@@ -264,10 +254,10 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
         input_path: song.audio_file,
         output_format: 'wav',
       })
-      alert(`Conversion job started: ${response.job_id}`)
+      console.log('Conversion started:', response.job_id)
+      // TODO: Show job status notification
     } catch (error) {
-      console.error('[StudioPanel] Convert failed:', error)
-      alert(`Conversion failed: ${error}`)
+      console.error('Convert failed:', error)
     }
   }
 
@@ -278,10 +268,10 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
         input_path: inputPath,
         preset: 'default',
       })
-      alert(`Analysis job started: ${response.job_id}`)
+      console.log('Analysis started:', response.job_id)
+      // TODO: Show job status notification
     } catch (error) {
-      console.error('[StudioPanel] Analysis failed:', error)
-      alert(`Analysis failed: ${error}`)
+      console.error('Analysis failed:', error)
     }
   }
 
@@ -295,26 +285,32 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
         model: `htdemucs`,
         stems: stemsMap[model],
       })
-      alert(`Stem separation job started: ${response.job_id}`)
+      console.log('Stem separation started:', response.job_id)
+      // TODO: Show job status notification
     } catch (error) {
-      console.error('[StudioPanel] Stem separation failed:', error)
-      alert(`Stem separation failed: ${error}`)
+      console.error('Stem separation failed:', error)
     }
   }
 
   const handleDelete = async () => {
     try {
       await libraryApi.deleteSong(song.song_id)
+      console.log('Song deleted')
       onClose()
     } catch (error) {
-      console.error('[StudioPanel] Delete failed:', error)
-      alert(`Delete failed: ${error}`)
+      console.error('Delete failed:', error)
     }
   }
 
-  const handlePrevious = () => {}
+  const handlePrevious = () => {
+    // TODO: Implement previous track navigation
+    console.log('Previous track')
+  }
 
-  const handleNext = () => {}
+  const handleNext = () => {
+    // TODO: Implement next track navigation
+    console.log('Next track')
+  }
 
   if (isLoadingData) {
     return (
@@ -322,22 +318,6 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
         <div className="text-center">
           <div className="mb-4 h-12 w-12 animate-spin rounded-full border-4 border-accent-500 border-t-transparent" />
           <p className="font-sans text-sm text-gray-400">Loading studio...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (loadError) {
-    return (
-      <div className={cn('flex h-full items-center justify-center', className)}>
-        <div className="text-center">
-          <p className="mb-4 font-sans text-sm text-red-400">{loadError}</p>
-          <button
-            onClick={onClose}
-            className="rounded bg-accent-500/20 px-4 py-2 text-sm text-accent-400 hover:bg-accent-500/30"
-          >
-            Close
-          </button>
         </div>
       </div>
     )
@@ -354,21 +334,6 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
         onSeparateStems={handleSeparateStems}
         onDelete={handleDelete}
       />
-
-      {/* Debug Info */}
-      <div className="border-b border-white/5 bg-yellow-900/20 p-2">
-        <details className="font-mono text-xs text-yellow-400">
-          <summary className="cursor-pointer">Debug Info (click to expand)</summary>
-          <div className="mt-2 space-y-1">
-            <div>Audio loaded: {audio.duration > 0 ? 'YES' : 'NO'}</div>
-            <div>Duration: {audio.duration.toFixed(2)}s</div>
-            <div>Is playing: {audio.isPlaying ? 'YES' : 'NO'}</div>
-            <div>Current time: {audio.currentTime.toFixed(2)}s</div>
-            <div>Stems: {stems.length}</div>
-            <div>Lyrics: {lyrics ? `${lyrics.length} lines` : staticLyrics ? 'Static' : 'None'}</div>
-          </div>
-        </details>
-      </div>
 
       {/* Main Content - Three Column Layout */}
       <div className="flex flex-1 gap-3 overflow-hidden p-3">

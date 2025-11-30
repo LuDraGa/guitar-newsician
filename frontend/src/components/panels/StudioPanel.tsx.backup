@@ -1,0 +1,259 @@
+import { Song } from '@/types/song'
+import { cn } from '@/utils'
+import { useState } from 'react'
+
+// Studio components
+import { StudioHeader } from '@/components/studio/StudioHeader'
+import { StemMixer } from '@/components/studio/StemMixer'
+import { StemVisualizer } from '@/components/studio/StemVisualizer'
+import { LyricsPanel } from '@/components/studio/LyricsPanel'
+import { PlaybackControls } from '@/components/studio/PlaybackControls'
+
+// Types
+import {
+  StemState,
+  StemType,
+  PlaybackState,
+  VisualizerState,
+  LyricsState,
+  OverlayType,
+  VisualizerView,
+} from '@/components/studio/types'
+
+interface StudioPanelProps {
+  song: Song
+  onClose: () => void
+  onStemSelect?: (stemType: string) => void
+  className?: string
+}
+
+export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPanelProps) {
+  // Initialize stems state
+  const availableStems = song.has_stems
+    ? (Object.keys(song.stem_files).filter((stem) => song.stem_files[stem]) as StemType[])
+    : (['vocals', 'drums', 'bass', 'guitar', 'piano', 'other'] as StemType[])
+
+  const [stems, setStems] = useState<StemState[]>(
+    availableStems.map((type) => ({
+      type,
+      muted: false,
+      solo: false,
+      volume: 0.8,
+    }))
+  )
+
+  // Playback state
+  const [playbackState, setPlaybackState] = useState<PlaybackState>({
+    isPlaying: false,
+    currentTime: 0,
+    duration: song.duration || 290, // Default to ~4:50 if not available
+    speed: 1.0,
+    loopEnabled: false,
+    loopStart: null,
+    loopEnd: null,
+    metronomeEnabled: false,
+    masterVolume: 0.8,
+    maxVolume: 1.0,
+  })
+
+  // Visualizer state
+  const [visualizerState, setVisualizerState] = useState<VisualizerState>({
+    view: 'waveform',
+    overlays: new Set<OverlayType>(['beats']),
+  })
+
+  // Lyrics state
+  const [lyricsState, setLyricsState] = useState<LyricsState>({
+    autoScroll: true,
+    offset: 0,
+  })
+
+  // Handlers
+  const handleStemUpdate = (type: StemType, updates: Partial<StemState>) => {
+    setStems((prev) => prev.map((stem) => (stem.type === type ? { ...stem, ...updates } : stem)))
+  }
+
+  const handleStemClick = (type: StemType) => {
+    onStemSelect?.(type)
+  }
+
+  const handlePlayPause = () => {
+    setPlaybackState((prev) => ({ ...prev, isPlaying: !prev.isPlaying }))
+  }
+
+  const handleSeek = (time: number) => {
+    setPlaybackState((prev) => ({ ...prev, currentTime: time }))
+  }
+
+  const handleSpeedChange = (speed: number) => {
+    setPlaybackState((prev) => ({ ...prev, speed }))
+  }
+
+  const handleLoopToggle = () => {
+    setPlaybackState((prev) => ({ ...prev, loopEnabled: !prev.loopEnabled }))
+  }
+
+  const handleSetLoopStart = () => {
+    setPlaybackState((prev) => ({ ...prev, loopStart: prev.currentTime }))
+  }
+
+  const handleSetLoopEnd = () => {
+    setPlaybackState((prev) => ({ ...prev, loopEnd: prev.currentTime }))
+  }
+
+  const handleClearLoop = () => {
+    setPlaybackState((prev) => ({ ...prev, loopStart: null, loopEnd: null }))
+  }
+
+  const handleMetronomeToggle = () => {
+    setPlaybackState((prev) => ({ ...prev, metronomeEnabled: !prev.metronomeEnabled }))
+  }
+
+  const handleMasterVolumeChange = (volume: number) => {
+    setPlaybackState((prev) => ({ ...prev, masterVolume: volume }))
+  }
+
+  const handleMaxVolumeChange = (maxVolume: number) => {
+    setPlaybackState((prev) => ({ ...prev, maxVolume }))
+  }
+
+  const handleViewChange = (view: VisualizerView) => {
+    setVisualizerState((prev) => ({ ...prev, view }))
+  }
+
+  const handleOverlayToggle = (overlay: OverlayType) => {
+    setVisualizerState((prev) => {
+      const newOverlays = new Set(prev.overlays)
+      if (newOverlays.has(overlay)) {
+        newOverlays.delete(overlay)
+      } else {
+        newOverlays.add(overlay)
+      }
+      return { ...prev, overlays: newOverlays }
+    })
+  }
+
+  const handleAutoScrollToggle = () => {
+    setLyricsState((prev) => ({ ...prev, autoScroll: !prev.autoScroll }))
+  }
+
+  const handleOffsetChange = (offset: number) => {
+    setLyricsState((prev) => ({ ...prev, offset }))
+  }
+
+  // Action handlers
+  const handleConvert = () => {
+    console.log('Convert to WAV')
+    // TODO: Implement convert action
+  }
+
+  const handleAnalyze = () => {
+    console.log('Analyze song')
+    // TODO: Implement analyze action
+  }
+
+  const handleSeparateStems = (model: '2stem' | '4stem' | '6stem') => {
+    console.log('Separate stems with model:', model)
+    // TODO: Implement stem separation
+  }
+
+  const handleDelete = () => {
+    console.log('Delete analysis and stems')
+    // TODO: Implement delete action
+  }
+
+  const handlePrevious = () => {
+    console.log('Previous track')
+    // TODO: Implement previous track
+  }
+
+  const handleNext = () => {
+    console.log('Next track')
+    // TODO: Implement next track
+  }
+
+  // Mock lyrics data (TODO: Load from file)
+  const mockLyrics = song.has_synced_lyrics
+    ? [
+        { timestamp: 0, text: 'And I\'d give up forever to touch you' },
+        { timestamp: 5, text: '\'Cause I know that you feel me somehow' },
+        { timestamp: 10, text: 'You\'re the closest to heaven that I\'ll ever be' },
+        { timestamp: 15, text: 'And I don\'t want to go home right now' },
+      ]
+    : null
+
+  return (
+    <div className={cn('flex h-full flex-col', className)}>
+      {/* Header */}
+      <StudioHeader
+        song={song}
+        onClose={onClose}
+        onConvert={handleConvert}
+        onAnalyze={handleAnalyze}
+        onSeparateStems={handleSeparateStems}
+        onDelete={handleDelete}
+      />
+
+      {/* Main Content - Three Column Layout */}
+      <div className="flex flex-1 gap-3 overflow-hidden p-3">
+        {/* Left: Stem Mixer */}
+        <div className="w-[280px] flex-shrink-0 overflow-y-auto">
+          <StemMixer
+            stems={stems}
+            onStemUpdate={handleStemUpdate}
+            onStemClick={handleStemClick}
+            masterVolume={playbackState.masterVolume}
+            maxVolume={playbackState.maxVolume}
+            onMasterVolumeChange={handleMasterVolumeChange}
+            onMaxVolumeChange={handleMaxVolumeChange}
+          />
+        </div>
+
+        {/* Center: Visualizer */}
+        <div className="flex-1 overflow-y-auto">
+          <StemVisualizer
+            stems={stems}
+            view={visualizerState.view}
+            overlays={visualizerState.overlays}
+            currentTime={playbackState.currentTime}
+            duration={playbackState.duration}
+            loopStart={playbackState.loopStart}
+            loopEnd={playbackState.loopEnd}
+            onViewChange={handleViewChange}
+            onOverlayToggle={handleOverlayToggle}
+            onSeek={handleSeek}
+            onStemClick={handleStemClick}
+          />
+        </div>
+
+        {/* Right: Lyrics */}
+        <div className="w-[300px] flex-shrink-0 overflow-y-auto">
+          <LyricsPanel
+            lyrics={mockLyrics}
+            currentTime={playbackState.currentTime}
+            lyricsState={lyricsState}
+            onAutoScrollToggle={handleAutoScrollToggle}
+            onOffsetChange={handleOffsetChange}
+            onSeek={handleSeek}
+          />
+        </div>
+      </div>
+
+      {/* Bottom: Playback Controls */}
+      <PlaybackControls
+        playbackState={playbackState}
+        onPlayPause={handlePlayPause}
+        onPrevious={handlePrevious}
+        onNext={handleNext}
+        onSeek={handleSeek}
+        onSpeedChange={handleSpeedChange}
+        onLoopToggle={handleLoopToggle}
+        onSetLoopStart={handleSetLoopStart}
+        onSetLoopEnd={handleSetLoopEnd}
+        onClearLoop={handleClearLoop}
+        onMetronomeToggle={handleMetronomeToggle}
+        onMasterVolumeChange={handleMasterVolumeChange}
+      />
+    </div>
+  )
+}

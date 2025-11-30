@@ -67,21 +67,45 @@ async def get_analysis(song_id: str):
 @router.get("/library/songs/{song_id}/audio")
 async def stream_audio(song_id: str):
     """Stream audio file for a song."""
+    import os
+    from pathlib import Path
+
     song_info = library_service.get_song(song_id)
 
-    if not song_info or not song_info.get("audio_file"):
+    if not song_info:
+        raise HTTPException(status_code=404, detail=f"Song not found: {song_id}")
+
+    # Prefer converted WAV file (better browser support), fallback to original
+    audio_file = song_info.get("converted_file") or song_info.get("audio_file")
+
+    if not audio_file or not os.path.exists(audio_file):
         raise HTTPException(status_code=404, detail=f"Audio file not found for song: {song_id}")
 
+    # Detect proper media type based on file extension
+    file_ext = Path(audio_file).suffix.lower()
+    media_type_map = {
+        ".wav": "audio/wav",
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".opus": "audio/ogg",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
+    }
+    media_type = media_type_map.get(file_ext, "audio/mpeg")
+
     return FileResponse(
-        song_info["audio_file"],
-        media_type="audio/mpeg",
-        filename=f"{song_id}.m4a",
+        audio_file,
+        media_type=media_type,
+        filename=f"{song_id}{file_ext}",
     )
 
 
 @router.get("/library/songs/{song_id}/stems/{stem_type}")
 async def stream_stem(song_id: str, stem_type: str):
     """Stream a specific stem file for a song."""
+    import os
+    from pathlib import Path
+
     song_info = library_service.get_song(song_id)
 
     if not song_info or not song_info.get("stem_files"):
@@ -92,10 +116,18 @@ async def stream_stem(song_id: str, stem_type: str):
         raise HTTPException(status_code=404, detail=f"Stem '{stem_type}' not found for song: {song_id}")
 
     stem_path = stem_files[stem_type]
+
+    if not os.path.exists(stem_path):
+        raise HTTPException(status_code=404, detail=f"Stem file not found: {stem_path}")
+
+    # Detect proper media type
+    file_ext = Path(stem_path).suffix.lower()
+    media_type = "audio/wav" if file_ext == ".wav" else "audio/mpeg"
+
     return FileResponse(
         stem_path,
-        media_type="audio/wav",
-        filename=f"{song_id}_{stem_type}.wav",
+        media_type=media_type,
+        filename=f"{song_id}_{stem_type}{file_ext}",
     )
 
 
