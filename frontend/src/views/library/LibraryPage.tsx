@@ -9,6 +9,7 @@ import { PanelLayout, StudioPanel, TranscriptionPanel } from '@/components/panel
 import { Song, ViewMode } from '@/types/song'
 import { motion } from 'framer-motion'
 import { cn } from '@/utils'
+import { libraryApi } from '@/services/api'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001'
 
@@ -49,8 +50,7 @@ export function LibraryPage() {
   const loadSongs = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`${API_BASE_URL}/api/v1/library/songs`)
-      const data = await response.json()
+      const data = await libraryApi.scanLibrary()
       setSongs(data.songs || [])
     } catch (error) {
       console.error('Failed to load songs:', error)
