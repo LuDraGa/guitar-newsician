@@ -4,7 +4,7 @@
 
 const API_BASE_URL = import.meta.env.VITE_API_URL
   ? `${import.meta.env.VITE_API_URL}/api/v1`
-  : 'http://localhost:8000/api/v1'
+  : 'http://localhost:8001/api/v1'
 
 // ===== Types =====
 
@@ -22,18 +22,24 @@ export interface ConvertRequest {
   channels?: number
 }
 
+export type AnalysisPreset = 'quick' | 'full' | 'production' | 'chord' | 'structure'
+export type AnalyzerType = 'tempo' | 'key' | 'chords' | 'structure'
+
 export interface AnalysisRequest {
   input_path: string
-  analyzers?: string[]
-  preset?: string
+  analyzers?: AnalyzerType[]
+  preset?: AnalysisPreset
   config_path?: string
   transpose_to?: string
 }
 
+export type DemucsModel = 'htdemucs' | 'htdemucs_ft' | 'htdemucs_6s' | 'mdx_extra'
+export type StemType = 'vocals' | 'drums' | 'bass' | 'other' | 'guitar' | 'piano'
+
 export interface StemSeparationRequest {
   input_path: string
-  model?: string
-  stems?: number
+  model?: DemucsModel
+  stems?: StemType[]
   output_dir?: string
   shifts?: number
 }

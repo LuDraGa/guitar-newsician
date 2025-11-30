@@ -50,8 +50,19 @@ def _write_json(path: Path, obj: Dict[str, Any]) -> None:
 def _read_json(path: Path) -> Optional[Dict[str, Any]]:
     if not path.exists():
         return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"⚠️  Warning: Corrupted JSON file at {path}, starting fresh: {e}")
+        # Backup the corrupted file
+        backup_path = path.with_suffix('.json.corrupted')
+        try:
+            path.rename(backup_path)
+            print(f"📁 Moved corrupted file to {backup_path}")
+        except Exception as rename_err:
+            print(f"⚠️  Could not rename corrupted file: {rename_err}")
+        return None
 
 
 # -------- Base Interfaces ------------------------------------------------------
