@@ -38,6 +38,8 @@ export function useSimpleAudioPlayback(options: UseSimpleAudioPlaybackOptions = 
       const audio = new Audio()
       let timeoutId: number | null = null
       let progressCheckId: number | null = null
+      let lastReadyState = -1
+      let noProgressCount = 0
 
       // IMPORTANT: Set crossOrigin BEFORE any src operations
       audio.crossOrigin = 'anonymous'
@@ -66,6 +68,9 @@ export function useSimpleAudioPlayback(options: UseSimpleAudioPlaybackOptions = 
 
       const handleProgress = () => {
         console.log(`[SimpleAudio] ⏳ Loading ${stemType}... readyState: ${audio.readyState}, networkState: ${audio.networkState}`)
+        // Reset no-progress counter on progress event
+        lastReadyState = audio.readyState
+        noProgressCount = 0
       }
 
       const handleLoaded = () => {
@@ -107,17 +112,35 @@ export function useSimpleAudioPlayback(options: UseSimpleAudioPlaybackOptions = 
         reject(new Error(`Failed to load audio: ${audio.error?.message || 'Unknown error'}`))
       }
 
-      // Check progress every 2 seconds to debug
+      // Check progress every 3 seconds - timeout only if NO progress
       progressCheckId = window.setInterval(() => {
-        console.log(`[SimpleAudio] 🔍 Progress check for ${stemType} - readyState: ${audio.readyState}, networkState: ${audio.networkState}`)
-      }, 2000)
+        const currentReadyState = audio.readyState
+        console.log(`[SimpleAudio] 🔍 Progress check for ${stemType} - readyState: ${currentReadyState}, networkState: ${audio.networkState}`)
 
-      // Timeout after 10 seconds
+        // Check if readyState has progressed
+        if (currentReadyState === lastReadyState) {
+          noProgressCount++
+          console.log(`[SimpleAudio] ⚠️ No progress for ${stemType} - count: ${noProgressCount}/10`)
+
+          // Timeout after 10 checks with no progress (30 seconds total)
+          if (noProgressCount >= 10) {
+            console.error(`[SimpleAudio] ⏱️ Timeout loading ${stemType} - no progress for 30s. ReadyState: ${currentReadyState}, NetworkState: ${audio.networkState}`)
+            cleanup()
+            reject(new Error(`Timeout loading audio - no progress for 30 seconds. ReadyState: ${currentReadyState}, NetworkState: ${audio.networkState}`))
+          }
+        } else {
+          // Progress detected, reset counter
+          lastReadyState = currentReadyState
+          noProgressCount = 0
+        }
+      }, 3000)
+
+      // Overall timeout after 60 seconds (fallback)
       timeoutId = window.setTimeout(() => {
-        console.error(`[SimpleAudio] ⏱️ Timeout loading ${stemType} - readyState: ${audio.readyState}, networkState: ${audio.networkState}, URL: ${url}`)
+        console.error(`[SimpleAudio] ⏱️ Hard timeout loading ${stemType} after 60s - readyState: ${audio.readyState}, networkState: ${audio.networkState}`)
         cleanup()
-        reject(new Error(`Timeout loading audio after 10 seconds. ReadyState: ${audio.readyState}, NetworkState: ${audio.networkState}`))
-      }, 10000)
+        reject(new Error(`Hard timeout loading audio after 60 seconds. ReadyState: ${audio.readyState}, NetworkState: ${audio.networkState}`))
+      }, 60000)
 
       audio.addEventListener('loadedmetadata', handleLoaded)
       audio.addEventListener('canplay', handleCanPlay)
