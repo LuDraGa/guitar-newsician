@@ -1,11 +1,85 @@
 """Library management endpoints."""
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from ..services.library_service import LibraryService
+import os
+from pathlib import Path
 
 router = APIRouter()
 library_service = LibraryService()
+
+
+def range_requests_response(
+    file_path: str,
+    request: Request,
+    media_type: str,
+    filename: str,
+    chunk_size: int = 1024 * 1024  # 1MB chunks
+):
+    """
+    Create a streaming response that supports HTTP range requests.
+    This enables faster loading and seeking in audio files.
+    """
+    file_size = os.path.getsize(file_path)
+    range_header = request.headers.get("range")
+
+    # If no range header, return full file
+    if not range_header:
+        def iterfile():
+            with open(file_path, "rb") as f:
+                while chunk := f.read(chunk_size):
+                    yield chunk
+
+        return StreamingResponse(
+            iterfile(),
+            media_type=media_type,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+                "Content-Disposition": f'inline; filename="{filename}"'
+            }
+        )
+
+    # Parse range header (format: "bytes=start-end")
+    range_str = range_header.replace("bytes=", "")
+    range_parts = range_str.split("-")
+    start = int(range_parts[0]) if range_parts[0] else 0
+    end = int(range_parts[1]) if range_parts[1] else file_size - 1
+
+    # Ensure valid range
+    if start >= file_size or end >= file_size or start > end:
+        return StreamingResponse(
+            content=iter([]),
+            status_code=416,
+            headers={"Content-Range": f"bytes */{file_size}"}
+        )
+
+    content_length = end - start + 1
+
+    def iterfile():
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            remaining = content_length
+            while remaining > 0:
+                chunk_size_to_read = min(chunk_size, remaining)
+                chunk = f.read(chunk_size_to_read)
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(
+        iterfile(),
+        status_code=206,  # Partial Content
+        media_type=media_type,
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(content_length),
+            "Content-Disposition": f'inline; filename="{filename}"'
+        }
+    )
 
 
 @router.get("/library/scan")
@@ -65,11 +139,8 @@ async def get_analysis(song_id: str):
 
 
 @router.get("/library/songs/{song_id}/audio")
-async def stream_audio(song_id: str):
-    """Stream audio file for a song."""
-    import os
-    from pathlib import Path
-
+async def stream_audio(song_id: str, request: Request):
+    """Stream audio file for a song with range request support."""
     song_info = library_service.get_song(song_id)
 
     if not song_info:
@@ -93,19 +164,17 @@ async def stream_audio(song_id: str):
     }
     media_type = media_type_map.get(file_ext, "audio/mpeg")
 
-    return FileResponse(
-        audio_file,
+    return range_requests_response(
+        file_path=audio_file,
+        request=request,
         media_type=media_type,
         filename=f"{song_id}{file_ext}",
     )
 
 
 @router.get("/library/songs/{song_id}/stems/{stem_type}")
-async def stream_stem(song_id: str, stem_type: str):
-    """Stream a specific stem file for a song."""
-    import os
-    from pathlib import Path
-
+async def stream_stem(song_id: str, stem_type: str, request: Request):
+    """Stream a specific stem file for a song with range request support."""
     song_info = library_service.get_song(song_id)
 
     if not song_info or not song_info.get("stem_files"):
@@ -124,8 +193,9 @@ async def stream_stem(song_id: str, stem_type: str):
     file_ext = Path(stem_path).suffix.lower()
     media_type = "audio/wav" if file_ext == ".wav" else "audio/mpeg"
 
-    return FileResponse(
-        stem_path,
+    return range_requests_response(
+        file_path=stem_path,
+        request=request,
         media_type=media_type,
         filename=f"{song_id}_{stem_type}{file_ext}",
     )

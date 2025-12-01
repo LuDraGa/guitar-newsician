@@ -117,15 +117,23 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
 
         // Load audio - prefer stems for mixing, fallback to full mix
         if (song.has_stems && availableStems.length > 0) {
-          console.log('[StudioPanel] Loading individual stems:', availableStems)
+          console.log('[StudioPanel] Loading individual stems in parallel:', availableStems)
 
-          // Load all stems in parallel (but show progress)
-          for (const stemType of availableStems) {
+          // Load all stems in parallel for faster loading
+          const stemLoadPromises = availableStems.map(async (stemType) => {
             const stemUrl = await libraryApi.getStemUrl(song.song_id, stemType)
-            console.log(`[StudioPanel] Loading stem ${stemType}...`)
-            await audio.loadStem(stemType, stemUrl)
-            console.log(`[StudioPanel] ✓ Loaded ${stemType}`)
-          }
+            console.log(`[StudioPanel] ⏳ Loading stem ${stemType}...`)
+            try {
+              await audio.loadStem(stemType, stemUrl)
+              console.log(`[StudioPanel] ✓ Loaded ${stemType}`)
+            } catch (error) {
+              console.error(`[StudioPanel] ❌ Failed to load ${stemType}:`, error)
+              throw error
+            }
+          })
+
+          // Wait for all stems to load
+          await Promise.all(stemLoadPromises)
         } else {
           // No stems available - load full mix
           console.log('[StudioPanel] Loading full mix (no stems available)')
