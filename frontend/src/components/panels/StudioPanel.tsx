@@ -101,6 +101,7 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
   // Data loading state
   const [lyrics, setLyrics] = useState<LyricLine[] | null>(null)
   const [staticLyrics, setStaticLyrics] = useState<string | undefined>(undefined)
+  const [analysisData, setAnalysisData] = useState<any>(null)
   const [isLoadingData, setIsLoadingData] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -165,6 +166,17 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
             }
           } catch (error) {
             console.error('[StudioPanel] Failed to load lyrics:', error)
+          }
+        }
+
+        // Load analysis data
+        if (song.has_analysis) {
+          try {
+            const analysis = await libraryApi.getAnalysis(song.song_id)
+            console.log('[StudioPanel] Loaded analysis data:', analysis)
+            setAnalysisData(analysis)
+          } catch (error) {
+            console.error('[StudioPanel] Failed to load analysis:', error)
           }
         }
       } catch (error) {
@@ -417,6 +429,8 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
             duration={playbackState.duration}
             loopStart={playbackState.loopStart}
             loopEnd={playbackState.loopEnd}
+            analysisData={analysisData}
+            songId={song.song_id}
             onViewChange={handleViewChange}
             onOverlayToggle={handleOverlayToggle}
             onSeek={handleSeek}
