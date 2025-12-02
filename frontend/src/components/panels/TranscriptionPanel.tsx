@@ -1,9 +1,12 @@
 import { cn } from '@/utils'
+import { StemType } from '@/components/studio/types'
 
 interface TranscriptionPanelProps {
   stemType: string
   songId: string
   onClose: () => void
+  onStemChange?: (stemType: StemType) => void
+  availableStems?: StemType[]
   className?: string
 }
 
@@ -11,6 +14,8 @@ export function TranscriptionPanel({
   stemType,
   songId,
   onClose,
+  onStemChange,
+  availableStems = [],
   className,
 }: TranscriptionPanelProps) {
   return (

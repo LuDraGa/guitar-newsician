@@ -8,6 +8,7 @@ import { StemMixer } from '@/components/studio/StemMixer'
 import { StemVisualizer } from '@/components/studio/StemVisualizer'
 import { LyricsPanel } from '@/components/studio/LyricsPanel'
 import { PlaybackControls } from '@/components/studio/PlaybackControls'
+import { TranscriptionPanel } from '@/components/panels/TranscriptionPanel'
 import { ToastContainer } from '@/components/ui/Toast'
 import { JobTracker } from '@/components/ui/JobTracker'
 import { JobHistory } from '@/components/ui/JobHistory'
@@ -89,7 +90,7 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
   // Visualizer state
   const [visualizerState, setVisualizerState] = useState<VisualizerState>({
     view: 'waveform',
-    overlays: new Set<OverlayType>(['beats']),
+    overlays: new Set<OverlayType>(['sections']),
   })
 
   // Lyrics state
@@ -104,6 +105,10 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
   const [analysisData, setAnalysisData] = useState<any>(null)
   const [isLoadingData, setIsLoadingData] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+
+  // Transcription panel state
+  const [transcriptionPanelOpen, setTranscriptionPanelOpen] = useState(false)
+  const [selectedStem, setSelectedStem] = useState<StemType | null>(null)
 
   // Load audio, lyrics, and analysis data on mount
   useEffect(() => {
@@ -218,7 +223,18 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
   }
 
   const handleStemClick = (type: StemType) => {
-    onStemSelect?.(type)
+    setSelectedStem(type)
+    setTranscriptionPanelOpen(true)
+  }
+
+  const handleTranscriptionToggle = () => {
+    if (!transcriptionPanelOpen) {
+      // Opening panel - set default stem if none selected
+      if (!selectedStem && stems.length > 0) {
+        setSelectedStem(stems[0].type)
+      }
+    }
+    setTranscriptionPanelOpen(!transcriptionPanelOpen)
   }
 
   const handlePlayPause = () => {
@@ -378,7 +394,7 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
   }
 
   return (
-    <div className={cn('flex h-full flex-col', className)}>
+    <div className={cn('flex h-full flex-col relative', className)}>
       {/* Header */}
       <StudioHeader
         song={song}
@@ -406,16 +422,28 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
 
       {/* Main Content - Three Column Layout */}
       <div className="flex flex-1 gap-3 overflow-hidden p-3">
-        {/* Left: Stem Mixer */}
+        {/* Left: Stem Mixer + Transcription Toggle */}
         <div className="w-[280px] flex-shrink-0 overflow-y-auto">
+          {/* Transcription Toggle Button */}
+          <button
+            onClick={handleTranscriptionToggle}
+            className={cn(
+              'mb-3 w-full flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 font-sans text-sm font-medium transition-all shadow-sm',
+              transcriptionPanelOpen
+                ? 'border-accent-500 bg-accent-500/20 text-accent-400 shadow-accent-500/20'
+                : 'border-white/20 bg-dark-300/50 text-white hover:border-accent-500/40 hover:bg-accent-500/10 hover:text-accent-400'
+            )}
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+            </svg>
+            Transcription
+          </button>
+
           <StemMixer
             stems={stems}
             onStemUpdate={handleStemUpdate}
-            onStemClick={handleStemClick}
             masterVolume={playbackState.masterVolume}
-            maxVolume={playbackState.maxVolume}
-            onMasterVolumeChange={handleMasterVolumeChange}
-            onMaxVolumeChange={handleMaxVolumeChange}
           />
         </div>
 
@@ -434,7 +462,6 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
             onViewChange={handleViewChange}
             onOverlayToggle={handleOverlayToggle}
             onSeek={handleSeek}
-            onStemClick={handleStemClick}
           />
         </div>
 
@@ -528,6 +555,32 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
 
         {/* Job history - collapsible action log */}
         <JobHistory history={jobHistory} onClear={clearHistory} />
+      </div>
+
+      {/* Overlay backdrop when transcription panel is open */}
+      {transcriptionPanelOpen && (
+        <div
+          className="fixed inset-0 z-[9998] bg-black/50 backdrop-blur-sm"
+          onClick={() => setTranscriptionPanelOpen(false)}
+        />
+      )}
+
+      {/* Sliding Transcription Panel - from left */}
+      <div
+        className={cn(
+          'fixed left-0 top-0 bottom-0 z-[9999] w-[500px] bg-dark-400 shadow-2xl transition-transform duration-300 ease-in-out border-r border-white/10',
+          transcriptionPanelOpen ? 'translate-x-0' : '-translate-x-full'
+        )}
+      >
+        {selectedStem && (
+          <TranscriptionPanel
+            stemType={selectedStem}
+            songId={song.song_id}
+            onClose={() => setTranscriptionPanelOpen(false)}
+            onStemChange={setSelectedStem}
+            availableStems={stems.map(s => s.type)}
+          />
+        )}
       </div>
     </div>
   )
