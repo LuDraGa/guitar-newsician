@@ -6,10 +6,7 @@ interface StemMixerProps {
   stems: StemState[]
   onStemUpdate: (type: StemType, updates: Partial<StemState>) => void
   onStemClick?: (type: StemType) => void
-  masterVolume: number
-  maxVolume: number
-  onMasterVolumeChange: (volume: number) => void
-  onMaxVolumeChange: (volume: number) => void
+  masterVolume: number // For displaying effective volume in stem controls
   className?: string
 }
 
@@ -18,9 +15,6 @@ export function StemMixer({
   onStemUpdate,
   onStemClick,
   masterVolume,
-  maxVolume,
-  onMasterVolumeChange,
-  onMaxVolumeChange,
   className,
 }: StemMixerProps) {
   const handleMuteToggle = (stem: StemState) => {
@@ -80,53 +74,9 @@ export function StemMixer({
             onSoloToggle={() => handleSoloToggle(stem)}
             onVolumeChange={(volume) => handleVolumeChange(stem, volume)}
             onClick={onStemClick ? () => onStemClick(stem.type) : undefined}
+            masterVolume={masterVolume}
           />
         ))}
-      </div>
-
-      {/* Divider */}
-      <div className="my-2 border-t border-white/5" />
-
-      {/* Master Volume */}
-      <div className="flex items-center gap-2 rounded-lg border border-white/5 bg-dark-300/30 p-2">
-        <div className="min-w-[60px] font-sans text-sm font-bold text-white">Master</div>
-        <div className="relative flex flex-1 items-center">
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={masterVolume * 100}
-            onChange={(e) => onMasterVolumeChange(parseInt(e.target.value) / 100)}
-            className="h-1.5 w-full cursor-pointer appearance-none rounded-full"
-            style={{
-              background: `linear-gradient(to right, rgb(var(--accent-500)) 0%, rgb(var(--accent-500)) ${masterVolume * 100}%, rgb(var(--dark-400)) ${masterVolume * 100}%, rgb(var(--dark-400)) 100%)`,
-            }}
-          />
-        </div>
-        <div className="min-w-[32px] text-right font-mono text-xs text-gray-400">
-          {Math.round(masterVolume * 100)}
-        </div>
-      </div>
-
-      {/* Max Volume (Limiter) */}
-      <div className="flex items-center gap-2 rounded-lg border border-white/5 bg-dark-300/30 p-2">
-        <div className="min-w-[60px] font-sans text-sm font-bold text-orange-400">Max</div>
-        <div className="relative flex flex-1 items-center">
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={maxVolume * 100}
-            onChange={(e) => onMaxVolumeChange(parseInt(e.target.value) / 100)}
-            className="h-1.5 w-full cursor-pointer appearance-none rounded-full"
-            style={{
-              background: `linear-gradient(to right, rgb(239, 68, 68) 0%, rgb(239, 68, 68) ${maxVolume * 100}%, rgb(var(--dark-400)) ${maxVolume * 100}%, rgb(var(--dark-400)) 100%)`,
-            }}
-          />
-        </div>
-        <div className="min-w-[32px] text-right font-mono text-xs text-orange-400">
-          {Math.round(maxVolume * 100)}
-        </div>
       </div>
 
       {/* Hint */}

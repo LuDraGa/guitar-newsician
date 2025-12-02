@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **[README.md](README.md)**: Project overview and setup
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: Detailed architecture and design patterns
 - **[docs/WORKFLOWS.md](docs/WORKFLOWS.md)**: Common development workflows and examples
-- **[execution_docs/](execution_docs/)**: Task execution tracking and status docs
+- **[docs/execution_docs/](execution_docs/)**: Task execution tracking and status docs
 
 ## Project Essentials
 
@@ -75,7 +75,7 @@ WereCode/
 
 ### Execution Documentation
 
-**IMPORTANT**: When performing significant changes or long-tail tasks, create a markdown execution document in `docs/execution_docs/` directory. Label properly: `execution_docs/YYYY-MM-DD_task-name.md`
+**IMPORTANT**: When performing significant changes or long-tail tasks, create a markdown execution document in `docs/execution_docs/` directory. Label properly: `docs/execution_docs/YYYY-MM-DD_task-name.md`
 
 ### Code Patterns
 

@@ -7,6 +7,7 @@ interface StemControlProps {
   onSoloToggle: () => void
   onVolumeChange: (volume: number) => void
   onClick?: () => void
+  masterVolume?: number // For showing effective volume
   className?: string
 }
 
@@ -16,9 +17,12 @@ export function StemControl({
   onSoloToggle,
   onVolumeChange,
   onClick,
+  masterVolume = 1.0,
   className,
 }: StemControlProps) {
   const isSilenced = stem.muted || (stem.solo === false) // Muted or not soloed when others are
+  const effectiveVolume = stem.volume * masterVolume
+  const showEffective = masterVolume < 1.0
 
   return (
     <div
@@ -89,8 +93,14 @@ export function StemControl({
       </div>
 
       {/* Volume Value */}
-      <div className="min-w-[32px] text-right font-mono text-xs text-gray-500">
-        {Math.round(stem.volume * 100)}
+      <div className="flex min-w-[70px] items-center justify-end gap-1 text-right font-mono text-xs">
+        <span className="text-gray-500">{Math.round(stem.volume * 100)}</span>
+        {showEffective && (
+          <>
+            <span className="text-gray-600">→</span>
+            <span className="text-accent-400/70">{Math.round(effectiveVolume * 100)}</span>
+          </>
+        )}
       </div>
     </div>
   )
