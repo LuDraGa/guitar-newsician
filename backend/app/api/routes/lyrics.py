@@ -15,6 +15,13 @@ class LyricsFetchRequest(BaseModel):
     song_id: str
 
 
+class LyricsSaveRequest(BaseModel):
+    """Request to save lyrics for a song."""
+    song_id: str
+    type: str  # 'plain' or 'synced'
+    content: str
+
+
 @router.post("/lyrics/fetch")
 async def fetch_lyrics(request: LyricsFetchRequest):
     """Fetch lyrics for a song using cascading strategy: YTMusic first, then syncedlyrics."""
@@ -140,3 +147,74 @@ async def fetch_lyrics(request: LyricsFetchRequest):
     except Exception as e:
         logger.error(f"Lyrics fetch failed for {request.song_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch lyrics: {str(e)}")
+
+
+@router.post("/lyrics/save")
+async def save_lyrics(request: LyricsSaveRequest):
+    """Save lyrics (plain or synced) for a song."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        # Validate type
+        if request.type not in ["plain", "synced"]:
+            raise HTTPException(status_code=400, detail="Type must be 'plain' or 'synced'")
+
+        # Get song info
+        song_info = library_service.get_song(request.song_id)
+        if not song_info:
+            raise HTTPException(status_code=404, detail=f"Song not found: {request.song_id}")
+
+        song_folder = Path(song_info["song_folder"])
+
+        # Validate content
+        if not request.content.strip():
+            raise HTTPException(status_code=400, detail="Lyrics content cannot be empty")
+
+        # Save based on type
+        lyrics_info = {}
+
+        if request.type == "plain":
+            lyrics_txt = song_folder / "lyrics.txt"
+            lyrics_txt.write_text(request.content, encoding="utf-8")
+            lyrics_info["has_plain_lyrics"] = True
+            logger.info(f"Saved plain lyrics to {lyrics_txt}")
+
+        elif request.type == "synced":
+            # Basic LRC format validation
+            if not ("[" in request.content and "]" in request.content):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid LRC format. Expected timestamp format like [00:12.00]"
+                )
+
+            lyrics_lrc = song_folder / "lyrics.lrc"
+            lyrics_lrc.write_text(request.content, encoding="utf-8")
+            lyrics_info["has_synced_lyrics"] = True
+            logger.info(f"Saved synced lyrics to {lyrics_lrc}")
+
+        # Update metadata.json
+        metadata_path = song_folder / "metadata.json"
+        if metadata_path.exists():
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                metadata_dict = json.load(f)
+
+            # Update only the relevant field
+            metadata_dict.update(lyrics_info)
+
+            with open(metadata_path, "w", encoding="utf-8") as f:
+                json.dump(metadata_dict, f, indent=2, ensure_ascii=False)
+
+        return {
+            "success": True,
+            "message": f"Lyrics saved successfully as {request.type}",
+            "type": request.type,
+            **lyrics_info
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Lyrics save failed for {request.song_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save lyrics: {str(e)}")

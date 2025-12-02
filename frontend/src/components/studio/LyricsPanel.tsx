@@ -1,30 +1,38 @@
 import { cn } from '@/utils'
 import { useEffect, useRef, useState } from 'react'
 import { LyricLine, LyricsState } from './types'
+import { LyricsEditor } from './LyricsEditor'
 
 interface LyricsPanelProps {
+  songId: string // Added for editing
   lyrics: LyricLine[] | null // Synced lyrics (.lrc format)
   staticLyrics?: string // Fallback static lyrics
   currentTime: number
+  isPlaying: boolean // Added for manual sync
   lyricsState: LyricsState
   onAutoScrollToggle: () => void
   onOffsetChange: (offset: number) => void
   onSeek: (time: number) => void
+  onLyricsUpdate?: () => void // Callback after lyrics are saved
   className?: string
 }
 
 export function LyricsPanel({
+  songId,
   lyrics,
   staticLyrics,
   currentTime,
+  isPlaying,
   lyricsState,
   onAutoScrollToggle,
   onOffsetChange,
   onSeek,
+  onLyricsUpdate,
   className,
 }: LyricsPanelProps) {
   const lyricsContainerRef = useRef<HTMLDivElement>(null)
   const [activeLine, setActiveLine] = useState<number>(-1)
+  const [isEditing, setIsEditing] = useState(false)
 
   // Find current active line based on time + offset
   useEffect(() => {
@@ -64,6 +72,38 @@ export function LyricsPanel({
     onSeek(line.timestamp)
   }
 
+  const handleEditClick = () => {
+    setIsEditing(true)
+  }
+
+  const handleCancelEdit = () => {
+    setIsEditing(false)
+  }
+
+  const handleSaveEdit = () => {
+    setIsEditing(false)
+    // Trigger refresh of lyrics data
+    if (onLyricsUpdate) {
+      onLyricsUpdate()
+    }
+  }
+
+  // If in edit mode, show the editor
+  if (isEditing) {
+    return (
+      <LyricsEditor
+        songId={songId}
+        initialLyrics={lyrics}
+        initialStaticLyrics={staticLyrics}
+        currentTime={currentTime}
+        isPlaying={isPlaying}
+        onSave={handleSaveEdit}
+        onCancel={handleCancelEdit}
+        className={className}
+      />
+    )
+  }
+
   // Render synced lyrics
   if (lyrics && lyrics.length > 0) {
     return (
@@ -72,6 +112,22 @@ export function LyricsPanel({
         <div className="flex items-center justify-between border-b border-white/5 pb-3">
           <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-gray-400">Lyrics</h3>
           <div className="flex items-center gap-2">
+            {/* Edit Button */}
+            <button
+              onClick={handleEditClick}
+              className="rounded border border-white/10 bg-dark-300/50 p-2 text-gray-400 transition-all hover:border-accent-500/30 hover:bg-accent-500/10 hover:text-accent-400"
+              title="Edit lyrics"
+              aria-label="Edit lyrics"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                />
+              </svg>
+            </button>
             {/* Auto-scroll Toggle */}
             <button
               onClick={onAutoScrollToggle}
@@ -154,7 +210,25 @@ export function LyricsPanel({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/5 pb-3">
           <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-gray-400">Lyrics</h3>
-          <span className="font-mono text-xs text-gray-500">Static</span>
+          <div className="flex items-center gap-2">
+            {/* Edit Button */}
+            <button
+              onClick={handleEditClick}
+              className="rounded border border-white/10 bg-dark-300/50 p-2 text-gray-400 transition-all hover:border-accent-500/30 hover:bg-accent-500/10 hover:text-accent-400"
+              title="Edit lyrics"
+              aria-label="Edit lyrics"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                />
+              </svg>
+            </button>
+            <span className="font-mono text-xs text-gray-500">Static</span>
+          </div>
         </div>
 
         {/* Static Lyrics */}
@@ -171,6 +245,22 @@ export function LyricsPanel({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/5 pb-3">
         <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-gray-400">Lyrics</h3>
+        {/* Edit Button */}
+        <button
+          onClick={handleEditClick}
+          className="rounded border border-white/10 bg-dark-300/50 p-2 text-gray-400 transition-all hover:border-accent-500/30 hover:bg-accent-500/10 hover:text-accent-400"
+          title="Edit lyrics"
+          aria-label="Edit lyrics"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+            />
+          </svg>
+        </button>
       </div>
 
       {/* No Lyrics Message */}
