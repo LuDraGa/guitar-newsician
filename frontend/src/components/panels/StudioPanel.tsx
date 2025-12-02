@@ -427,13 +427,30 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
         {/* Right: Lyrics */}
         <div className="w-[300px] flex-shrink-0 overflow-y-auto">
           <LyricsPanel
+            songId={song.song_id}
             lyrics={lyrics}
             staticLyrics={staticLyrics}
             currentTime={playbackState.currentTime}
+            isPlaying={playbackState.isPlaying}
             lyricsState={lyricsState}
             onAutoScrollToggle={handleAutoScrollToggle}
             onOffsetChange={handleOffsetChange}
             onSeek={handleSeek}
+            onLyricsUpdate={async () => {
+              // Reload lyrics after save
+              try {
+                const lyricsData = await libraryApi.getLyrics(song.song_id)
+                if (lyricsData.synced) {
+                  const parsedLyrics = parseLRC(lyricsData.synced)
+                  setLyrics(parsedLyrics)
+                } else if (lyricsData.plain) {
+                  setStaticLyrics(lyricsData.plain)
+                }
+                toast.success('Lyrics Saved', 'Lyrics updated successfully')
+              } catch (error) {
+                console.error('[StudioPanel] Failed to reload lyrics:', error)
+              }
+            }}
           />
         </div>
       </div>
