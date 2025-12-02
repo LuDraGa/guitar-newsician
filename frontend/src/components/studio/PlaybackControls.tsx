@@ -40,7 +40,9 @@ export function PlaybackControls({
 
   const currentTimeFormatted = formatTime(playbackState.currentTime)
   const durationFormatted = formatTime(playbackState.duration)
-  const progress = playbackState.duration > 0 ? (playbackState.currentTime / playbackState.duration) * 100 : 0
+  // Use high resolution (0-10000) for smooth thumb movement
+  const progress = playbackState.duration > 0 ? (playbackState.currentTime / playbackState.duration) * 10000 : 0
+  const progressPercent = progress / 100 // For background gradient (0-100%)
 
   const speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
 
@@ -48,24 +50,25 @@ export function PlaybackControls({
     <div className={cn('flex flex-col gap-3 border-t border-white/5 bg-dark-400/20 p-4', className)}>
       {/* Progress Bar */}
       <div className="flex items-center gap-3">
-        <span className="font-mono text-xs text-gray-400">{currentTimeFormatted}</span>
+        <span className="font-mono text-xs font-semibold text-white">{currentTimeFormatted}</span>
         <div className="relative flex-1">
           <input
             type="range"
             min="0"
-            max="100"
+            max="10000"
+            step="1"
             value={progress}
             onChange={(e) => {
-              const newProgress = parseInt(e.target.value) / 100
+              const newProgress = parseInt(e.target.value) / 10000
               onSeek(newProgress * playbackState.duration)
             }}
-            className="h-1.5 w-full cursor-pointer appearance-none rounded-full"
+            className="h-2.5 w-full cursor-pointer appearance-none rounded-full"
             style={{
-              background: `linear-gradient(to right, rgb(var(--accent-500)) 0%, rgb(var(--accent-500)) ${progress}%, rgb(var(--dark-400)) ${progress}%, rgb(var(--dark-400)) 100%)`,
+              background: `linear-gradient(to right, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.9) ${progressPercent}%, rgba(255, 255, 255, 0.2) ${progressPercent}%, rgba(255, 255, 255, 0.2) 100%)`,
             }}
           />
         </div>
-        <span className="font-mono text-xs text-gray-400">{durationFormatted}</span>
+        <span className="font-mono text-xs font-semibold text-white">{durationFormatted}</span>
       </div>
 
       {/* Main Controls Row */}
@@ -211,7 +214,7 @@ export function PlaybackControls({
 
           {/* Master Volume */}
           <div className="flex items-center gap-2">
-            <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -225,12 +228,12 @@ export function PlaybackControls({
               max="100"
               value={playbackState.masterVolume * 100}
               onChange={(e) => onMasterVolumeChange(parseInt(e.target.value) / 100)}
-              className="h-1.5 w-24 cursor-pointer appearance-none rounded-full"
+              className="h-3.5 w-32 cursor-pointer appearance-none rounded-full"
               style={{
-                background: `linear-gradient(to right, rgb(var(--accent-500)) 0%, rgb(var(--accent-500)) ${playbackState.masterVolume * 100}%, rgb(var(--dark-400)) ${playbackState.masterVolume * 100}%, rgb(var(--dark-400)) 100%)`,
+                background: `linear-gradient(to right, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.9) ${playbackState.masterVolume * 100}%, rgba(255, 255, 255, 0.15) ${playbackState.masterVolume * 100}%, rgba(255, 255, 255, 0.15) 100%)`,
               }}
             />
-            <span className="min-w-[32px] text-right font-mono text-xs text-gray-400">
+            <span className="min-w-[32px] text-right font-mono text-xs font-semibold text-white">
               {Math.round(playbackState.masterVolume * 100)}
             </span>
           </div>

@@ -5,7 +5,6 @@ import { StemControl } from './StemControl'
 interface StemMixerProps {
   stems: StemState[]
   onStemUpdate: (type: StemType, updates: Partial<StemState>) => void
-  onStemClick?: (type: StemType) => void
   masterVolume: number // For displaying effective volume in stem controls
   className?: string
 }
@@ -13,7 +12,6 @@ interface StemMixerProps {
 export function StemMixer({
   stems,
   onStemUpdate,
-  onStemClick,
   masterVolume,
   className,
 }: StemMixerProps) {
@@ -55,11 +53,11 @@ export function StemMixer({
   return (
     <div className={cn('flex flex-col gap-3 rounded-lg border border-white/5 bg-dark-400/20 p-4', className)}>
       {/* Header */}
-      <div className="mb-2 flex items-center justify-between border-b border-white/5 pb-3">
-        <h3 className="font-display text-sm font-semibold uppercase tracking-wider text-gray-400">
+      <div className="mb-2 flex items-center justify-between border-b border-white/10 pb-3">
+        <h3 className="font-display text-sm font-bold uppercase tracking-wider text-white">
           Stem Mixer
         </h3>
-        <div className="font-mono text-xs text-gray-500">
+        <div className="font-mono text-xs font-semibold text-gray-200">
           {stems.filter((s) => !s.muted).length}/{stems.length} active
         </div>
       </div>
@@ -73,15 +71,9 @@ export function StemMixer({
             onMuteToggle={() => handleMuteToggle(stem)}
             onSoloToggle={() => handleSoloToggle(stem)}
             onVolumeChange={(volume) => handleVolumeChange(stem, volume)}
-            onClick={onStemClick ? () => onStemClick(stem.type) : undefined}
             masterVolume={masterVolume}
           />
         ))}
-      </div>
-
-      {/* Hint */}
-      <div className="mt-2 rounded-lg bg-accent-500/5 p-2 font-mono text-xs text-gray-500">
-        Click any stem to open transcription
       </div>
     </div>
   )

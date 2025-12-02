@@ -24,7 +24,7 @@ export function useSimpleAudioPlayback(options: UseSimpleAudioPlaybackOptions = 
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [isLoaded, setIsLoaded] = useState(false)
-  const timeUpdateIntervalRef = useRef<number | null>(null)
+  const timeUpdateAnimationRef = useRef<number | null>(null)
   const masterVolumeRef = useRef<number>(0.8)
   const maxVolumeRef = useRef<number>(1.0)
 
@@ -176,14 +176,14 @@ export function useSimpleAudioPlayback(options: UseSimpleAudioPlaybackOptions = 
   }, [loadStem])
 
   /**
-   * Start time update polling
+   * Start time update polling (using requestAnimationFrame for smooth updates)
    */
   const startTimeUpdates = useCallback(() => {
-    if (timeUpdateIntervalRef.current) {
+    if (timeUpdateAnimationRef.current) {
       return
     }
 
-    timeUpdateIntervalRef.current = window.setInterval(() => {
+    const updateTime = () => {
       // Get time from first audio element
       const firstAudio = Array.from(stemAudiosRef.current.values())[0]
       if (firstAudio?.element) {
@@ -191,16 +191,22 @@ export function useSimpleAudioPlayback(options: UseSimpleAudioPlaybackOptions = 
         setCurrentTime(time)
         options.onTimeUpdate?.(time)
       }
-    }, 100) // Update every 100ms
+
+      // Continue animation loop
+      timeUpdateAnimationRef.current = window.requestAnimationFrame(updateTime)
+    }
+
+    // Start the animation loop
+    timeUpdateAnimationRef.current = window.requestAnimationFrame(updateTime)
   }, [options])
 
   /**
    * Stop time update polling
    */
   const stopTimeUpdates = useCallback(() => {
-    if (timeUpdateIntervalRef.current) {
-      clearInterval(timeUpdateIntervalRef.current)
-      timeUpdateIntervalRef.current = null
+    if (timeUpdateAnimationRef.current) {
+      window.cancelAnimationFrame(timeUpdateAnimationRef.current)
+      timeUpdateAnimationRef.current = null
     }
   }, [])
 
@@ -330,9 +336,9 @@ export function useSimpleAudioPlayback(options: UseSimpleAudioPlaybackOptions = 
    */
   const reset = useCallback(() => {
     // Stop time updates
-    if (timeUpdateIntervalRef.current) {
-      clearInterval(timeUpdateIntervalRef.current)
-      timeUpdateIntervalRef.current = null
+    if (timeUpdateAnimationRef.current) {
+      window.cancelAnimationFrame(timeUpdateAnimationRef.current)
+      timeUpdateAnimationRef.current = null
     }
 
     // Remove all audio elements

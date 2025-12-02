@@ -19,7 +19,6 @@ interface StemVisualizerProps {
   onViewChange: (view: VisualizerView) => void
   onOverlayToggle: (overlay: OverlayType) => void
   onSeek: (time: number) => void
-  onStemClick?: (type: StemType) => void
   className?: string
 }
 
@@ -32,7 +31,7 @@ const stemColors: Record<StemType, string> = {
   other: '#6b7280',   // gray
 }
 
-const STEM_HEIGHT = 120 // Height of each stem visualization
+const STEM_HEIGHT = 90 // Height of each stem visualization (reduced for 13" screens)
 
 export function StemVisualizer({
   stems,
@@ -47,7 +46,6 @@ export function StemVisualizer({
   onViewChange,
   onOverlayToggle,
   onSeek,
-  onStemClick,
   className,
 }: StemVisualizerProps) {
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
@@ -227,21 +225,6 @@ export function StemVisualizer({
                     height={STEM_HEIGHT}
                     className="opacity-80"
                   />
-                )}
-
-                {/* Click hint on hover */}
-                {onStemClick && (
-                  <div
-                    className="absolute inset-0 flex items-center justify-center bg-dark-500/0 opacity-0 transition-all hover:bg-dark-500/80 hover:opacity-100"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onStemClick(stem.type)
-                    }}
-                  >
-                    <div className="rounded-lg border border-accent-500/30 bg-accent-500/10 px-3 py-2 font-sans text-xs text-accent-400">
-                      Click to transcribe
-                    </div>
-                  </div>
                 )}
               </div>
             )
