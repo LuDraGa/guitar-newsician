@@ -10,6 +10,7 @@ import { LyricsPanel } from '@/components/studio/LyricsPanel'
 import { PlaybackControls } from '@/components/studio/PlaybackControls'
 import { ToastContainer } from '@/components/ui/Toast'
 import { JobTracker } from '@/components/ui/JobTracker'
+import { JobHistory } from '@/components/ui/JobHistory'
 
 // Types
 import {
@@ -59,7 +60,7 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
   const toast = useToast()
 
   // Job tracking
-  const { activeJobs, addJob, removeJob } = useJobTracker()
+  const { activeJobs, jobHistory, addJob, dismissJob, completeJob, failJob, clearHistory } = useJobTracker()
 
   // Audio playback hook (using simple HTMLAudioElement version)
   const audio = useSimpleAudioPlayback({
@@ -282,7 +283,7 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
         input_path: song.audio_file,
         output_format: 'wav',
       })
-      toast.info('Conversion Started', `Job ID: ${response.job_id.slice(-6)}`, 3000)
+      toast.info('Conversion Started', song.title, 3000)
       addJob(response.job_id)
     } catch (error) {
       console.error('[StudioPanel] Convert failed:', error)
@@ -297,7 +298,7 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
         input_path: inputPath,
         preset: 'full',
       })
-      toast.info('Analysis Started', `Running full analysis suite...`, 3000)
+      toast.info('Analysis Started', song.title, 3000)
       addJob(response.job_id)
     } catch (error) {
       console.error('[StudioPanel] Analysis failed:', error)
@@ -315,7 +316,7 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
         stems: ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'],
         shifts: 2,
       })
-      toast.info('Stem Separation Started', `Extracting 6 stems with 2 shifts...`, 3000)
+      toast.info('Stem Separation Started', song.title, 3000)
       addJob(response.job_id)
     } catch (error) {
       console.error('[StudioPanel] Stem separation failed:', error)
@@ -456,22 +457,46 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
       {/* Toast Notifications */}
       <ToastContainer toasts={toast.toasts} onClose={toast.removeToast} />
 
-      {/* Job Trackers */}
+      {/* Job Trackers and History */}
       <div className="fixed bottom-6 right-6 z-[9998] w-96 space-y-3">
-        {activeJobs.map((jobId) => (
-          <JobTracker
-            key={jobId}
-            jobId={jobId}
-            onComplete={(job) => {
-              const jobType = job.job_type?.replace('_', ' ') || 'Job'
-              toast.success('Job Completed', `${jobType} finished successfully`)
-              setTimeout(() => removeJob(jobId), 5000)
-            }}
-            onError={(job) => {
-              toast.error('Job Failed', job.error || 'Unknown error occurred')
-            }}
-          />
-        ))}
+        {/* Active job trackers */}
+        {activeJobs.map((jobId) => {
+          // Determine action name from job type
+          const getActionName = (jobType?: string) => {
+            if (!jobType) return undefined
+            const typeMap: Record<string, string> = {
+              'convert': 'Convert to WAV',
+              'analysis': 'Full Analysis',
+              'stem_separation': 'Stem Separation',
+            }
+            return typeMap[jobType] || jobType.replace('_', ' ')
+          }
+
+          return (
+            <JobTracker
+              key={jobId}
+              jobId={jobId}
+              songName={song.title}
+              actionName={undefined} // Will be set once job data loads
+              onComplete={(job) => {
+                const actionName = getActionName(job.job_type)
+                toast.success('Completed', `${song.title} - ${actionName}`)
+                completeJob(jobId, job.job_type, song.title, actionName)
+              }}
+              onError={(job) => {
+                const actionName = getActionName(job.job_type)
+                toast.error('Failed', `${song.title} - ${actionName}`)
+                failJob(jobId, job.job_type, job.error || undefined, song.title, actionName)
+              }}
+              onDismiss={(jobId) => {
+                dismissJob(jobId, song.title, 'Job')
+              }}
+            />
+          )
+        })}
+
+        {/* Job history - collapsible action log */}
+        <JobHistory history={jobHistory} onClear={clearHistory} />
       </div>
     </div>
   )
