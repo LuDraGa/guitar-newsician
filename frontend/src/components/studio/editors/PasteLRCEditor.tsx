@@ -2,13 +2,14 @@ import { cn } from '@/utils'
 import { useState, useEffect } from 'react'
 
 interface PasteLRCEditorProps {
+  songId: string
   initialContent?: string
   existingLRC?: string // Pre-populate with existing LRC if available
   onContentChange: (content: string) => void
   className?: string
 }
 
-export function PasteLRCEditor({ initialContent = '', existingLRC, onContentChange, className }: PasteLRCEditorProps) {
+export function PasteLRCEditor({ songId, initialContent = '', existingLRC, onContentChange, className }: PasteLRCEditorProps) {
   const [content, setContent] = useState(() => {
     // Prioritize existing LRC content
     if (existingLRC) return existingLRC
@@ -19,21 +20,25 @@ export function PasteLRCEditor({ initialContent = '', existingLRC, onContentChan
   const [validationMessage, setValidationMessage] = useState('')
 
   useEffect(() => {
-    // Auto-save to localStorage
+    // Auto-save to localStorage (song-specific)
     const timer = setTimeout(() => {
-      localStorage.setItem('lyrics-editor-draft-lrc', content)
+      localStorage.setItem(`lyrics-editor-draft-lrc-${songId}`, content)
     }, 500)
 
     return () => clearTimeout(timer)
-  }, [content])
+  }, [content, songId])
 
   useEffect(() => {
-    // Load draft on mount
-    const draft = localStorage.getItem('lyrics-editor-draft-lrc')
-    if (draft && !initialContent) {
+    // Load draft on mount or when songId changes
+    const draft = localStorage.getItem(`lyrics-editor-draft-lrc-${songId}`)
+    if (draft && !existingLRC && !initialContent) {
       setContent(draft)
+    } else if (existingLRC) {
+      setContent(existingLRC)
+    } else if (initialContent) {
+      setContent(initialContent)
     }
-  }, [])
+  }, [songId, existingLRC, initialContent])
 
   useEffect(() => {
     // Validate LRC format

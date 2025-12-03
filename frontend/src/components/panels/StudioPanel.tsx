@@ -166,7 +166,8 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
             if (lyricsData.synced) {
               const parsedLyrics = parseLRC(lyricsData.synced)
               setLyrics(parsedLyrics)
-            } else if (lyricsData.plain) {
+            }
+            if (lyricsData.plain) {
               setStaticLyrics(lyricsData.plain)
             }
           } catch (error) {
@@ -484,7 +485,8 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
                 if (lyricsData.synced) {
                   const parsedLyrics = parseLRC(lyricsData.synced)
                   setLyrics(parsedLyrics)
-                } else if (lyricsData.plain) {
+                }
+                if (lyricsData.plain) {
                   setStaticLyrics(lyricsData.plain)
                 }
                 toast.success('Lyrics Saved', 'Lyrics updated successfully')

@@ -2,30 +2,34 @@ import { cn } from '@/utils'
 import { useState, useEffect } from 'react'
 
 interface PlainTextEditorProps {
+  songId: string
   initialContent?: string
   onContentChange: (content: string) => void
   className?: string
 }
 
-export function PlainTextEditor({ initialContent = '', onContentChange, className }: PlainTextEditorProps) {
+export function PlainTextEditor({ songId, initialContent = '', onContentChange, className }: PlainTextEditorProps) {
   const [content, setContent] = useState(initialContent)
 
   useEffect(() => {
-    // Auto-save to localStorage to prevent data loss
+    // Auto-save to localStorage to prevent data loss (song-specific)
     const timer = setTimeout(() => {
-      localStorage.setItem('lyrics-editor-draft-plain', content)
+      localStorage.setItem(`lyrics-editor-draft-plain-${songId}`, content)
     }, 500)
 
     return () => clearTimeout(timer)
-  }, [content])
+  }, [content, songId])
 
   useEffect(() => {
-    // Load draft on mount
-    const draft = localStorage.getItem('lyrics-editor-draft-plain')
+    // Load draft on mount or when songId changes
+    const draft = localStorage.getItem(`lyrics-editor-draft-plain-${songId}`)
     if (draft && !initialContent) {
       setContent(draft)
+    } else {
+      // Use initialContent from server if available
+      setContent(initialContent)
     }
-  }, [])
+  }, [songId, initialContent])
 
   useEffect(() => {
     onContentChange(content)
