@@ -130,9 +130,9 @@ export function LyricsEditor({
       const result = await response.json()
       console.log('Save successful:', result)
 
-      // Clear localStorage drafts on successful save
-      localStorage.removeItem('lyrics-editor-draft-plain')
-      localStorage.removeItem('lyrics-editor-draft-lrc')
+      // Clear localStorage drafts on successful save (song-specific)
+      localStorage.removeItem(`lyrics-editor-draft-plain-${songId}`)
+      localStorage.removeItem(`lyrics-editor-draft-lrc-${songId}`)
 
       // Success
       onSave()
@@ -216,12 +216,14 @@ export function LyricsEditor({
       <div className="flex-1">
         {mode === 'plain' && (
           <PlainTextEditor
+            songId={songId}
             initialContent={initialStaticLyrics}
             onContentChange={handleContentChange}
           />
         )}
         {mode === 'paste-lrc' && (
           <PasteLRCEditor
+            songId={songId}
             existingLRC={existingLRCContent}
             onContentChange={handleContentChange}
           />
