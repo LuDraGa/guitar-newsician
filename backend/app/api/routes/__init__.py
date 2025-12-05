@@ -8,6 +8,7 @@ from .jobs import router as jobs_router
 from .config import router as config_router
 from .library import router as library_router
 from .lyrics import router as lyrics_router
+from .midi_editor import router as midi_editor_router
 
 __all__ = [
     "download_router",
@@ -18,4 +19,5 @@ __all__ = [
     "config_router",
     "library_router",
     "lyrics_router",
+    "midi_editor_router",
 ]

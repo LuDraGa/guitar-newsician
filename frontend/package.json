@@ -14,12 +14,17 @@
     "analyze": "vite-bundle-visualizer"
   },
   "dependencies": {
+    "@tonejs/midi": "^2.0.28",
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.24",
+    "lucide-react": "^0.555.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-resizable-panels": "^3.0.6",
     "react-router-dom": "^7.9.6",
+    "react-slider": "^2.0.6",
+    "react-tooltip": "^5.30.0",
+    "tone": "^15.1.22",
     "zod": "^3.22.4",
     "zustand": "^4.5.0"
   },

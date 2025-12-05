@@ -25,6 +25,11 @@ dependencies = [
     "openai>=2.7.1",
     "coremltools>=8.3.0",
     "dotenv>=0.9.9",
+    "langgraph>=1.0.4",
+    "music21>=9.9.1",
+    "librosa>=0.11.0",
+    "soundfile>=0.13.1",
+    "langchain-openai>=1.1.0",
 ]
 
 [dependency-groups]
