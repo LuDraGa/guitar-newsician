@@ -1,5 +1,11 @@
+import { useState, useEffect } from 'react'
 import { cn } from '@/utils'
 import { StemType } from '@/components/studio/types'
+import { TranscriptionSettings } from './TranscriptionSettings'
+import { MIDIStatus } from './MIDIStatus'
+import { AIEditor } from './AIEditor'
+import { PianoRollViewer } from './PianoRollViewer'
+import { midiEditorService, BasicPitchParams } from '@/services/midiEditorService'
 
 interface TranscriptionPanelProps {
   stemType: string
@@ -18,15 +24,124 @@ export function TranscriptionPanel({
   availableStems = [],
   className,
 }: TranscriptionPanelProps) {
+  // MIDI transcription state
+  const [midiStatus, setMidiStatus] = useState<'none' | 'transcribing' | 'transcribed' | 'error'>('none')
+  const [midiPath, setMidiPath] = useState<string | null>(null)
+  const [notesDetected, setNotesDetected] = useState<number | null>(null)
+
+  // Current stem (can be changed via dropdown)
+  const [currentStem, setCurrentStem] = useState<string>(stemType)
+
+  // Section selection for AI editing
+  const [selectedSection, setSelectedSection] = useState<{ start: number; end: number } | null>(null)
+
+  // Check MIDI status on mount and when stem changes
+  useEffect(() => {
+    checkMidiStatus()
+  }, [songId, currentStem])
+
+  // Check if MIDI file already exists
+  const checkMidiStatus = async () => {
+    try {
+      const response = await midiEditorService.checkStatus({
+        song_id: songId,
+        stem_name: currentStem,
+      })
+
+      if (response.exists && response.status === 'transcribed') {
+        setMidiStatus('transcribed')
+        setMidiPath(response.midi_path || null)
+        setNotesDetected(response.notes_detected || null)
+      } else {
+        setMidiStatus('none')
+        setMidiPath(null)
+        setNotesDetected(null)
+      }
+    } catch (error) {
+      console.error('Failed to check MIDI status:', error)
+      setMidiStatus('none')
+    }
+  }
+
+  // Handle stem change from dropdown
+  const handleStemChange = (newStem: string) => {
+    setCurrentStem(newStem)
+    // Clear section selection when changing stems
+    setSelectedSection(null)
+    // Notify parent if callback provided
+    if (onStemChange) {
+      onStemChange(newStem as StemType)
+    }
+    // Note: MIDI status will be updated by useEffect when currentStem changes
+  }
+
+  // Handle transcription
+  const handleTranscribe = async (params: BasicPitchParams) => {
+    setMidiStatus('transcribing')
+
+    try {
+      const response = await midiEditorService.transcribe({
+        song_id: songId,
+        stem_name: currentStem,
+        params,
+        force_retranscribe: midiStatus === 'transcribed', // Allow re-transcription
+      })
+
+      setMidiStatus('transcribed')
+      setMidiPath(response.midi_path)
+      setNotesDetected(response.notes_detected)
+
+      // TODO: Show success toast
+      console.log('Transcription successful:', response.message)
+    } catch (error) {
+      setMidiStatus('error')
+      console.error('Transcription failed:', error)
+      // TODO: Show error toast
+    }
+  }
+
+  // Handle AI edit approval
+  const handleApprove = async (sessionId: string) => {
+    try {
+      const response = await midiEditorService.approve({
+        change_session_id: sessionId,
+        approved: true,
+      })
+
+      console.log('Changes applied:', response.message)
+      // TODO: Show success toast
+      // TODO: Reload MIDI visualization if we add piano roll
+
+    } catch (error) {
+      console.error('Failed to apply changes:', error)
+      throw error
+    }
+  }
+
+  // Handle AI edit rejection
+  const handleReject = async (sessionId: string) => {
+    try {
+      await midiEditorService.approve({
+        change_session_id: sessionId,
+        approved: false,
+      })
+
+      console.log('Changes rejected')
+      setSelectedSection(null)
+    } catch (error) {
+      console.error('Failed to reject changes:', error)
+    }
+  }
+
   return (
     <div className={cn('flex h-full flex-col', className)}>
       {/* Header */}
       <div className="flex items-center justify-between border-b border-white/5 p-4">
         <div>
           <h3 className="font-display text-lg font-bold capitalize text-white">
-            {stemType} Transcription
+            {currentStem} Transcription
           </h3>
-          <p className="font-mono text-xs text-gray-500">AI-generated tabs & notation</p>
+          <p className="font-mono text-xs text-gray-500">AI-powered MIDI transcription & editing</p>
         </div>
 
         {/* Close Button */}
@@ -46,74 +161,45 @@ export function TranscriptionPanel({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {/* Transcription Options */}
-        <div className="mb-6 space-y-3">
-          <button className="w-full rounded-lg border border-white/10 bg-dark-300/30 p-3 text-left transition-all hover:border-accent-500/30 hover:bg-accent-500/10">
-            <div className="mb-1 font-display text-sm font-semibold text-white">
-              Guitar Tabs
-            </div>
-            <div className="font-mono text-xs text-gray-500">Standard notation & tablature</div>
-          </button>
+      <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        {/* Transcription Settings */}
+        <TranscriptionSettings
+          songId={songId}
+          stemName={currentStem}
+          availableStems={availableStems}
+          onStemChange={handleStemChange}
+          onTranscribe={handleTranscribe}
+          status={midiStatus}
+        />
 
-          <button className="w-full rounded-lg border border-white/10 bg-dark-300/30 p-3 text-left transition-all hover:border-accent-500/30 hover:bg-accent-500/10">
-            <div className="mb-1 font-display text-sm font-semibold text-white">
-              Piano Roll
-            </div>
-            <div className="font-mono text-xs text-gray-500">MIDI visualization</div>
-          </button>
+        {/* MIDI Status Display */}
+        {midiStatus !== 'none' && (
+          <MIDIStatus
+            status={midiStatus}
+            midiPath={midiPath || undefined}
+            notesDetected={notesDetected || undefined}
+          />
+        )}
 
-          <button className="w-full rounded-lg border border-white/10 bg-dark-300/30 p-3 text-left transition-all hover:border-accent-500/30 hover:bg-accent-500/10">
-            <div className="mb-1 font-display text-sm font-semibold text-white">
-              Chord Chart
-            </div>
-            <div className="font-mono text-xs text-gray-500">Chord progressions</div>
-          </button>
-        </div>
+        {/* Piano Roll Viewer */}
+        {midiStatus === 'transcribed' && midiPath && (
+          <PianoRollViewer
+            midiPath={midiPath}
+            onSectionSelect={(start, end) => setSelectedSection({ start, end })}
+            selectedSection={selectedSection}
+          />
+        )}
 
-        {/* Transcription Preview Placeholder */}
-        <div className="rounded-xl border border-white/10 bg-dark-300/30 p-6">
-          <div className="mb-4 text-center">
-            <svg
-              className="mx-auto h-12 w-12 text-gray-700"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-              />
-            </svg>
-            <p className="mt-3 font-sans text-sm text-gray-400">
-              Transcription UI coming soon
-            </p>
-          </div>
-        </div>
-
-        {/* AI Assistant */}
-        <div className="mt-6">
-          <h4 className="mb-3 font-display text-sm font-semibold text-white">
-            AI Tab Editor
-          </h4>
-          <div className="rounded-xl border border-white/10 bg-dark-300/30 p-4">
-            <p className="mb-3 font-mono text-xs text-gray-500">
-              Ask AI to edit or improve transcription
-            </p>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="e.g., 'Fix measure 4'"
-                className="flex-1 rounded-lg border border-white/10 bg-dark-400/50 px-3 py-2 font-mono text-xs text-white placeholder-gray-600 outline-none focus:border-accent-500/30"
-              />
-              <button className="rounded-lg bg-accent-500/20 px-3 py-2 font-mono text-xs text-accent-400 transition-colors hover:bg-accent-500/30">
-                Send
-              </button>
-            </div>
-          </div>
-        </div>
+        {/* AI Editor (shows when section is selected OR always if transcribed) */}
+        {midiStatus === 'transcribed' && (
+          <AIEditor
+            songId={songId}
+            stemName={currentStem}
+            section={selectedSection}
+            onApprove={handleApprove}
+            onReject={handleReject}
+          />
+        )}
       </div>
     </div>
   )

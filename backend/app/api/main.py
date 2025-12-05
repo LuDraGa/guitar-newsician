@@ -18,6 +18,7 @@ from .routes import (
     config_router,
     library_router,
     lyrics_router,
+    midi_editor_router,
 )
 
 # Load environment variables
@@ -79,6 +80,7 @@ app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(config_router, prefix="/api/v1")
 app.include_router(library_router, prefix="/api/v1")
 app.include_router(lyrics_router, prefix="/api/v1")
+app.include_router(midi_editor_router, prefix="/api/v1")
 
 
 @app.get("/")
