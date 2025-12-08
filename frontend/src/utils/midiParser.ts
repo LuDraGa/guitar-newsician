@@ -29,8 +29,8 @@ export async function parseMIDIFile(midiPath: string): Promise<MIDIParsedData> {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001'
     const fullUrl = midiPath.startsWith('http') ? midiPath : `${API_URL}${midiPath}`
 
-    // Fetch MIDI file
-    const response = await fetch(fullUrl)
+    // Fetch MIDI file (disable cache to ensure we get updated file after AI edits)
+    const response = await fetch(fullUrl, { cache: 'no-cache' })
     if (!response.ok) {
       throw new Error(`Failed to fetch MIDI file: ${response.statusText}`)
     }

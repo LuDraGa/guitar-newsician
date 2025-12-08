@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Play, Pause, Square, ZoomIn, ZoomOut, Music2, Navigation, Eye } from 'lucide-react'
 import * as Tone from 'tone'
 import { parseMIDIFile, MIDINote, MIDIParsedData, getNoteColor } from '@/utils/midiParser'
+import { cn } from '@/utils'
 
 interface PianoRollViewerProps {
   midiPath: string
@@ -47,17 +48,44 @@ export function PianoRollViewer({
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState<{ x: number; time: number } | null>(null)
   const [dragCurrent, setDragCurrent] = useState<{ x: number; time: number } | null>(null)
+  const [isShiftPressed, setIsShiftPressed] = useState(false)
 
   // Constants for rendering
   const PIXELS_PER_SECOND = 100 * zoom
   const NOTE_HEIGHT = 8
   const PIANO_KEY_WIDTH = 60
-  const CANVAS_HEIGHT = 600
+  const CANVAS_HEIGHT = 420
+
+  // Calculate total timeline width based on MIDI duration and zoom
+  const totalWidth = midiData ? (midiData.duration * PIXELS_PER_SECOND) + 100 : 0
 
   // Load MIDI file
   useEffect(() => {
     loadMIDI()
   }, [midiPath])
+
+  // Cleanup on unmount - stop playback and cancel scheduled notes
+  useEffect(() => {
+    return () => {
+      // Stop playback
+      setIsPlaying(false)
+
+      // Cancel animation frame
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
+
+      // Stop and cancel all Tone.js events
+      Tone.Transport.stop()
+      Tone.Transport.cancel()
+
+      // Release all notes
+      if (synthRef.current) {
+        synthRef.current.releaseAll()
+      }
+    }
+  }, [])
 
   // Track container width for responsive canvas (scrollable timeline area only)
   useEffect(() => {
@@ -73,6 +101,29 @@ export function PianoRollViewer({
     updateWidth()
     window.addEventListener('resize', updateWidth)
     return () => window.removeEventListener('resize', updateWidth)
+  }, [])
+
+  // Track shift key state for cursor feedback
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        setIsShiftPressed(true)
+      }
+    }
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') {
+        setIsShiftPressed(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
   }, [])
 
   // Handle scroll events - detect manual scrolling
@@ -441,9 +492,19 @@ export function PianoRollViewer({
     const x = e.clientX - rect.left
     const time = x / PIXELS_PER_SECOND
 
-    setIsDragging(true)
-    setDragStart({ x, time })
-    setDragCurrent({ x, time })
+    // Shift + drag = select region for AI editing
+    if (e.shiftKey) {
+      setIsDragging(true)
+      setDragStart({ x, time })
+      setDragCurrent({ x, time })
+    } else {
+      // Regular click = seek to position
+      setCurrentTime(time)
+      // Stop playback on seek (common DAW behavior)
+      if (isPlaying) {
+        handlePause()
+      }
+    }
   }
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -531,7 +592,7 @@ export function PianoRollViewer({
   }
 
   return (
-    <div className={className}>
+    <div className={cn('w-full relative', className)}>
       <style>{`
         .piano-roll-container::-webkit-scrollbar {
           height: 12px;
@@ -549,7 +610,7 @@ export function PianoRollViewer({
           background: #666;
         }
       `}</style>
-      <div className="rounded-xl border border-white/10 bg-dark-300/30 p-4">
+      <div className="rounded-xl border border-white/10 bg-dark-300/30 p-4 w-full relative overflow-hidden">
         {/* Header */}
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -638,19 +699,21 @@ export function PianoRollViewer({
         </div>
 
         {/* Canvas - Two-panel layout: fixed piano keys + scrollable timeline */}
-        <div className="flex rounded-lg border border-white/5 bg-black overflow-hidden">
+        <div className="flex rounded-lg border border-white/5 bg-black overflow-hidden w-full max-w-full relative isolate">
           {/* Left: Fixed piano keys */}
-          <div className="flex-shrink-0">
+          <div className="flex-shrink-0 relative">
             <canvas ref={pianoKeysCanvasRef} className="block" />
           </div>
 
           {/* Right: Scrollable timeline */}
           <div
             ref={containerRef}
-            className="relative overflow-x-auto overflow-y-hidden piano-roll-container flex-1"
+            className="relative overflow-x-auto overflow-y-hidden piano-roll-container flex-1 min-w-0"
             style={{ maxHeight: CANVAS_HEIGHT }}
           >
-            <div className="relative">
+            <div className="relative"
+              style={{ height: CANVAS_HEIGHT, width: totalWidth }}
+            >
               {/* Timeline canvas - rendered once on zoom/data changes */}
               <canvas ref={timelineCanvasRef} className="block" />
 
@@ -687,8 +750,8 @@ export function PianoRollViewer({
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
-                className="absolute top-0 left-0 w-full cursor-crosshair"
-                style={{ height: CANVAS_HEIGHT }}
+                className={cn("absolute top-0 left-0", isShiftPressed ? "cursor-crosshair" : "cursor-pointer")}
+                style={{ height: CANVAS_HEIGHT, width: totalWidth }}
               />
             </div>
           </div>
@@ -697,13 +760,20 @@ export function PianoRollViewer({
         {/* Instructions */}
         <div className="mt-2 flex items-center justify-between">
           <p className="font-mono text-[10px] text-gray-600">
-            Scroll horizontally to view the full timeline • Click and drag to select a time range for AI editing
+            Click to seek • <span className={isShiftPressed ? "text-accent-400 font-semibold" : ""}>Shift + drag to select region for AI editing</span>
           </p>
-          {autoFollow && isPlaying && (
-            <p className="font-mono text-[10px] text-green-400">
-              ● Auto-following playback
-            </p>
-          )}
+          <div className="flex items-center gap-3">
+            {isShiftPressed && (
+              <span className="font-mono text-[10px] text-accent-400 font-semibold">
+                ⇧ Selection mode active
+              </span>
+            )}
+            {autoFollow && isPlaying && (
+              <p className="font-mono text-[10px] text-green-400">
+                ● Auto-following playback
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>

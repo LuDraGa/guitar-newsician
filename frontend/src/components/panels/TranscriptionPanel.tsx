@@ -3,7 +3,7 @@ import { cn } from '@/utils'
 import { StemType } from '@/components/studio/types'
 import { TranscriptionSettings } from './TranscriptionSettings'
 import { MIDIStatus } from './MIDIStatus'
-import { AIEditor } from './AIEditor'
+import { AIEditor } from './AIEditorWithChat'
 import { PianoRollViewer } from './PianoRollViewer'
 import { midiEditorService, BasicPitchParams } from '@/services/midiEditorService'
 
@@ -109,8 +109,20 @@ export function TranscriptionPanel({
       })
 
       console.log('Changes applied:', response.message)
+
+      // Force reload the MIDI by updating the path with cache buster
+      // This triggers PianoRollViewer to reload the updated MIDI file
+      if (midiPath) {
+        const url = new URL(midiPath, window.location.origin)
+        url.searchParams.set('t', Date.now().toString())
+        // Extract just the path + search params (without origin)
+        setMidiPath(url.pathname + url.search)
+      }
+
+      // Clear selection after successful apply
+      setSelectedSection(null)
+
       // TODO: Show success toast
-      // TODO: Reload MIDI visualization if we add piano roll
 
     } catch (error) {
       console.error('Failed to apply changes:', error)
@@ -134,9 +146,9 @@ export function TranscriptionPanel({
   }
 
   return (
-    <div className={cn('flex h-full flex-col', className)}>
+    <div className={cn('flex h-full flex-col w-full relative overflow-hidden', className)}>
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/5 p-4">
+      <div className="flex items-center justify-between border-b border-white/5 p-4 flex-shrink-0 relative z-10">
         <div>
           <h3 className="font-display text-lg font-bold capitalize text-white">
             {currentStem} Transcription
@@ -160,46 +172,54 @@ export function TranscriptionPanel({
         </button>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
-        {/* Transcription Settings */}
-        <TranscriptionSettings
-          songId={songId}
-          stemName={currentStem}
-          availableStems={availableStems}
-          onStemChange={handleStemChange}
-          onTranscribe={handleTranscribe}
-          status={midiStatus}
-        />
-
-        {/* MIDI Status Display */}
-        {midiStatus !== 'none' && (
-          <MIDIStatus
-            status={midiStatus}
-            midiPath={midiPath || undefined}
-            notesDetected={notesDetected || undefined}
-          />
-        )}
-
-        {/* Piano Roll Viewer */}
-        {midiStatus === 'transcribed' && midiPath && (
-          <PianoRollViewer
-            midiPath={midiPath}
-            onSectionSelect={(start, end) => setSelectedSection({ start, end })}
-            selectedSection={selectedSection}
-          />
-        )}
-
-        {/* AI Editor (shows when section is selected OR always if transcribed) */}
-        {midiStatus === 'transcribed' && (
-          <AIEditor
+      {/* Content - Two Column Layout */}
+      <div className="flex-1 grid grid-cols-[300px_1fr] gap-4 overflow-hidden p-4">
+        {/* Left Column: Settings & Status */}
+        <div className="flex flex-col gap-4 overflow-y-auto">
+          {/* Transcription Settings */}
+          <TranscriptionSettings
             songId={songId}
             stemName={currentStem}
-            section={selectedSection}
-            onApprove={handleApprove}
-            onReject={handleReject}
+            availableStems={availableStems}
+            onStemChange={handleStemChange}
+            onTranscribe={handleTranscribe}
+            status={midiStatus}
           />
-        )}
+
+          {/* MIDI Status Display */}
+          {midiStatus !== 'none' && (
+            <MIDIStatus
+              status={midiStatus}
+              midiPath={midiPath || undefined}
+              notesDetected={notesDetected || undefined}
+            />
+          )}
+        </div>
+
+        {/* Right Column: Piano Roll & AI Editor */}
+        <div className="flex flex-col gap-4 overflow-y-auto overflow-x-hidden min-w-0">
+          {/* Piano Roll Viewer */}
+          {midiStatus === 'transcribed' && midiPath && (
+            <div className="min-w-0 max-w-full">
+              <PianoRollViewer
+                midiPath={midiPath}
+                onSectionSelect={(start, end) => setSelectedSection({ start, end })}
+                selectedSection={selectedSection}
+              />
+            </div>
+          )}
+
+          {/* AI Editor (shows when section is selected OR always if transcribed) */}
+          {midiStatus === 'transcribed' && (
+            <AIEditor
+              songId={songId}
+              stemName={currentStem}
+              section={selectedSection}
+              onApprove={handleApprove}
+              onReject={handleReject}
+            />
+          )}
+        </div>
       </div>
     </div>
   )

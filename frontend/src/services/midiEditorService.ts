@@ -39,9 +39,72 @@ export interface EditRequest {
   instrument_idx?: number
 }
 
+// Typed parameter interfaces matching backend schemas
+export interface MergeNotesParams {
+  note_indices: number[]
+  keep_first: boolean
+}
+
+export interface AddPitchBendParams {
+  time: number
+  semitones: number
+}
+
+export interface AddPitchBendSequenceParams {
+  start_time: number
+  end_time: number
+  start_semitones: number
+  end_semitones: number
+  num_points: number
+}
+
+export interface ModifyNoteParams {
+  note_idx: number
+  pitch?: number
+  start?: number
+  end?: number
+  velocity?: number
+}
+
+export interface AddNoteParams {
+  pitch: number
+  start: number
+  end: number
+  velocity: number
+}
+
+export interface DeleteNoteParams {
+  note_idx: number
+}
+
+// Discriminated union type for all changes
+export type ProposedChangeParams =
+  | MergeNotesParams
+  | AddPitchBendParams
+  | AddPitchBendSequenceParams
+  | ModifyNoteParams
+  | AddNoteParams
+  | DeleteNoteParams
+
 export interface ProposedChange {
-  type: string
-  parameters: Record<string, any>
+  type: 'merge_notes' | 'add_pitch_bend' | 'add_pitch_bend_sequence' | 'modify_note' | 'add_note' | 'delete_note'
+  parameters?: ProposedChangeParams // Optional for backwards compatibility
+  // Flattened parameters (for new structured output)
+  note_indices?: number[]
+  keep_first?: boolean
+  time?: number
+  semitones?: number
+  start_time?: number
+  end_time?: number
+  start_semitones?: number
+  end_semitones?: number
+  num_points?: number
+  note_idx?: number
+  pitch?: number
+  start?: number
+  end?: number
+  velocity?: number
+  // Common fields
   description: string
   reasoning: string
 }
@@ -82,6 +145,29 @@ export interface Preset {
 
 export interface PresetsResponse {
   presets: Record<string, Preset>
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatRequest {
+  song_id: string
+  stem_name?: string
+  query: string
+  section_start?: number
+  section_end?: number
+  conversation_history?: ChatMessage[]
+}
+
+export interface ChatResponse {
+  response: string
+  structured_data?: {
+    notes_count?: number
+    chords_detected?: number
+    chord_names?: string[]
+  }
 }
 
 class MIDIEditorService {
@@ -145,6 +231,13 @@ class MIDIEditorService {
     const queryParams = params.stem_name ? `?stem_name=${encodeURIComponent(params.stem_name)}` : ''
     return this.request<any>(`/status/${params.song_id}${queryParams}`, {
       method: 'GET',
+    })
+  }
+
+  async chat(request: ChatRequest): Promise<ChatResponse> {
+    return this.request<ChatResponse>('/chat', {
+      method: 'POST',
+      body: JSON.stringify(request),
     })
   }
 }

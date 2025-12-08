@@ -80,6 +80,28 @@ class ApprovalResponse(BaseModel):
     message: str
 
 
+class ChatMessage(BaseModel):
+    """A single chat message."""
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    """Request to chat about MIDI."""
+    song_id: str
+    stem_name: Optional[str] = None
+    query: str
+    section_start: Optional[float] = None
+    section_end: Optional[float] = None
+    conversation_history: Optional[List[ChatMessage]] = None
+
+
+class ChatResponse(BaseModel):
+    """Response from MIDI chat."""
+    response: str
+    structured_data: Optional[Dict[str, Any]] = None
+
+
 # Helper functions
 def get_audio_path(song_id: str, stem_name: Optional[str] = None) -> str:
     """
@@ -383,7 +405,19 @@ async def approve_midi_changes(request: ApprovalRequest):
 
         for change in proposed_changes:
             change_type = change.get("type")
-            params = change.get("parameters", {})
+
+            # Support both formats: nested parameters and flattened (new structured output)
+            # New format: all fields at top level (from Pydantic model_dump)
+            # Old format: nested under "parameters" key
+            if "parameters" in change:
+                # Old format (nested)
+                params = change["parameters"]
+            else:
+                # New format (flattened) - extract all non-common fields and filter out None
+                params = {
+                    k: v for k, v in change.items()
+                    if k not in ["type", "description", "reasoning"] and v is not None
+                }
 
             try:
                 if change_type == "add_pitch_bend_sequence":
@@ -439,6 +473,8 @@ async def approve_midi_changes(request: ApprovalRequest):
 
             except Exception as e:
                 print(f"Warning: Failed to apply change {change_type}: {e}")
+                print(f"Change data: {change}")
+                print(f"Extracted params: {params}")
 
         # Save modified MIDI
         # Create backup first
@@ -539,6 +575,119 @@ async def download_midi(song_id: str, stem_name: Optional[str] = None):
         raise
     except Exception as e:
         raise HTTPException(500, f"Error downloading MIDI: {str(e)}")
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat_about_midi(request: ChatRequest):
+    """
+    Conversational MIDI analysis - no modifications.
+
+    Chat about MIDI content, get analysis, discover patterns.
+    This endpoint doesn't modify MIDI files.
+    """
+    try:
+        # Get MIDI path and analyze
+        midi_path = get_midi_path(request.song_id, request.stem_name)
+
+        # Import analysis tools
+        from ...editors.midi_agent_editor.tools.midi_tools import MIDIAnalyzer
+        from langchain_openai import ChatOpenAI
+        from langchain_core.messages import SystemMessage, HumanMessage
+
+        # Analyze MIDI section (or full MIDI if no section specified)
+        analyzer = MIDIAnalyzer()
+
+        if request.section_start is not None and request.section_end is not None:
+            # Analyze specific section
+            midi_analysis = analyzer.analyze_section(
+                midi_path=midi_path,
+                start_time=request.section_start,
+                end_time=request.section_end,
+                instrument_idx=0
+            )
+            section_context = f"Selected section: {request.section_start:.2f}s - {request.section_end:.2f}s"
+        else:
+            # Analyze full MIDI
+            midi_analysis = analyzer.analyze_section(
+                midi_path=midi_path,
+                start_time=0,
+                end_time=999999,  # Large number to get all notes
+                instrument_idx=0
+            )
+            section_context = "Analyzing entire MIDI file"
+
+        # Build conversation history for context (keep last 4 messages for speed)
+        conversation_messages = []
+        if request.conversation_history:
+            # Only keep recent context to speed up responses
+            recent_history = request.conversation_history[-4:]
+            for msg in recent_history:
+                if msg.role == "user":
+                    conversation_messages.append(HumanMessage(content=msg.content))
+                else:
+                    conversation_messages.append(SystemMessage(content=msg.content))
+
+        # Create LLM - use faster model for chat (gpt-4o-mini is already fast, but lower temperature)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
+
+        # System prompt - music theory expert, conversational
+        system_prompt = """You are an expert music theorist and MIDI analyst. Your role is to help users understand their MIDI files through conversation.
+
+You can:
+- Analyze harmonic content (chords, progressions, keys)
+- Identify melodic patterns and motifs
+- Explain musical structure (verse, chorus, sections)
+- Discuss rhythm and timing
+- Compare different sections
+- Provide music theory insights
+
+Be conversational, educational, and specific. Reference timestamps when discussing sections.
+If asked about patterns, list them with specific locations.
+If asked about chords, provide chord names and progressions.
+
+DO NOT propose MIDI edits - you're here to analyze and discuss, not modify."""
+
+        # Prepare concise MIDI data summary
+        notes_summary = [{'pitch': n.pitch_name, 'start': n.start, 'duration': n.duration} for n in midi_analysis['notes'][:15]]
+        chords_summary = [c.chord_name for c in midi_analysis['chords'][:12]]
+
+        # Build user prompt with MIDI analysis data
+        user_prompt = f"""
+{section_context}
+
+User's Question: "{request.query}"
+
+MIDI Summary:
+- Total notes: {len(midi_analysis['notes'])}
+- Sample notes: {notes_summary}
+- Chords detected: {len(midi_analysis['chords'])}
+- Chord progression: {chords_summary}
+- Pitch bends: {len(midi_analysis['pitch_bends'])}
+
+Analysis: {midi_analysis['description']}
+
+Answer concisely and conversationally. Reference timestamps when relevant.
+"""
+
+        # Combine messages
+        messages = [SystemMessage(content=system_prompt)] + conversation_messages + [HumanMessage(content=user_prompt)]
+
+        # Get response
+        response = llm.invoke(messages)
+
+        return ChatResponse(
+            response=response.content,
+            structured_data={
+                "notes_count": len(midi_analysis['notes']),
+                "chords_detected": len(midi_analysis['chords']),
+                "chord_names": [c.chord_name for c in midi_analysis['chords'][:20]],
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Chat error: {str(e)}")
 
 
 @router.get("/presets")
