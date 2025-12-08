@@ -32,11 +32,15 @@ export function AIEditor({
   const [error, setError] = useState<string | null>(null)
 
   const examplePrompts = [
-    'This section has a string bend',
-    'Two notes should be one note',
-    'Missing vibrato here',
-    'Wrong notes in this section',
+    'This section has a guitar bend that wasn\'t detected',
+    'These notes should be merged into one sustained note',
+    'The timing of this note is slightly off',
+    'Wrong pitch detected here',
+    'Missing a note that I can hear in the audio',
+    'This note shouldn\'t be here'
   ]
+
+  const [showWhatCanAIFix, setShowWhatCanAIFix] = useState(false)
 
   const handleRequestEdit = async () => {
     if (!section || !issueDescription.trim()) return
@@ -129,6 +133,75 @@ export function AIEditor({
         {/* No Changes Requested State */}
         {!sessionId && (
           <>
+            {/* What can AI fix - Collapsible Guide */}
+            <div className="mb-4 rounded-lg border border-blue-500/20 bg-blue-500/5">
+              <button
+                onClick={() => setShowWhatCanAIFix(!showWhatCanAIFix)}
+                className="flex w-full items-center justify-between p-3 text-left transition-colors hover:bg-blue-500/10"
+              >
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-3.5 w-3.5 text-blue-400" />
+                  <span className="font-mono text-xs font-semibold text-blue-400">
+                    What can the AI fix?
+                  </span>
+                </div>
+                <svg
+                  className={`h-4 w-4 text-blue-400 transition-transform ${showWhatCanAIFix ? 'rotate-180' : ''}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showWhatCanAIFix && (
+                <div className="border-t border-blue-500/20 p-3 space-y-2">
+                  <div className="rounded bg-dark-400/30 p-2">
+                    <div className="font-mono text-xs font-semibold text-white mb-1">
+                      🎸 Missing Pitch Bends/Slides
+                    </div>
+                    <div className="font-mono text-[10px] text-gray-400">
+                      "This section has a guitar bend" → AI adds smooth pitch bend
+                    </div>
+                  </div>
+
+                  <div className="rounded bg-dark-400/30 p-2">
+                    <div className="font-mono text-xs font-semibold text-white mb-1">
+                      🎵 Incorrect Note Splitting
+                    </div>
+                    <div className="font-mono text-[10px] text-gray-400">
+                      "Two notes should be one note" → AI merges them into sustained note
+                    </div>
+                  </div>
+
+                  <div className="rounded bg-dark-400/30 p-2">
+                    <div className="font-mono text-xs font-semibold text-white mb-1">
+                      ⏱️ Timing Issues
+                    </div>
+                    <div className="font-mono text-[10px] text-gray-400">
+                      "Note starts too early" → AI adjusts note timing
+                    </div>
+                  </div>
+
+                  <div className="rounded bg-dark-400/30 p-2">
+                    <div className="font-mono text-xs font-semibold text-white mb-1">
+                      🎹 Wrong/Missing Notes
+                    </div>
+                    <div className="font-mono text-[10px] text-gray-400">
+                      "Wrong pitch" or "Missing note" → AI corrects or adds notes
+                    </div>
+                  </div>
+
+                  <div className="mt-2 rounded border border-blue-500/20 bg-blue-500/5 p-2">
+                    <div className="font-mono text-[10px] text-blue-400">
+                      💡 Tip: Describe what you <span className="font-semibold">hear in the audio</span> vs what's in the MIDI. The AI will analyze both and propose fixes.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Issue Description Input */}
             <div className="mb-3">
               <label className="mb-1.5 block font-mono text-xs text-gray-400">
@@ -137,7 +210,7 @@ export function AIEditor({
               <textarea
                 value={issueDescription}
                 onChange={e => setIssueDescription(e.target.value)}
-                placeholder="e.g., 'This section has a string bend that wasn't detected'"
+                placeholder="e.g., 'This section has a guitar bend that wasn't detected'"
                 rows={3}
                 className="w-full rounded-lg border border-white/10 bg-dark-400/50 px-3 py-2 font-mono text-sm text-white placeholder-gray-600 outline-none focus:border-accent-500/30"
               />
@@ -194,29 +267,53 @@ export function AIEditor({
               <div className="font-mono text-xs font-semibold text-white">
                 Proposed Changes ({proposedChanges.length})
               </div>
-              {proposedChanges.map((change, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-lg border border-green-500/30 bg-green-500/10 p-3"
-                >
-                  <div className="mb-1 flex items-start justify-between">
-                    <div className="font-mono text-xs font-semibold text-green-400">
-                      {change.type.replace(/_/g, ' ').toUpperCase()}
+              {proposedChanges.map((change, idx) => {
+                // Helper to get operation icon
+                const getOperationIcon = (type: string) => {
+                  switch (type) {
+                    case 'add_pitch_bend_sequence':
+                    case 'add_pitch_bend':
+                      return '🎸'
+                    case 'merge_notes':
+                      return '🎵'
+                    case 'modify_note':
+                      return '⏱️'
+                    case 'add_note':
+                      return '➕'
+                    case 'delete_note':
+                      return '🗑️'
+                    default:
+                      return '✨'
+                  }
+                }
+
+                return (
+                  <div
+                    key={idx}
+                    className="rounded-lg border border-green-500/30 bg-green-500/10 p-3"
+                  >
+                    <div className="mb-1 flex items-start justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span>{getOperationIcon(change.type)}</span>
+                        <div className="font-mono text-xs font-semibold text-green-400">
+                          {change.type.replace(/_/g, ' ').toUpperCase()}
+                        </div>
+                      </div>
+                      <div className="rounded-full bg-green-500/20 px-2 py-0.5 font-mono text-[10px] text-green-400">
+                        #{idx + 1}
+                      </div>
                     </div>
-                    <div className="rounded-full bg-green-500/20 px-2 py-0.5 font-mono text-[10px] text-green-400">
-                      #{idx + 1}
-                    </div>
-                  </div>
-                  <p className="mb-2 font-mono text-xs text-gray-300">
-                    {change.description}
-                  </p>
-                  {change.reasoning && (
-                    <p className="font-mono text-[10px] text-gray-500">
-                      Reason: {change.reasoning}
+                    <p className="mb-2 font-mono text-xs text-gray-300">
+                      {change.description}
                     </p>
-                  )}
-                </div>
-              ))}
+                    {change.reasoning && (
+                      <p className="font-mono text-[10px] text-gray-500">
+                        💡 {change.reasoning}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
             </div>
 
             {/* Approve/Reject Buttons */}

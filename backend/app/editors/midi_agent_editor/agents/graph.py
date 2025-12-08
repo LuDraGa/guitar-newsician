@@ -8,6 +8,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from .state import MIDIEditorState
+from .schemas import DiscrepancyAnalysis, MIDIEditProposal
 from ..tools.audio_tools import AudioAnalyzer
 from ..tools.midi_tools import MIDIAnalyzer
 from ..tools.midi_editor import MIDIEditor
@@ -68,12 +69,16 @@ class MIDIEditorWorkflow:
             audio_results = self.audio_analyzer.analyze_section(
                 audio_path=state["audio_path"],
                 start_time=state["section_start"],
-                end_time=state["section_end"]
+                end_time=state["section_end"],
             )
 
             state["audio_features"] = {
                 "pitch_points": [
-                    {"time": p.time, "frequency": p.frequency, "confidence": p.confidence}
+                    {
+                        "time": p.time,
+                        "frequency": p.frequency,
+                        "confidence": p.confidence,
+                    }
                     for p in audio_results["pitch_points"]
                 ],
                 "onsets": [
@@ -87,7 +92,7 @@ class MIDIEditorWorkflow:
                         "start_freq": b.start_freq,
                         "end_freq": b.end_freq,
                         "semitones": b.semitones,
-                        "direction": b.direction
+                        "direction": b.direction,
                     }
                     for b in audio_results["bends"]
                 ],
@@ -96,11 +101,11 @@ class MIDIEditorWorkflow:
                         "start_time": v.start_time,
                         "end_time": v.end_time,
                         "rate": v.rate,
-                        "extent": v.extent
+                        "extent": v.extent,
                     }
                     for v in audio_results["vibratos"]
                 ],
-                "description": audio_results["description"]
+                "description": audio_results["description"],
             }
 
         except Exception as e:
@@ -121,7 +126,7 @@ class MIDIEditorWorkflow:
                 midi_path=state["midi_path"],
                 start_time=state["section_start"],
                 end_time=state["section_end"],
-                instrument_idx=state.get("instrument_idx", 0)
+                instrument_idx=state.get("instrument_idx", 0),
             )
 
             state["midi_features"] = {
@@ -133,7 +138,7 @@ class MIDIEditorWorkflow:
                         "start": n.start,
                         "end": n.end,
                         "duration": n.duration,
-                        "velocity": n.velocity
+                        "velocity": n.velocity,
                     }
                     for n in midi_results["notes"]
                 ],
@@ -142,7 +147,7 @@ class MIDIEditorWorkflow:
                         "time": c.time,
                         "duration": c.duration,
                         "notes": c.notes,
-                        "chord_name": c.chord_name
+                        "chord_name": c.chord_name,
                     }
                     for c in midi_results["chords"]
                 ],
@@ -150,7 +155,7 @@ class MIDIEditorWorkflow:
                     {"time": pb.time, "value": pb.value, "semitones": pb.semitones}
                     for pb in midi_results["pitch_bends"]
                 ],
-                "description": midi_results["description"]
+                "description": midi_results["description"],
             }
 
         except Exception as e:
@@ -161,56 +166,85 @@ class MIDIEditorWorkflow:
     def _comparison_node(self, state: MIDIEditorState) -> Dict[str, Any]:
         """
         Comparison agent node.
-        Uses LLM to identify discrepancies between audio and MIDI.
+        Uses LLM with structured output to identify discrepancies between audio and MIDI.
         """
         try:
             state["current_step"] = "Comparing audio and MIDI features"
 
+            # Create structured output LLM
+            structured_llm = self.llm.with_structured_output(
+                schema=DiscrepancyAnalysis,
+                method="json_schema",
+                strict=True
+            )
+
             # Prepare prompt for LLM
             system_prompt = """You are an expert music transcription analyst.
 Your task is to compare audio analysis features with MIDI data and identify discrepancies.
-Focus on:
-1. Missing pitch bends (audio shows bend, MIDI has discrete notes)
-2. Incorrect note splitting (audio shows one note, MIDI shows multiple)
-3. Timing misalignments
-4. Missing articulations (vibrato, slides, etc.)
 
-Provide a structured analysis of discrepancies with severity levels."""
+Common issues to look for:
+1. **Missing pitch bends**: Audio shows pitch bend/slide, MIDI has discrete notes
+2. **Incorrect note splitting**: Audio shows one sustained note, MIDI shows multiple short notes
+3. **Timing misalignments**: Note starts/ends don't match audio onsets
+4. **Missing articulations**: Vibrato, slides, or other expression not captured
+5. **Wrong pitches**: MIDI pitch doesn't match detected audio frequency
+6. **Extra/missing notes**: MIDI has notes not present in audio or vice versa
+
+Analyze the data carefully and provide:
+- A clear summary of what's wrong
+- Specific discrepancies with severity levels
+- Location information (time ranges) for each issue"""
+
+            # Prepare MIDI notes summary
+            midi_notes_summary = [
+                {
+                    'pitch': n['pitch_name'],
+                    'start': n['start'],
+                    'duration': n['duration']
+                }
+                for n in state['midi_features']['notes'][:5]
+            ]
 
             user_prompt = f"""
-User Issue Description: {state['user_description']}
+User's Issue Description: "{state['user_description']}"
 
-Audio Analysis:
+Section Time Range: {state['section_start']:.2f}s - {state['section_end']:.2f}s
+
+Audio Analysis Summary:
 {state['audio_features']['description']}
 
-MIDI Analysis:
+MIDI Analysis Summary:
 {state['midi_features']['description']}
 
-Audio Pitch Bends Detected: {len(state['audio_features']['bends'])}
-MIDI Pitch Bends Present: {len(state['midi_features']['pitch_bends'])}
+Detailed Comparison:
+- Audio Pitch Bends Detected: {len(state['audio_features']['bends'])}
+- MIDI Pitch Bends Present: {len(state['midi_features']['pitch_bends'])}
+- Audio Onsets Detected: {len(state['audio_features']['onsets'])}
+- MIDI Notes Present: {len(state['midi_features']['notes'])}
 
-Audio Onsets: {len(state['audio_features']['onsets'])}
-MIDI Notes: {len(state['midi_features']['notes'])}
+Audio Bends Detail: {state['audio_features']['bends'][:3] if state['audio_features']['bends'] else 'None detected'}
+MIDI Notes Detail (first 5): {midi_notes_summary}
 
-Based on the user's description and the analysis data, identify specific discrepancies
-and recommend corrections. Format your response as a structured analysis.
+Based on the user's description and this analysis data, identify specific discrepancies.
 """
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=user_prompt)
+                HumanMessage(content=user_prompt),
             ]
 
-            response = self.llm.invoke(messages)
+            # Get structured response
+            analysis: DiscrepancyAnalysis = structured_llm.invoke(messages)
 
-            state["analysis_summary"] = response.content
-            state["discrepancies"] = self._parse_discrepancies(
-                response.content,
-                state["audio_features"],
-                state["midi_features"]
-            )
+            # Store in state
+            state["analysis_summary"] = analysis.summary
+            state["discrepancies"] = [d.model_dump() for d in analysis.discrepancies]
 
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"❌ Comparison node error: {str(e)}")
+            print(f"Traceback:\n{error_details}")
             state["error"] = f"Comparison error: {str(e)}"
 
         return state
@@ -218,54 +252,105 @@ and recommend corrections. Format your response as a structured analysis.
     def _editor_node(self, state: MIDIEditorState) -> Dict[str, Any]:
         """
         MIDI editor agent node.
-        Uses LLM to propose specific MIDI editing operations.
+        Uses LLM with structured output to propose specific MIDI editing operations.
         """
         try:
+            # Check if previous nodes failed
+            if state.get("error"):
+                # Don't proceed if there's already an error
+                return state
+
             state["current_step"] = "Proposing MIDI edits"
+
+            # Create structured output LLM
+            structured_llm = self.llm.with_structured_output(
+                schema=MIDIEditProposal,
+                method="json_schema",
+                strict=True
+            )
 
             system_prompt = """You are an expert MIDI editor. Based on the discrepancy analysis,
 propose specific MIDI editing operations to fix the issues.
 
-Available operations:
-1. merge_notes: Merge multiple notes into one (for incorrect splits)
-2. add_pitch_bend: Add pitch bend events (for missing bends/slides)
-3. modify_note: Change note properties (pitch, timing, velocity)
-4. add_note: Add missing notes
-5. delete_note: Remove incorrect notes
+Available operations (choose the appropriate type):
 
-Provide concrete, executable editing instructions."""
+1. **merge_notes**: Merge multiple MIDI notes into one continuous note
+   - Use when: Audio shows one sustained note but MIDI has it split into multiple notes
+   - Parameters: note_indices (which notes to merge), keep_first (preserve first note's properties)
+
+2. **add_pitch_bend_sequence**: Add a smooth pitch bend over time (for slides, bends, vibrato)
+   - Use when: Audio shows pitch bend/slide but MIDI doesn't have it
+   - Parameters: start_time, end_time, start_semitones (usually 0), end_semitones, num_points
+   - Example: Guitar bend up 2 semitones over 0.5 seconds
+
+3. **add_pitch_bend**: Add a single pitch bend event at a specific time
+   - Use when: Quick pitch adjustment needed
+   - Parameters: time, semitones
+
+4. **modify_note**: Change properties of an existing note
+   - Use when: Note has wrong pitch, timing, or velocity
+   - Parameters: note_idx, pitch (MIDI 0-127), start, end, velocity (0-1)
+
+5. **add_note**: Add a completely new note
+   - Use when: MIDI is missing a note that's clearly in the audio
+   - Parameters: pitch, start, end, velocity
+
+6. **delete_note**: Remove an incorrect note
+   - Use when: MIDI has a note that doesn't exist in audio (transcription artifact)
+   - Parameters: note_idx
+
+**Important**:
+- Be specific and surgical - only fix what's necessary
+- Reference note indices from the MIDI notes list (0-indexed)
+- For time-based operations, use seconds (not beats)
+- Provide clear reasoning for each change"""
 
             user_prompt = f"""
+User's Issue Description: "{state['user_description']}"
+
 Analysis Summary:
-{state['analysis_summary']}
+{state.get('analysis_summary', 'No prior analysis available - analyze based on raw features below.')}
 
-User's Issue: {state['user_description']}
+Identified Discrepancies:
+{state.get('discrepancies', [])}
 
-Audio Features:
-- Bends detected: {state['audio_features']['bends']}
+Audio Features Available:
+- Pitch bends detected: {len(state.get('audio_features', {}).get('bends', []))}
+- Bend details: {state.get('audio_features', {}).get('bends', [])}
+- Onsets detected: {len(state.get('audio_features', {}).get('onsets', []))}
 
-MIDI Features:
-- Notes: {len(state['midi_features']['notes'])}
-- Existing bends: {len(state['midi_features']['pitch_bends'])}
+MIDI Features Current State:
+- Notes present: {len(state.get('midi_features', {}).get('notes', []))}
+- Note details: {state.get('midi_features', {}).get('notes', [])}
+- Existing pitch bends: {len(state.get('midi_features', {}).get('pitch_bends', []))}
 
-Propose specific MIDI editing operations to address the discrepancies.
-Format each operation clearly with parameters.
+Based on this analysis, propose specific MIDI editing operations.
+Each operation must include:
+1. Correct operation type
+2. All required parameters with proper values
+3. Clear description of what it does
+4. Reasoning explaining why it's needed
+
+If no changes are needed (MIDI already matches audio), return empty proposed_changes list.
 """
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=user_prompt)
+                HumanMessage(content=user_prompt),
             ]
 
-            response = self.llm.invoke(messages)
+            # Get structured response
+            proposal: MIDIEditProposal = structured_llm.invoke(messages)
 
-            # Parse proposed changes
-            state["proposed_changes"] = self._parse_proposed_changes(
-                response.content,
-                state
-            )
+            # Store in state
+            state["analysis_summary"] = proposal.analysis_summary
+            state["proposed_changes"] = [c.model_dump() for c in proposal.proposed_changes]
 
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"❌ Editor node error: {str(e)}")
+            print(f"Traceback:\n{error_details}")
             state["error"] = f"Editor error: {str(e)}"
 
         return state
@@ -291,8 +376,12 @@ Format each operation clearly with parameters.
                 change_type = change.get("type")
 
                 if change_type not in [
-                    "merge_notes", "add_pitch_bend", "modify_note",
-                    "add_note", "delete_note", "add_pitch_bend_sequence"
+                    "merge_notes",
+                    "add_pitch_bend",
+                    "modify_note",
+                    "add_note",
+                    "delete_note",
+                    "add_pitch_bend_sequence",
                 ]:
                     issues.append(f"Invalid change type: {change_type}")
                     is_valid = False
@@ -301,7 +390,7 @@ Format each operation clearly with parameters.
                 "is_valid": is_valid,
                 "issues": issues,
                 "change_count": len(state.get("proposed_changes", [])),
-                "summary": f"{'Valid' if is_valid else 'Invalid'}: {len(state.get('proposed_changes', []))} changes proposed"
+                "summary": f"{'Valid' if is_valid else 'Invalid'}: {len(state.get('proposed_changes', []))} changes proposed",
             }
             state["is_valid"] = is_valid
 
@@ -311,70 +400,6 @@ Format each operation clearly with parameters.
 
         return state
 
-    def _parse_discrepancies(
-        self,
-        llm_response: str,
-        audio_features: Dict,
-        midi_features: Dict
-    ) -> list:
-        """
-        Parse LLM response to extract structured discrepancies.
-        This is a simplified parser - could be enhanced with structured output.
-        """
-        # For now, return a basic discrepancy based on feature comparison
-        discrepancies = []
-
-        # Check for missing bends
-        if len(audio_features["bends"]) > len(midi_features["pitch_bends"]):
-            discrepancies.append({
-                "type": "missing_pitch_bends",
-                "severity": "high",
-                "count": len(audio_features["bends"]) - len(midi_features["pitch_bends"]),
-                "audio_bends": audio_features["bends"]
-            })
-
-        # Check for note count mismatch
-        if len(audio_features["onsets"]) != len(midi_features["notes"]):
-            discrepancies.append({
-                "type": "note_count_mismatch",
-                "severity": "medium",
-                "audio_onsets": len(audio_features["onsets"]),
-                "midi_notes": len(midi_features["notes"])
-            })
-
-        return discrepancies
-
-    def _parse_proposed_changes(
-        self,
-        llm_response: str,
-        state: MIDIEditorState
-    ) -> list:
-        """
-        Parse LLM response to extract proposed MIDI changes.
-        This is simplified - could use structured output or function calling.
-        """
-        changes = []
-
-        # If audio shows bends but MIDI doesn't have them, propose adding bends
-        audio_bends = state["audio_features"]["bends"]
-        midi_bends = state["midi_features"]["pitch_bends"]
-
-        if len(audio_bends) > len(midi_bends):
-            for bend in audio_bends:
-                changes.append({
-                    "type": "add_pitch_bend_sequence",
-                    "parameters": {
-                        "start_time": bend["start_time"],
-                        "end_time": bend["end_time"],
-                        "start_semitones": 0.0,
-                        "end_semitones": bend["semitones"],
-                        "num_points": 10
-                    },
-                    "description": f"Add pitch bend {bend['direction']} {abs(bend['semitones']):.1f} semitones",
-                    "reasoning": "Audio analysis detected pitch bend not present in MIDI"
-                })
-
-        return changes
 
     async def arun(self, initial_state: Dict[str, Any]) -> Dict[str, Any]:
         """
