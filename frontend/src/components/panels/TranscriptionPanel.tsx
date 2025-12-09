@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { cn } from '@/utils'
 import { StemType } from '@/components/studio/types'
 import { TranscriptionSettings } from './TranscriptionSettings'
@@ -14,6 +14,23 @@ interface TranscriptionPanelProps {
   onStemChange?: (stemType: StemType) => void
   availableStems?: StemType[]
   className?: string
+}
+
+// Resize Handle Component
+interface ResizeHandleProps {
+  onMouseDown: (e: React.MouseEvent) => void
+}
+
+function ResizeHandle({ onMouseDown }: ResizeHandleProps) {
+  return (
+    <div
+      className="group relative w-1 flex-shrink-0 cursor-col-resize hover:bg-accent-500/30 transition-colors"
+      onMouseDown={onMouseDown}
+    >
+      <div className="absolute inset-y-0 -left-1 -right-1" />
+      <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-white/5 group-hover:bg-accent-500/50" />
+    </div>
+  )
 }
 
 export function TranscriptionPanel({
@@ -34,6 +51,57 @@ export function TranscriptionPanel({
 
   // Section selection for AI editing
   const [selectedSection, setSelectedSection] = useState<{ start: number; end: number } | null>(null)
+
+  // Column widths for resizable layout (percentages)
+  const [settingsWidth, setSettingsWidth] = useState(20) // 20% for settings
+  const [pianoRollWidth, setPianoRollWidth] = useState(52) // 52% for piano roll (majority)
+  // AI width is calculated as: 100 - settingsWidth - pianoRollWidth - 0.5 (for handles)
+
+  const containerRef = useRef<HTMLDivElement>(null)
+  const isResizingRef = useRef<'settings-piano' | 'piano-ai' | null>(null)
+
+  // Handle resize start
+  const handleResizeStart = useCallback((divider: 'settings-piano' | 'piano-ai') => (e: React.MouseEvent) => {
+    e.preventDefault()
+
+    if (!containerRef.current) return
+
+    isResizingRef.current = divider
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingRef.current || !containerRef.current) return
+
+      const containerRect = containerRef.current.getBoundingClientRect()
+      const containerWidth = containerRect.width
+      const mouseX = e.clientX - containerRect.left
+      const percentX = (mouseX / containerWidth) * 100
+
+      if (isResizingRef.current === 'settings-piano') {
+        // Resize between settings and piano roll
+        const newSettingsWidth = Math.max(15, Math.min(30, percentX)) // 15-30%
+        setSettingsWidth(newSettingsWidth)
+      } else if (isResizingRef.current === 'piano-ai') {
+        // Resize between piano roll and AI
+        // percentX represents the position from the left edge
+        // Subtract settingsWidth to get the piano roll width
+        const newPianoRollWidth = Math.max(30, Math.min(70, percentX - settingsWidth - 0.5)) // Keep piano roll 30-70%
+        setPianoRollWidth(newPianoRollWidth)
+      }
+    }
+
+    const handleMouseUp = () => {
+      isResizingRef.current = null
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [settingsWidth])
 
   // Check MIDI status on mount and when stem changes
   useEffect(() => {
@@ -172,10 +240,13 @@ export function TranscriptionPanel({
         </button>
       </div>
 
-      {/* Content - Two Column Layout */}
-      <div className="flex-1 grid grid-cols-[300px_1fr] gap-4 overflow-hidden p-4">
-        {/* Left Column: Settings & Status */}
-        <div className="flex flex-col gap-4 overflow-y-auto">
+      {/* Content - Three Column Resizable Layout */}
+      <div ref={containerRef} className="flex-1 flex overflow-hidden p-4 gap-0">
+        {/* Column 1: Settings & Status */}
+        <div
+          className="flex flex-col gap-4 overflow-y-auto pr-2"
+          style={{ width: `${settingsWidth}%` }}
+        >
           {/* Transcription Settings */}
           <TranscriptionSettings
             songId={songId}
@@ -196,11 +267,16 @@ export function TranscriptionPanel({
           )}
         </div>
 
-        {/* Right Column: Piano Roll & AI Editor */}
-        <div className="flex flex-col gap-4 overflow-y-auto overflow-x-hidden min-w-0">
-          {/* Piano Roll Viewer */}
+        {/* Resize Handle 1: Settings <-> Piano Roll */}
+        <ResizeHandle onMouseDown={handleResizeStart('settings-piano')} />
+
+        {/* Column 2: Piano Roll (Majority Width) */}
+        <div
+          className="flex flex-col overflow-y-auto overflow-x-hidden min-w-0 px-2"
+          style={{ width: `${pianoRollWidth}%` }}
+        >
           {midiStatus === 'transcribed' && midiPath && (
-            <div className="min-w-0 max-w-full">
+            <div className="min-w-0 max-w-full h-full">
               <PianoRollViewer
                 midiPath={midiPath}
                 onSectionSelect={(start, end) => setSelectedSection({ start, end })}
@@ -208,8 +284,16 @@ export function TranscriptionPanel({
               />
             </div>
           )}
+        </div>
 
-          {/* AI Editor (shows when section is selected OR always if transcribed) */}
+        {/* Resize Handle 2: Piano Roll <-> AI Assistant */}
+        <ResizeHandle onMouseDown={handleResizeStart('piano-ai')} />
+
+        {/* Column 3: AI Assistant */}
+        <div
+          className="flex flex-col overflow-y-auto overflow-x-hidden min-w-0 pl-2"
+          style={{ width: `${100 - settingsWidth - pianoRollWidth - 0.5}%` }}
+        >
           {midiStatus === 'transcribed' && (
             <AIEditor
               songId={songId}

@@ -570,7 +570,7 @@ export function StudioPanel({ song, onClose, onStemSelect, className }: StudioPa
       {/* Sliding Transcription Panel - from left */}
       <div
         className={cn(
-          'fixed left-0 top-0 bottom-0 z-[9999] w-[60vw] max-w-[1200px] bg-dark-400 shadow-2xl transition-transform duration-300 ease-in-out border-r border-white/10 overflow-hidden',
+          'fixed left-0 top-0 bottom-0 z-[9999] w-[90vw] bg-dark-400 shadow-2xl transition-transform duration-300 ease-in-out border-r border-white/10 overflow-hidden',
           transcriptionPanelOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >

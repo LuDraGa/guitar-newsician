@@ -307,17 +307,20 @@ export function AIEditor({
                   />
                 </div>
 
-                {/* Example Prompts */}
-                <div className="mb-4 flex flex-wrap gap-2">
-                  {editPrompts.map(prompt => (
-                    <button
-                      key={prompt}
-                      onClick={() => setIssueDescription(prompt)}
-                      className="rounded-full border border-white/10 bg-dark-400/30 px-3 py-1 font-mono text-xs text-gray-400 transition-colors hover:border-accent-500/30 hover:text-accent-400"
-                    >
-                      {prompt}
-                    </button>
-                  ))}
+                {/* Example Prompts - Always Visible */}
+                <div className="mb-4">
+                  <div className="mb-2 font-mono text-xs text-gray-500">Quick prompts:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {editPrompts.map(prompt => (
+                      <button
+                        key={prompt}
+                        onClick={() => setIssueDescription(prompt)}
+                        className="rounded-full border border-white/10 bg-dark-400/30 px-3 py-1.5 font-mono text-xs text-gray-400 transition-colors hover:border-accent-500/30 hover:bg-accent-500/10 hover:text-accent-400"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Request Button */}
@@ -498,35 +501,41 @@ export function AIEditor({
               </div>
             )}
 
-            {/* Example Questions */}
-            {chatHistory.length === 0 && (
-              <div className="mb-4 flex flex-wrap gap-2">
+            {/* Example Questions - Always Visible */}
+            <div className="mb-4">
+              <div className="mb-2 font-mono text-xs text-gray-500">Quick questions:</div>
+              <div className="flex flex-wrap gap-2">
                 {chatPrompts.map(prompt => (
                   <button
                     key={prompt}
                     onClick={() => setChatQuery(prompt)}
-                    className="rounded-full border border-white/10 bg-dark-400/30 px-3 py-1 font-mono text-xs text-gray-400 transition-colors hover:border-blue-500/30 hover:text-blue-400"
+                    className="rounded-full border border-white/10 bg-dark-400/30 px-3 py-1.5 font-mono text-xs text-gray-400 transition-colors hover:border-blue-500/30 hover:bg-blue-500/10 hover:text-blue-400"
                   >
                     {prompt}
                   </button>
                 ))}
               </div>
-            )}
+            </div>
 
-            {/* Chat Input */}
-            <div className="flex gap-2">
-              <input
-                type="text"
+            {/* Chat Input - Multi-line Textarea */}
+            <div className="flex gap-2 items-end">
+              <textarea
                 value={chatQuery}
                 onChange={e => setChatQuery(e.target.value)}
-                onKeyPress={e => e.key === 'Enter' && handleSendChat()}
-                placeholder="Ask about chords, patterns, structure..."
-                className="flex-1 rounded-lg border border-white/10 bg-dark-400/50 px-3 py-2 font-mono text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500/30"
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSendChat()
+                  }
+                }}
+                placeholder="Ask about chords, patterns, structure... (Shift+Enter for new line)"
+                rows={3}
+                className="flex-1 rounded-lg border border-white/10 bg-dark-400/50 px-3 py-2 font-mono text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500/30 resize-y"
               />
               <button
                 onClick={handleSendChat}
                 disabled={!chatQuery.trim() || isChatting}
-                className="rounded-lg bg-blue-500/20 px-4 py-2 font-display text-sm font-semibold text-blue-400 transition-all hover:bg-blue-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg bg-blue-500/20 px-4 py-2.5 font-display text-sm font-semibold text-blue-400 transition-all hover:bg-blue-500/30 disabled:cursor-not-allowed disabled:opacity-50 flex-shrink-0"
               >
                 {isChatting ? (
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
