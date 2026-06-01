@@ -158,10 +158,9 @@ export function AIEditor({
   }
 
   return (
-    <div className={className}>
-      <div className="rounded-xl border border-white/10 bg-dark-300/30 p-4">
-        {/* Header with Mode Toggle */}
-        <div className="mb-4 flex items-center justify-between">
+    <div className={cn('flex flex-col h-full', className)}>
+      {/* Header with Mode Toggle */}
+      <div className="mb-3 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-accent-400" />
             <h4 className="font-display text-sm font-semibold text-white">AI Assistant</h4>
@@ -198,7 +197,7 @@ export function AIEditor({
 
         {/* EDIT MODE */}
         {mode === 'edit' && (
-          <>
+          <div className="flex flex-col flex-1 overflow-hidden gap-3">
             {/* Section requirement */}
             {!section && (
               <div className="rounded-xl border border-white/10 bg-dark-300/30 p-6">
@@ -440,28 +439,23 @@ export function AIEditor({
                 </div>
               </div>
             )}
-          </>
+          </div>
         )}
 
         {/* CHAT MODE */}
         {mode === 'chat' && (
-          <>
-            {/* Section info (optional) */}
+          <div className="flex flex-col flex-1 overflow-hidden gap-3">
+            {/* Section info (optional) - Simple badge */}
             {section && (
-              <div className="mb-3 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
-                <div className="font-mono text-xs text-gray-400">Analyzing Section</div>
-                <div className="mt-1 font-mono text-sm text-blue-400">
-                  {section.start.toFixed(2)}s - {section.end.toFixed(2)}s
-                  <span className="ml-2 text-gray-500">
-                    (or ask about the whole MIDI)
-                  </span>
-                </div>
+              <div className="flex-shrink-0 font-mono text-xs text-gray-400">
+                Section: {section.start.toFixed(2)}s - {section.end.toFixed(2)}s
+                <span className="ml-2 text-gray-500">(or ask about the whole MIDI)</span>
               </div>
             )}
 
-            {/* Chat History */}
+            {/* Chat History - Flat, no outer container */}
             {chatHistory.length > 0 && (
-              <div className="mb-4 max-h-96 space-y-3 overflow-y-auto rounded-lg border border-white/10 bg-dark-400/30 p-3">
+              <div className="flex-1 space-y-2 overflow-y-auto">
                 {chatHistory.map((msg, idx) => (
                   <div
                     key={idx}
@@ -487,38 +481,41 @@ export function AIEditor({
               </div>
             )}
 
+            {/* Empty state with quick questions */}
             {chatHistory.length === 0 && (
-              <div className="mb-4 rounded-lg border border-blue-500/20 bg-blue-500/5 p-4">
-                <div className="text-center">
-                  <MessageCircle className="mx-auto h-8 w-8 text-blue-400" />
-                  <p className="mt-2 font-mono text-xs text-blue-400">
-                    Ask me anything about this MIDI!
-                  </p>
-                  <p className="mt-1 font-mono text-[10px] text-gray-500">
-                    I can analyze chords, patterns, structure, and more
-                  </p>
+              <div className="flex-1 flex flex-col gap-3 overflow-y-auto">
+                <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-4">
+                  <div className="text-center">
+                    <MessageCircle className="mx-auto h-8 w-8 text-blue-400" />
+                    <p className="mt-2 font-mono text-xs text-blue-400">
+                      Ask me anything about this MIDI!
+                    </p>
+                    <p className="mt-1 font-mono text-[10px] text-gray-500">
+                      I can analyze chords, patterns, structure, and more
+                    </p>
+                  </div>
+                </div>
+
+                {/* Example Questions - Only when no chat history */}
+                <div>
+                  <div className="mb-2 font-mono text-xs text-gray-500">Quick questions:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {chatPrompts.map(prompt => (
+                      <button
+                        key={prompt}
+                        onClick={() => setChatQuery(prompt)}
+                        className="rounded-full border border-white/10 bg-dark-400/30 px-3 py-1.5 font-mono text-xs text-gray-400 transition-colors hover:border-blue-500/30 hover:bg-blue-500/10 hover:text-blue-400"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Example Questions - Always Visible */}
-            <div className="mb-4">
-              <div className="mb-2 font-mono text-xs text-gray-500">Quick questions:</div>
-              <div className="flex flex-wrap gap-2">
-                {chatPrompts.map(prompt => (
-                  <button
-                    key={prompt}
-                    onClick={() => setChatQuery(prompt)}
-                    className="rounded-full border border-white/10 bg-dark-400/30 px-3 py-1.5 font-mono text-xs text-gray-400 transition-colors hover:border-blue-500/30 hover:bg-blue-500/10 hover:text-blue-400"
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Chat Input - Multi-line Textarea */}
-            <div className="flex gap-2 items-end">
+            <div className="flex-shrink-0 flex gap-2 items-end">
               <textarea
                 value={chatQuery}
                 onChange={e => setChatQuery(e.target.value)}
@@ -549,7 +546,7 @@ export function AIEditor({
             {chatHistory.length > 0 && (
               <button
                 onClick={clearChat}
-                className="mt-2 w-full rounded-lg border border-white/10 bg-dark-400/30 px-4 py-2 font-mono text-xs text-gray-400 transition-colors hover:border-red-500/30 hover:text-red-400"
+                className="flex-shrink-0 w-full rounded-lg border border-white/10 bg-dark-400/30 px-4 py-2 font-mono text-xs text-gray-400 transition-colors hover:border-red-500/30 hover:text-red-400"
               >
                 Clear Conversation
               </button>
@@ -557,16 +554,15 @@ export function AIEditor({
 
             {/* Chat Error */}
             {chatError && (
-              <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+              <div className="flex-shrink-0 rounded-lg border border-red-500/30 bg-red-500/10 p-3">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="h-4 w-4 flex-shrink-0 text-red-400" />
                   <p className="font-mono text-xs text-red-400">{chatError}</p>
                 </div>
               </div>
             )}
-          </>
+          </div>
         )}
-      </div>
     </div>
   )
 }

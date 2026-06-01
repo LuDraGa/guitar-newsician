@@ -45,3 +45,9 @@ async def download_audio(request: DownloadRequest, background_tasks: BackgroundT
         status="queued",
         message="Download job created successfully",
     )
+
+
+@router.get("/diagnostics")
+async def download_diagnostics():
+    """Show local yt-dlp runtime/cookie configuration."""
+    return download_service.diagnostics()

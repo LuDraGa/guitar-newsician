@@ -21,7 +21,7 @@ if __name__ == "__main__":
 
     # Get config from environment
     host = os.getenv("API_HOST", "0.0.0.0")
-    port = int(os.getenv("API_PORT", "8000"))
+    port = int(os.getenv("API_PORT", "8001"))
     reload = os.getenv("API_RELOAD", "true").lower() == "true"
 
     print(f"🎵 Starting WereCode API on {host}:{port}")

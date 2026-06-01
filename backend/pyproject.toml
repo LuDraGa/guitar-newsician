@@ -7,7 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "basic-pitch>=0.3.0",
     "demucs>=4.0.1",
-    "essentia>=2.1b6.dev1389",
+    "essentia==2.1b6.dev1389",
     "fastapi>=0.119.1",
     "ffmpeg-python>=0.2.0",
     "gytmdl>=2.1.6",
@@ -21,7 +21,7 @@ dependencies = [
     "setuptools>=65.0.0",
     "syncedlyrics>=1.0.0",
     "uvicorn>=0.38.0",
-    "yt-dlp>=2025.10.14",
+    "yt-dlp[default]>=2025.10.14",
     "openai>=2.7.1",
     "coremltools>=8.3.0",
     "dotenv>=0.9.9",
@@ -30,6 +30,7 @@ dependencies = [
     "librosa>=0.11.0",
     "soundfile>=0.13.1",
     "langchain-openai>=1.1.0",
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]

@@ -1,0 +1,43 @@
+# WAV to MIDI Converter Configuration
+# Using Spotify's basic-pitch for audio-to-MIDI transcription
+
+# Input directory containing song directories
+input_dir: downloads
+
+# Output settings
+# Options: in_place, outputs, custom
+output_mode: in_place
+# output_dir: outputs/midi  # Only used if output_mode is 'custom'
+
+# Conversion modes
+# Options: disabled, optional, stems_only
+stems_mode: optional
+convert_main_audio: true
+
+# Basic-pitch model settings
+# Onset threshold: higher = fewer note onsets detected (range: 0-1)
+onset_threshold: 0.5
+
+# Frame threshold: higher = fewer notes overall (range: 0-1)
+frame_threshold: 0.3
+
+# Minimum note length in milliseconds
+minimum_note_length: 58.0
+
+# Frequency range filters (null = no filter)
+minimum_frequency: null       # Hz - e.g., 80 for bass
+maximum_frequency: null       # Hz - e.g., 2000 for vocals
+
+# Pitch bend settings
+multiple_pitch_bends: false   # Allow multiple pitch bends per note
+melodia_trick: true           # Better for monophonic sources (vocals, bass)
+
+# Processing options
+overwrite: false
+skip_existing: true
+supported_formats:
+  - wav
+  - mp3
+  - flac
+  - ogg
+  - m4a

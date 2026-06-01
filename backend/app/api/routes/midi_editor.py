@@ -9,9 +9,13 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 import uuid
+import logging
+from music21 import converter, stream
 
 from ...editors.midi_agent_editor.agents.graph import MIDIEditorWorkflow
 from ...editors.midi_agent_editor.tools.midi_editor import MIDIEditor, Change
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/midi-editor", tags=["midi-editor"])
 
@@ -100,6 +104,21 @@ class ChatResponse(BaseModel):
     """Response from MIDI chat."""
     response: str
     structured_data: Optional[Dict[str, Any]] = None
+
+
+class MusicXMLConvertRequest(BaseModel):
+    """Request to convert MIDI to MusicXML."""
+    song_id: str
+    stem_name: Optional[str] = None
+
+
+class MusicXMLConvertResponse(BaseModel):
+    """Response from MusicXML conversion."""
+    musicxml: str
+    measures: int
+    key: str
+    time_signature: str
+    tempo: Optional[float] = None
 
 
 # Helper functions
@@ -630,22 +649,61 @@ async def chat_about_midi(request: ChatRequest):
         # Create LLM - use faster model for chat (gpt-4o-mini is already fast, but lower temperature)
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
 
-        # System prompt - music theory expert, conversational
-        system_prompt = """You are an expert music theorist and MIDI analyst. Your role is to help users understand their MIDI files through conversation.
+        # System prompt - guitar expert + music theorist with deep domain knowledge
+        system_prompt = """You are a master guitar instructor and music theorist with 20+ years of experience in:
 
-You can:
-- Analyze harmonic content (chords, progressions, keys)
-- Identify melodic patterns and motifs
-- Explain musical structure (verse, chorus, sections)
-- Discuss rhythm and timing
-- Compare different sections
-- Provide music theory insights
+**Core Expertise:**
+1. **Advanced Music Theory**
+   - Scales, modes, intervals, chord construction
+   - Voice leading and harmonization principles
+   - Circle of fifths and key relationships
+   - Chord progressions (ii-V-I, I-IV-V, modal interchange)
+   - Functional harmony and borrowed chords
 
-Be conversational, educational, and specific. Reference timestamps when discussing sections.
-If asked about patterns, list them with specific locations.
-If asked about chords, provide chord names and progressions.
+2. **Guitar-Specific Mastery**
+   - CAGED system (fretboard mapping, moveable chord shapes)
+   - Chord voicings and inversions across all positions
+   - Practical fingerings for lead, rhythm, and fingerstyle
+   - Open vs barre chords, capo applications
+   - Alternative tunings (DADGAD, Open D, etc.)
 
-DO NOT propose MIDI edits - you're here to analyze and discuss, not modify."""
+3. **Transcription & Arrangement**
+   - Converting MIDI to playable guitar parts
+   - Separating polyphonic MIDI into: melody (lead), rhythm (chords), bass lines
+   - Creating fingerstyle arrangements (bass + melody + harmony combined)
+   - Transposing to easier keys or positions
+   - Simplifying complex passages for playability
+
+4. **Guitar Techniques**
+   - Bends, slides, vibrato, hammer-ons, pull-offs
+   - Picking patterns (alternate, sweep, economy)
+   - Fingerpicking patterns (Travis picking, classical, flamenco)
+   - Strumming patterns and rhythmic variations
+
+**Your Role:**
+- Analyze MIDI transcriptions from a **guitar player's perspective**
+- Identify chord shapes using CAGED system principles
+- Suggest practical fingerings and positions on fretboard
+- Separate parts into: melody/lead (for picking), rhythm (chord progressions), bass lines, and complete fingerstyle arrangements
+- Provide music theory insights with practical guitar applications
+- Reference circle of fifths for transposition and modulation suggestions
+- Discuss harmonization (how melody notes relate to underlying chords)
+
+**Communication Style:**
+- Be conversational, educational, and **guitar-specific**
+- Reference timestamps when discussing sections (e.g., "at 1:23")
+- When identifying chords, provide: chord name, CAGED shape/position, and fingering suggestions
+- For melodic passages, suggest scale patterns and fretboard positions
+- Always think about **playability** - can this be played on guitar? How to make it easier?
+
+**Important Context:**
+This MIDI was transcribed from audio and may need interpretation for guitar. Your job is to:
+1. Analyze what's musically happening
+2. Translate it into guitar-friendly terms (shapes, positions, techniques)
+3. Suggest arrangements: lead lines, rhythm parts, fingerstyle versions
+4. Apply music theory (circle of fifths, harmonization) to explain and improve the arrangement
+
+DO NOT propose MIDI edits in chat mode - you're here to analyze and discuss. Users use "Edit Mode" for modifications."""
 
         # Prepare concise MIDI data summary
         notes_summary = [{'pitch': n.pitch_name, 'start': n.start, 'duration': n.duration} for n in midi_analysis['notes'][:15]]
@@ -654,19 +712,28 @@ DO NOT propose MIDI edits - you're here to analyze and discuss, not modify."""
         # Build user prompt with MIDI analysis data
         user_prompt = f"""
 {section_context}
+Stem/Instrument: {request.stem_name or 'Full Mix'}
 
 User's Question: "{request.query}"
 
-MIDI Summary:
+MIDI Analysis Data:
 - Total notes: {len(midi_analysis['notes'])}
-- Sample notes: {notes_summary}
+- Sample notes (pitch, start, duration): {notes_summary}
 - Chords detected: {len(midi_analysis['chords'])}
 - Chord progression: {chords_summary}
 - Pitch bends: {len(midi_analysis['pitch_bends'])}
+- Musical description: {midi_analysis['description']}
 
-Analysis: {midi_analysis['description']}
+**Instructions:**
+Answer the user's question from a **guitar player's perspective**:
+- Identify chord shapes using CAGED system when relevant
+- Suggest fretboard positions and fingerings
+- Consider playability and practical guitar techniques
+- Apply music theory (circle of fifths, harmonization) to explain patterns
+- If asked about structure, suggest how to separate into: melody/lead, rhythm/chords, bass lines, or fingerstyle arrangement
+- Be conversational and reference timestamps when relevant
 
-Answer concisely and conversationally. Reference timestamps when relevant.
+Focus on making this transcription **playable and understandable on guitar**.
 """
 
         # Combine messages
@@ -735,3 +802,103 @@ async def get_parameter_presets():
             }
         }
     }
+
+
+@router.post("/convert/musicxml", response_model=MusicXMLConvertResponse)
+async def convert_midi_to_musicxml(request: MusicXMLConvertRequest):
+    """
+    Convert MIDI file to MusicXML for sheet music rendering.
+
+    Uses music21 library for intelligent conversion:
+    - Quantization of note timings
+    - Key signature detection
+    - Time signature detection
+    - Voice separation for polyphonic content
+
+    Args:
+        request: MusicXMLConvertRequest with song_id and optional stem_name
+
+    Returns:
+        MusicXMLConvertResponse with MusicXML string and metadata
+
+    Raises:
+        HTTPException: If MIDI file not found or conversion fails
+    """
+    try:
+        # Get MIDI file path
+        midi_file_path = get_midi_path(request.song_id, request.stem_name)
+
+        logger.info(f"Converting MIDI to MusicXML: {midi_file_path}")
+
+        # Parse MIDI file with music21
+        score = converter.parse(midi_file_path)
+
+        # Analyze key signature
+        try:
+            key = score.analyze('key')
+            key_str = str(key)
+        except Exception as e:
+            logger.warning(f"Failed to analyze key signature: {e}")
+            key_str = "C major"
+
+        # Count measures
+        try:
+            measures_list = score.parts[0].getElementsByClass('Measure') if score.parts else []
+            measures = len(measures_list)
+        except Exception as e:
+            logger.warning(f"Failed to count measures: {e}")
+            measures = 0
+
+        # Get time signature
+        try:
+            time_sigs = score.getElementsByClass('TimeSignature')
+            if time_sigs:
+                time_sig = time_sigs[0]
+                time_signature = f"{time_sig.numerator}/{time_sig.denominator}"
+            else:
+                time_signature = "4/4"
+        except Exception as e:
+            logger.warning(f"Failed to get time signature: {e}")
+            time_signature = "4/4"
+
+        # Get tempo
+        try:
+            tempo_marking = score.metronomeMarkBoundaries()
+            if tempo_marking and len(tempo_marking) > 0:
+                tempo = float(tempo_marking[0][2].number)
+            else:
+                tempo = None
+        except Exception as e:
+            logger.warning(f"Failed to get tempo: {e}")
+            tempo = None
+
+        # Convert to MusicXML
+        # Note: score.write('musicxml') returns a file path, not a string
+        temp_musicxml_path = score.write('musicxml')
+
+        # Read the MusicXML file content
+        with open(temp_musicxml_path, 'r', encoding='utf-8') as f:
+            musicxml_string = f.read()
+
+        logger.info(
+            f"MusicXML conversion successful: {measures} measures, "
+            f"key={key_str}, time={time_signature}"
+        )
+
+        return MusicXMLConvertResponse(
+            musicxml=musicxml_string,
+            measures=measures,
+            key=key_str,
+            time_signature=time_signature,
+            tempo=tempo
+        )
+
+    except HTTPException:
+        # Re-raise HTTP exceptions (e.g., 404 from get_midi_path)
+        raise
+    except Exception as e:
+        logger.error(f"Failed to convert MIDI to MusicXML: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"MusicXML conversion failed: {str(e)}"
+        )

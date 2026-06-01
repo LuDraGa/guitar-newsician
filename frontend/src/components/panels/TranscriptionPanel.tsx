@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { cn } from '@/utils'
 import { StemType } from '@/components/studio/types'
-import { TranscriptionSettings } from './TranscriptionSettings'
+import { TranscriptionHeader } from './TranscriptionHeader'
 import { MIDIStatus } from './MIDIStatus'
 import { AIEditor } from './AIEditorWithChat'
 import { PianoRollViewer } from './PianoRollViewer'
+import { SheetMusicViewer } from './SheetMusicViewer'
 import { midiEditorService, BasicPitchParams } from '@/services/midiEditorService'
 
 interface TranscriptionPanelProps {
@@ -52,21 +53,24 @@ export function TranscriptionPanel({
   // Section selection for AI editing
   const [selectedSection, setSelectedSection] = useState<{ start: number; end: number } | null>(null)
 
+  // View type for visualization (piano roll / sheet music / tablature)
+  type ViewType = 'piano' | 'sheet' | 'tab'
+  const [viewType, setViewType] = useState<ViewType>('piano')
+
   // Column widths for resizable layout (percentages)
-  const [settingsWidth, setSettingsWidth] = useState(20) // 20% for settings
-  const [pianoRollWidth, setPianoRollWidth] = useState(52) // 52% for piano roll (majority)
-  // AI width is calculated as: 100 - settingsWidth - pianoRollWidth - 0.5 (for handles)
+  const [visualizationWidth, setVisualizationWidth] = useState(75) // 75% for visualization (piano/sheet/tab)
+  // AI width is calculated as: 100 - visualizationWidth - 0.25 (for handle)
 
   const containerRef = useRef<HTMLDivElement>(null)
-  const isResizingRef = useRef<'settings-piano' | 'piano-ai' | null>(null)
+  const isResizingRef = useRef<boolean>(false)
 
   // Handle resize start
-  const handleResizeStart = useCallback((divider: 'settings-piano' | 'piano-ai') => (e: React.MouseEvent) => {
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
 
     if (!containerRef.current) return
 
-    isResizingRef.current = divider
+    isResizingRef.current = true
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
 
@@ -78,21 +82,13 @@ export function TranscriptionPanel({
       const mouseX = e.clientX - containerRect.left
       const percentX = (mouseX / containerWidth) * 100
 
-      if (isResizingRef.current === 'settings-piano') {
-        // Resize between settings and piano roll
-        const newSettingsWidth = Math.max(15, Math.min(30, percentX)) // 15-30%
-        setSettingsWidth(newSettingsWidth)
-      } else if (isResizingRef.current === 'piano-ai') {
-        // Resize between piano roll and AI
-        // percentX represents the position from the left edge
-        // Subtract settingsWidth to get the piano roll width
-        const newPianoRollWidth = Math.max(30, Math.min(70, percentX - settingsWidth - 0.5)) // Keep piano roll 30-70%
-        setPianoRollWidth(newPianoRollWidth)
-      }
+      // Resize between visualization and AI (60-85% range for visualization)
+      const newVisualizationWidth = Math.max(60, Math.min(85, percentX))
+      setVisualizationWidth(newVisualizationWidth)
     }
 
     const handleMouseUp = () => {
-      isResizingRef.current = null
+      isResizingRef.current = false
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
       document.removeEventListener('mousemove', handleMouseMove)
@@ -101,7 +97,7 @@ export function TranscriptionPanel({
 
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
-  }, [settingsWidth])
+  }, [])
 
   // Check MIDI status on mount and when stem changes
   useEffect(() => {
@@ -215,84 +211,133 @@ export function TranscriptionPanel({
 
   return (
     <div className={cn('flex h-full flex-col w-full relative overflow-hidden', className)}>
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/5 p-4 flex-shrink-0 relative z-10">
-        <div>
-          <h3 className="font-display text-lg font-bold capitalize text-white">
-            {currentStem} Transcription
-          </h3>
-          <p className="font-mono text-xs text-gray-500">AI-powered MIDI transcription & editing</p>
-        </div>
+      {/* Compact Header */}
+      <TranscriptionHeader
+        songId={songId}
+        stemName={currentStem}
+        availableStems={availableStems}
+        onStemChange={handleStemChange}
+        onTranscribe={handleTranscribe}
+        onClose={onClose}
+        status={midiStatus}
+        notesDetected={notesDetected || undefined}
+      />
 
-        {/* Close Button */}
-        <button
-          onClick={onClose}
-          className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 text-gray-400 transition-all hover:border-accent-500/30 hover:bg-accent-500/10 hover:text-accent-400"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
-      </div>
-
-      {/* Content - Three Column Resizable Layout */}
+      {/* Content - Two Column Resizable Layout */}
       <div ref={containerRef} className="flex-1 flex overflow-hidden p-4 gap-0">
-        {/* Column 1: Settings & Status */}
+        {/* Column 1: Visualization (Piano Roll / Sheet / Tab) - 75% default */}
         <div
-          className="flex flex-col gap-4 overflow-y-auto pr-2"
-          style={{ width: `${settingsWidth}%` }}
+          className="flex flex-col overflow-y-auto overflow-x-hidden min-w-0 pr-2"
+          style={{ width: `${visualizationWidth}%` }}
         >
-          {/* Transcription Settings */}
-          <TranscriptionSettings
-            songId={songId}
-            stemName={currentStem}
-            availableStems={availableStems}
-            onStemChange={handleStemChange}
-            onTranscribe={handleTranscribe}
-            status={midiStatus}
-          />
-
           {/* MIDI Status Display */}
           {midiStatus !== 'none' && (
-            <MIDIStatus
-              status={midiStatus}
-              midiPath={midiPath || undefined}
-              notesDetected={notesDetected || undefined}
-            />
+            <div className="mb-3">
+              <MIDIStatus
+                status={midiStatus}
+                midiPath={midiPath || undefined}
+                notesDetected={notesDetected || undefined}
+              />
+            </div>
           )}
-        </div>
 
-        {/* Resize Handle 1: Settings <-> Piano Roll */}
-        <ResizeHandle onMouseDown={handleResizeStart('settings-piano')} />
+          {/* View Switcher Tabs */}
+          {midiStatus === 'transcribed' && (
+            <div className="mb-3 flex items-center gap-2 border-b border-white/5 pb-2">
+              {/* Piano Roll Tab */}
+              <button
+                onClick={() => setViewType('piano')}
+                className={cn(
+                  'flex items-center gap-2 rounded-lg px-4 py-2 font-display text-sm font-semibold transition-all',
+                  viewType === 'piano'
+                    ? 'bg-accent-500/20 text-accent-400 border border-accent-500/30'
+                    : 'text-gray-400 border border-transparent hover:text-white hover:bg-white/5'
+                )}
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                </svg>
+                Piano Roll
+              </button>
 
-        {/* Column 2: Piano Roll (Majority Width) */}
-        <div
-          className="flex flex-col overflow-y-auto overflow-x-hidden min-w-0 px-2"
-          style={{ width: `${pianoRollWidth}%` }}
-        >
+              {/* Sheet Music Tab */}
+              <button
+                onClick={() => setViewType('sheet')}
+                className={cn(
+                  'flex items-center gap-2 rounded-lg px-4 py-2 font-display text-sm font-semibold transition-all',
+                  viewType === 'sheet'
+                    ? 'bg-accent-500/20 text-accent-400 border border-accent-500/30'
+                    : 'text-gray-400 border border-transparent hover:text-white hover:bg-white/5'
+                )}
+                title="Sheet music view"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Sheet Music
+              </button>
+
+              {/* Tablature Tab */}
+              <button
+                onClick={() => setViewType('tab')}
+                disabled
+                className={cn(
+                  'flex items-center gap-2 rounded-lg px-4 py-2 font-display text-sm font-semibold transition-all',
+                  viewType === 'tab'
+                    ? 'bg-accent-500/20 text-accent-400 border border-accent-500/30'
+                    : 'text-gray-600 border border-transparent cursor-not-allowed opacity-50'
+                )}
+                title="Tablature view coming soon"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                Tablature
+                <span className="rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] text-blue-400">Soon</span>
+              </button>
+            </div>
+          )}
+
+          {/* Visualization Area */}
           {midiStatus === 'transcribed' && midiPath && (
             <div className="min-w-0 max-w-full h-full">
-              <PianoRollViewer
-                midiPath={midiPath}
-                onSectionSelect={(start, end) => setSelectedSection({ start, end })}
-                selectedSection={selectedSection}
-              />
+              {viewType === 'piano' && (
+                <PianoRollViewer
+                  midiPath={midiPath}
+                  onSectionSelect={(start, end) => setSelectedSection({ start, end })}
+                  selectedSection={selectedSection}
+                />
+              )}
+              {viewType === 'sheet' && (
+                <SheetMusicViewer
+                  songId={songId}
+                  stemName={currentStem}
+                  onSectionSelect={(start, end) => setSelectedSection({ start, end })}
+                  selectedSection={selectedSection}
+                />
+              )}
+              {viewType === 'tab' && (
+                <div className="flex h-full items-center justify-center">
+                  <div className="text-center">
+                    <svg className="mx-auto h-16 w-16 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    <p className="mt-4 font-display text-sm text-gray-500">Tablature View</p>
+                    <p className="mt-1 font-mono text-xs text-gray-600">Coming soon...</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* Resize Handle 2: Piano Roll <-> AI Assistant */}
-        <ResizeHandle onMouseDown={handleResizeStart('piano-ai')} />
+        {/* Resize Handle: Visualization <-> AI Assistant */}
+        <ResizeHandle onMouseDown={handleResizeStart} />
 
-        {/* Column 3: AI Assistant */}
+        {/* Column 2: AI Assistant - 25% default */}
         <div
           className="flex flex-col overflow-y-auto overflow-x-hidden min-w-0 pl-2"
-          style={{ width: `${100 - settingsWidth - pianoRollWidth - 0.5}%` }}
+          style={{ width: `${100 - visualizationWidth - 0.25}%` }}
         >
           {midiStatus === 'transcribed' && (
             <AIEditor
