@@ -42,7 +42,7 @@ export async function probeSong(input: z.infer<typeof probeSongSchema>) {
       ...body,
     },
   });
-  const updatedJob = await updateJob(supabase, job.id, {
+  const updatedJob = await updateJob(supabase, user.id, job.id, {
     status: 'ready',
     progress: 100,
     message: 'Source URL parsed by Next',
@@ -80,7 +80,7 @@ export async function ingestSong(input: z.infer<typeof ingestSongSchema>) {
       ...body,
     },
   });
-  const updatedJob = await updateJob(supabase, job.id, {
+  const updatedJob = await updateJob(supabase, user.id, job.id, {
     status: 'ready',
     progress: 100,
     message: responsePayload.message,
@@ -168,6 +168,7 @@ async function updateRegisteredSong(
       },
     })
     .eq('id', song.id)
+    .eq('owner_id', song.owner_id)
     .select('*')
     .single<SongRow>();
 
@@ -206,8 +207,14 @@ async function createJob(
   return data;
 }
 
-async function updateJob(supabase: SupabaseClient, jobId: string, values: Record<string, unknown>) {
-  const { data, error } = await supabase.from('jobs').update(values).eq('id', jobId).select('*').single<JobRow>();
+async function updateJob(supabase: SupabaseClient, ownerId: string, jobId: string, values: Record<string, unknown>) {
+  const { data, error } = await supabase
+    .from('jobs')
+    .update(values)
+    .eq('id', jobId)
+    .eq('owner_id', ownerId)
+    .select('*')
+    .single<JobRow>();
 
   if (error) {
     throw error;

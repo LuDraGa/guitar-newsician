@@ -18,6 +18,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = saveLyricsSchema.parse(await request.json().catch(() => null));
     const { user, supabase } = await getWereCodeRequestContext();
+    const { error: songAccessError } = await supabase
+      .from('songs')
+      .select('id')
+      .eq('id', body.song_id)
+      .eq('owner_id', user.id)
+      .single();
+
+    if (songAccessError) {
+      throw songAccessError;
+    }
 
     const { data, error } = await supabase
       .from('lyrics')
@@ -46,7 +56,11 @@ export async function POST(request: NextRequest) {
           : {};
 
     if (Object.keys(songPatch).length > 0) {
-      const { error: songError } = await supabase.from('songs').update(songPatch).eq('id', body.song_id);
+      const { error: songError } = await supabase
+        .from('songs')
+        .update(songPatch)
+        .eq('id', body.song_id)
+        .eq('owner_id', user.id);
       if (songError) {
         throw songError;
       }

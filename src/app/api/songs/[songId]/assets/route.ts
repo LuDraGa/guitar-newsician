@@ -17,11 +17,12 @@ type RouteContext = {
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
     const { songId } = await context.params;
-    const { supabase } = await getWereCodeRequestContext();
+    const { user, supabase } = await getWereCodeRequestContext();
     const { data, error } = await supabase
       .from('assets')
       .select('*')
       .eq('song_id', songId)
+      .eq('owner_id', user.id)
       .order('created_at', { ascending: false })
       .returns<AssetRow[]>();
 

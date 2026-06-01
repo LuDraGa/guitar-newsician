@@ -16,8 +16,13 @@ type RouteContext = {
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
     const { jobId } = await context.params;
-    const { supabase } = await getWereCodeRequestContext();
-    const { data, error } = await supabase.from('jobs').select('*').eq('id', jobId).single<JobRow>();
+    const { user, supabase } = await getWereCodeRequestContext();
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('id', jobId)
+      .eq('owner_id', user.id)
+      .single<JobRow>();
 
     if (error) {
       throw error;
@@ -33,8 +38,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const { jobId } = await context.params;
     const body = updateJobSchema.parse(await request.json().catch(() => null));
-    const { supabase } = await getWereCodeRequestContext();
-    const { data, error } = await supabase.from('jobs').update(body).eq('id', jobId).select('*').single<JobRow>();
+    const { user, supabase } = await getWereCodeRequestContext();
+    const { data, error } = await supabase
+      .from('jobs')
+      .update(body)
+      .eq('id', jobId)
+      .eq('owner_id', user.id)
+      .select('*')
+      .single<JobRow>();
 
     if (error) {
       throw error;

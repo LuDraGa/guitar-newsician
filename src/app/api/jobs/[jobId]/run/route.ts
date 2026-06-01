@@ -4,6 +4,7 @@ import { routeErrorResponse } from '@/lib/http/route-error';
 import { runStoredJob } from '@/server/werecode/modal-workflows';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 type RouteContext = {
   params: Promise<{

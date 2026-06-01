@@ -13,9 +13,14 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(Number(searchParams.get('limit') ?? 50), 100);
     const status = searchParams.get('status');
     const includeArchived = searchParams.get('includeArchived') === 'true';
-    const { supabase } = await getWereCodeRequestContext();
+    const { user, supabase } = await getWereCodeRequestContext();
 
-    let query = supabase.from('songs').select('*').order('updated_at', { ascending: false }).limit(limit);
+    let query = supabase
+      .from('songs')
+      .select('*')
+      .eq('owner_id', user.id)
+      .order('updated_at', { ascending: false })
+      .limit(limit);
 
     if (status) {
       query = query.eq('status', status);

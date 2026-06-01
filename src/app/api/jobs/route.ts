@@ -13,9 +13,14 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(Number(searchParams.get('limit') ?? 50), 100);
     const songId = searchParams.get('songId');
     const status = searchParams.get('status');
-    const { supabase } = await getWereCodeRequestContext();
+    const { user, supabase } = await getWereCodeRequestContext();
 
-    let query = supabase.from('jobs').select('*').order('created_at', { ascending: false }).limit(limit);
+    let query = supabase
+      .from('jobs')
+      .select('*')
+      .eq('owner_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(limit);
 
     if (songId) {
       query = query.eq('song_id', songId);

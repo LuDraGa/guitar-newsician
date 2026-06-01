@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
 
     try {
       const backendJob = await startBackendDownload(body);
-      await updateJob(supabase, job.id, {
+      await updateJob(supabase, user.id, job.id, {
         status: 'processing',
         progress: 10,
         message: backendJob.message ?? 'Local backend download started',
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
         songFolder: result?.song_folder ?? dirname(audioFile),
       });
 
-      const updatedSong = await updateSong(supabase, song.id, {
+      const updatedSong = await updateSong(supabase, user.id, song.id, {
         title: result?.title || song.title,
         artist: result?.artist ?? song.artist,
         duration_sec: typeof result?.duration === 'number' ? result.duration : song.duration_sec,
@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
           },
         },
       });
-      const updatedJob = await updateJob(supabase, job.id, {
+      const updatedJob = await updateJob(supabase, user.id, job.id, {
         status: 'ready',
         progress: 100,
         message: 'Local YouTube download imported',
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
       });
     } catch (downloadError) {
       await Promise.allSettled([
-        updateSong(supabase, song.id, {
+        updateSong(supabase, user.id, song.id, {
           status: 'failed',
           metadata: {
             ...jsonObject(song.metadata),
@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
             },
           },
         }),
-        updateJob(supabase, job.id, {
+        updateJob(supabase, user.id, job.id, {
           status: 'failed',
           progress: 0,
           message: 'Local YouTube download failed',
@@ -302,8 +302,14 @@ async function createJob(
   return data;
 }
 
-async function updateJob(supabase: SupabaseClient, jobId: string, values: Record<string, unknown>) {
-  const { data, error } = await supabase.from('jobs').update(values).eq('id', jobId).select('*').single<JobRow>();
+async function updateJob(supabase: SupabaseClient, ownerId: string, jobId: string, values: Record<string, unknown>) {
+  const { data, error } = await supabase
+    .from('jobs')
+    .update(values)
+    .eq('id', jobId)
+    .eq('owner_id', ownerId)
+    .select('*')
+    .single<JobRow>();
   if (error) {
     throw error;
   }
@@ -311,8 +317,14 @@ async function updateJob(supabase: SupabaseClient, jobId: string, values: Record
   return data;
 }
 
-async function updateSong(supabase: SupabaseClient, songId: string, values: Record<string, unknown>) {
-  const { data, error } = await supabase.from('songs').update(values).eq('id', songId).select('*').single<SongRow>();
+async function updateSong(supabase: SupabaseClient, ownerId: string, songId: string, values: Record<string, unknown>) {
+  const { data, error } = await supabase
+    .from('songs')
+    .update(values)
+    .eq('id', songId)
+    .eq('owner_id', ownerId)
+    .select('*')
+    .single<SongRow>();
   if (error) {
     throw error;
   }

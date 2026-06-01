@@ -136,7 +136,7 @@ export async function runAnalyzeWorkflow(input: z.infer<typeof analyzeWorkflowSc
   const outputSpecs = [
     jsonOutput(context.userId, input.song_id, context.job.id, 'analysis', 'analysis_json', 'analysis.json'),
   ];
-  const inputUrl = await resolveInputUrl(context.supabase, input);
+  const inputUrl = await resolveInputUrl(context.supabase, input, context.userId, input.song_id);
   const output_upload_urls = await createUploadUrlMap(outputSpecs);
 
   const result = await runJobWithModal({
@@ -175,7 +175,7 @@ export async function runSeparateWorkflow(input: z.infer<typeof separateWorkflow
     objectPath: buildObjectPath(context.userId, input.song_id, 'artifacts', context.job.id, 'stems', `${stem}.wav`),
     contentType: 'audio/wav',
   }));
-  const inputUrl = await resolveInputUrl(context.supabase, input);
+  const inputUrl = await resolveInputUrl(context.supabase, input, context.userId, input.song_id);
   const output_upload_urls = await createUploadUrlMap(outputSpecs);
 
   return runJobWithModal({
@@ -200,7 +200,7 @@ export async function runLyricsAlignWorkflow(input: z.infer<typeof lyricsAlignWo
   const outputSpecs = [
     jsonOutput(context.userId, input.song_id, context.job.id, 'lyrics_alignment', 'lyrics_alignment', 'lyrics_alignment.json'),
   ];
-  const inputUrl = await resolveInputUrl(context.supabase, input);
+  const inputUrl = await resolveInputUrl(context.supabase, input, context.userId, input.song_id);
   const output_upload_urls = await createUploadUrlMap(outputSpecs);
 
   const result = await runJobWithModal({
@@ -240,7 +240,7 @@ export async function runMidiTranscribeWorkflow(input: z.infer<typeof midiTransc
     },
     jsonOutput(context.userId, input.song_id, context.job.id, 'note_events', 'note_events', 'note_events.json'),
   ];
-  const inputUrl = await resolveInputUrl(context.supabase, input);
+  const inputUrl = await resolveInputUrl(context.supabase, input, context.userId, input.song_id);
   const output_upload_urls = await createUploadUrlMap(outputSpecs);
 
   return runJobWithModal({
@@ -274,8 +274,13 @@ async function workflowContext(jobType: JobType, endpoint: string, requestPayloa
     return { userId: user.id, supabase, job: existingJob };
   }
 
+  const songId = getSongId(requestPayload);
+  if (songId) {
+    await assertOwnedSong(supabase, user.id, songId);
+  }
+
   const job = await createJob(supabase, user.id, {
-    song_id: getSongId(requestPayload),
+    song_id: songId,
     job_type: jobType,
     modal_endpoint: endpoint,
     request_payload: {
@@ -295,7 +300,7 @@ async function runJobWithModal(options: {
   outputSpecs?: OutputSpec[];
   songId?: string;
 }) {
-  await updateJob(options.supabase, options.job.id, {
+  await updateJob(options.supabase, options.job.owner_id, options.job.id, {
     status: 'processing',
     progress: 10,
     started_at: new Date().toISOString(),
@@ -324,10 +329,10 @@ async function runJobWithModal(options: {
       })
     : [];
   if (ready && assets.length > 0 && (options.songId ?? options.job.song_id)) {
-    await updateSongReadiness(options.supabase, options.songId ?? options.job.song_id!, assets);
+    await updateSongReadiness(options.supabase, options.job.owner_id, options.songId ?? options.job.song_id!, assets);
   }
 
-  const updatedJob = await updateJob(options.supabase, options.job.id, {
+  const updatedJob = await updateJob(options.supabase, options.job.owner_id, options.job.id, {
     status: ready ? 'ready' : pending ? 'processing' : 'failed',
     progress: ready ? 100 : pending ? 50 : 0,
     message: ready ? 'Modal job completed' : pending ? 'Modal job is still processing' : 'Modal job failed',
@@ -394,8 +399,27 @@ async function createJob(
   return data;
 }
 
-async function updateJob(supabase: SupabaseClient, jobId: string, values: Record<string, unknown>) {
-  const { data, error } = await supabase.from('jobs').update(values).eq('id', jobId).select('*').single<JobRow>();
+async function assertOwnedSong(supabase: SupabaseClient, ownerId: string, songId: string) {
+  const { error } = await supabase
+    .from('songs')
+    .select('id')
+    .eq('id', songId)
+    .eq('owner_id', ownerId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function updateJob(supabase: SupabaseClient, ownerId: string, jobId: string, values: Record<string, unknown>) {
+  const { data, error } = await supabase
+    .from('jobs')
+    .update(values)
+    .eq('id', jobId)
+    .eq('owner_id', ownerId)
+    .select('*')
+    .single<JobRow>();
 
   if (error) {
     throw error;
@@ -453,7 +477,7 @@ async function createAssetRows(
   return data ?? [];
 }
 
-async function updateSongReadiness(supabase: SupabaseClient, songId: string, assets: AssetRow[]) {
+async function updateSongReadiness(supabase: SupabaseClient, ownerId: string, songId: string, assets: AssetRow[]) {
   const patch: Record<string, boolean> = {};
   for (const asset of assets) {
     if (asset.kind === 'source_audio') {
@@ -483,7 +507,7 @@ async function updateSongReadiness(supabase: SupabaseClient, songId: string, ass
     return;
   }
 
-  const { error } = await supabase.from('songs').update(patch).eq('id', songId);
+  const { error } = await supabase.from('songs').update(patch).eq('id', songId).eq('owner_id', ownerId);
   if (error) {
     throw error;
   }
@@ -566,7 +590,12 @@ async function persistAlignedLyrics(
   return data;
 }
 
-async function resolveInputUrl(supabase: SupabaseClient, input: { input_url?: string; source_asset_id?: string }) {
+async function resolveInputUrl(
+  supabase: SupabaseClient,
+  input: { input_url?: string; source_asset_id?: string },
+  ownerId: string,
+  songId: string
+) {
   if (input.input_url) {
     return input.input_url;
   }
@@ -579,6 +608,8 @@ async function resolveInputUrl(supabase: SupabaseClient, input: { input_url?: st
     .from('assets')
     .select('*')
     .eq('id', input.source_asset_id)
+    .eq('owner_id', ownerId)
+    .eq('song_id', songId)
     .single<AssetRow>();
 
   if (error) {

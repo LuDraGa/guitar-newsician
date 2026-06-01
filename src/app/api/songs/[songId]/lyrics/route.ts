@@ -15,11 +15,12 @@ type RouteContext = {
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
     const { songId } = await context.params;
-    const { supabase } = await getWereCodeRequestContext();
+    const { user, supabase } = await getWereCodeRequestContext();
     const { data, error } = await supabase
       .from('lyrics')
       .select('*')
       .eq('song_id', songId)
+      .eq('owner_id', user.id)
       .order('updated_at', { ascending: false })
       .returns<LyricsRow[]>();
 

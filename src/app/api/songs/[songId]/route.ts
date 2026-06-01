@@ -17,8 +17,13 @@ type RouteContext = {
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
     const { songId } = await context.params;
-    const { supabase } = await getWereCodeRequestContext();
-    const { data, error } = await supabase.from('songs').select('*').eq('id', songId).single<SongRow>();
+    const { user, supabase } = await getWereCodeRequestContext();
+    const { data, error } = await supabase
+      .from('songs')
+      .select('*')
+      .eq('id', songId)
+      .eq('owner_id', user.id)
+      .single<SongRow>();
 
     if (error) {
       throw error;
@@ -34,8 +39,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const { songId } = await context.params;
     const body = updateSongSchema.parse(await request.json().catch(() => null));
-    const { supabase } = await getWereCodeRequestContext();
-    const { data, error } = await supabase.from('songs').update(body).eq('id', songId).select('*').single<SongRow>();
+    const { user, supabase } = await getWereCodeRequestContext();
+    const { data, error } = await supabase
+      .from('songs')
+      .update(body)
+      .eq('id', songId)
+      .eq('owner_id', user.id)
+      .select('*')
+      .single<SongRow>();
 
     if (error) {
       throw error;
@@ -50,7 +61,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(_request: NextRequest, context: RouteContext) {
   try {
     const { songId } = await context.params;
-    const { supabase } = await getWereCodeRequestContext();
+    const { user, supabase } = await getWereCodeRequestContext();
     const { data, error } = await supabase
       .from('songs')
       .update({
@@ -58,6 +69,7 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
         archived_at: new Date().toISOString(),
       })
       .eq('id', songId)
+      .eq('owner_id', user.id)
       .select('*')
       .single<SongRow>();
 

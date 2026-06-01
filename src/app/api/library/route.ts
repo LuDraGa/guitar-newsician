@@ -11,11 +11,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const limit = Math.min(Number(searchParams.get('limit') ?? 100), 200);
     const includeJobs = searchParams.get('includeJobs') !== 'false';
-    const { supabase } = await getWereCodeRequestContext();
+    const { user, supabase } = await getWereCodeRequestContext();
 
     const songsQuery = supabase
       .from('songs')
       .select('*')
+      .eq('owner_id', user.id)
       .neq('status', 'archived')
       .order('updated_at', { ascending: false })
       .limit(limit)
@@ -32,7 +33,13 @@ export async function GET(request: NextRequest) {
 
     const [songsResult, jobsResult] = await Promise.all([
       songsQuery,
-      supabase.from('jobs').select('*').order('created_at', { ascending: false }).limit(30).returns<JobRow[]>(),
+      supabase
+        .from('jobs')
+        .select('*')
+        .eq('owner_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(30)
+        .returns<JobRow[]>(),
     ]);
 
     if (songsResult.error) {
