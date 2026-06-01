@@ -2,6 +2,10 @@
 
 import asyncio
 import json
+import os
+import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
@@ -23,7 +27,7 @@ class DownloadService:
         quality: str,
         progress_callback,
         use_cookies: bool = False,
-        use_android_client: bool = False,
+        player_clients: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         """Build yt-dlp options with 403 fix support."""
         # Map quality to bitrate (for mp3/aac)
@@ -40,7 +44,7 @@ class DownloadService:
         ]
 
         opts: Dict[str, Any] = {
-            "format": "bestaudio/best",
+            "format": self._format_selector(audio_format),
             "outtmpl": {"default": str(song_folder / f"audio.%(ext)s")},
             "noprogress": True,
             "progress_hooks": [progress_callback],
@@ -50,23 +54,153 @@ class DownloadService:
             "nocheckcertificate": True,
             "noplaylist": True,
             "geo_bypass": True,
-            "http_headers": {"Accept-Language": "en-US,en;q=0.8"},
+            "check_formats": True,
+            "retries": 3,
+            "fragment_retries": 3,
+            "extractor_retries": 3,
+            "http_headers": {
+                "Accept-Language": "en-US,en;q=0.8",
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/125.0.0.0 Safari/537.36"
+                ),
+            },
         }
 
-        # Add cookie support for 403 bypass
-        if use_cookies:
-            opts["cookiesfrombrowser"] = ("chrome",)
+        js_runtime = self._node_runtime_path()
+        if js_runtime:
+            opts["js_runtimes"] = {"node": {"path": js_runtime}}
+            # Allow yt-dlp to fetch the external challenge solver when needed.
+            opts["remote_components"] = ["ejs:github"]
 
-        # Use Android client for 403 bypass
-        if use_android_client:
-            opts["extractor_args"] = {"youtube": {"player_client": ["android"]}}
-            opts["http_headers"]["User-Agent"] = (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
+        # Add cookie support for 403 bypass
+        cookiefile = os.getenv("YTDLP_COOKIEFILE")
+        if use_cookies and cookiefile:
+            opts["cookiefile"] = cookiefile
+        elif use_cookies:
+            browser = os.getenv("YTDLP_COOKIES_BROWSER", "chrome")
+            opts["cookiesfrombrowser"] = (browser,)
+
+        if player_clients:
+            opts["extractor_args"] = {"youtube": {"player_client": player_clients}}
 
         return opts
+
+    def _format_selector(self, audio_format: str) -> str:
+        if audio_format == "m4a":
+            return "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best"
+        if audio_format == "opus":
+            return "bestaudio[acodec=opus]/bestaudio[ext=webm]/bestaudio/best"
+        return "bestaudio/best"
+
+    def _node_runtime_path(self) -> Optional[str]:
+        return self._node_runtime_info().get("path")
+
+    def _node_runtime_info(self) -> Dict[str, Any]:
+        candidates: list[tuple[str, Path]] = []
+        configured = os.getenv("YTDLP_NODE_PATH")
+        if configured:
+            candidates.append(("YTDLP_NODE_PATH", Path(configured)))
+
+        discovered = shutil.which("node")
+        if discovered:
+            candidates.append(("PATH", Path(discovered)))
+
+        nvm_root = Path.home() / ".nvm" / "versions" / "node"
+        if nvm_root.exists():
+            nvm_candidates = sorted(
+                nvm_root.glob("v*/bin/node"),
+                key=self._node_candidate_version_key,
+                reverse=True,
+            )
+            candidates.extend(("nvm", candidate) for candidate in nvm_candidates)
+
+        seen: set[str] = set()
+        fallback: Dict[str, Any] = {}
+        inspected: list[Dict[str, Any]] = []
+
+        for source, candidate in candidates:
+            path = str(candidate)
+            if path in seen:
+                continue
+            seen.add(path)
+
+            version = self._node_version(path)
+            supported = self._node_version_is_supported(version)
+            info = {
+                "path": path,
+                "source": source,
+                "version": version,
+                "supported": supported,
+            }
+            inspected.append(info)
+
+            if version and not fallback:
+                fallback = info
+            if supported:
+                return {**info, "candidates": inspected}
+
+        if fallback:
+            return {**fallback, "candidates": inspected}
+        return {"path": None, "source": None, "version": None, "supported": False, "candidates": inspected}
+
+    def _node_candidate_version_key(self, path: Path) -> tuple[int, int, int]:
+        match = re.search(r"/v(\d+)\.(\d+)\.(\d+)/", str(path))
+        if not match:
+            return (0, 0, 0)
+        return tuple(int(part) for part in match.groups())
+
+    def _node_version(self, path: str) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                [path, "--version"],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=3,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+        version = result.stdout.strip() or result.stderr.strip()
+        return version or None
+
+    def _node_version_is_supported(self, version: Optional[str]) -> bool:
+        if not version:
+            return False
+        match = re.match(r"v?(\d+)\.", version)
+        if not match:
+            return False
+        return int(match.group(1)) >= 22
+
+    def _download_attempts(self) -> list[dict[str, Any]]:
+        cookiefile = os.getenv("YTDLP_COOKIEFILE")
+        cookie_label = f"cookie file {cookiefile}" if cookiefile else f"{os.getenv('YTDLP_COOKIES_BROWSER', 'chrome')} browser cookies"
+
+        return [
+            {"label": "default clients", "player_clients": ["default"], "use_cookies": False},
+            {"label": "tv/web clients", "player_clients": ["tv", "web"], "use_cookies": False},
+            {"label": "iOS client", "player_clients": ["ios"], "use_cookies": False},
+            {"label": "Android SDK-less client", "player_clients": ["android_sdkless"], "use_cookies": False},
+            {"label": cookie_label, "player_clients": ["default"], "use_cookies": True},
+            {"label": "web client with cookies", "player_clients": ["web"], "use_cookies": True},
+        ]
+
+    def diagnostics(self) -> Dict[str, Any]:
+        """Return local yt-dlp prerequisites used by the download route."""
+        node_runtime = self._node_runtime_info()
+        return {
+            "node_runtime": node_runtime["path"],
+            "node_runtime_source": node_runtime["source"],
+            "node_version": node_runtime["version"],
+            "node_supported_for_ejs": node_runtime["supported"],
+            "node_candidates": node_runtime["candidates"],
+            "cookiefile": os.getenv("YTDLP_COOKIEFILE"),
+            "cookies_browser": os.getenv("YTDLP_COOKIES_BROWSER", "chrome"),
+            "remote_components": ["ejs:github"],
+            "attempts": [attempt["label"] for attempt in self._download_attempts()],
+        }
 
     def _create_metadata_file(self, info: Dict[str, Any], output_dir: Path) -> None:
         """Create a metadata.json file with track information."""
@@ -231,11 +365,19 @@ class DownloadService:
             # First, extract metadata to get title
             job_manager.update_job(job_id, progress=15.0, message="Fetching metadata...")
 
-            temp_opts = {
-                "format": "bestaudio/best",
+            temp_opts = self._build_ytdlp_opts(
+                song_folder=base_dir,
+                audio_format=audio_format,
+                quality=quality,
+                progress_callback=progress_hook,
+                player_clients=["default"],
+            )
+            temp_opts.update({
                 "quiet": True,
                 "no_warnings": True,
-            }
+                "skip_download": True,
+                "simulate": True,
+            })
 
             info = None
             with YoutubeDL(temp_opts) as ydl:
@@ -257,38 +399,36 @@ class DownloadService:
                 message=f"Downloading: {title}...",
             )
 
-            # Build download options
-            ytdlp_opts = self._build_ytdlp_opts(
-                song_folder=song_folder,
-                audio_format=audio_format,
-                quality=quality,
-                progress_callback=progress_hook,
-            )
-
-            # Try download with retry on 403
-            try:
-                with YoutubeDL(ytdlp_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-            except Exception as e:
-                if "HTTP Error 403" in str(e) or "Forbidden" in str(e):
-                    job_manager.update_job(
-                        job_id,
-                        progress=25.0,
-                        message="403 error - retrying with cookies + Android client...",
-                    )
-                    # Retry with 403 fix
+            info = None
+            attempt_errors = []
+            for index, attempt in enumerate(self._download_attempts(), start=1):
+                job_manager.update_job(
+                    job_id,
+                    progress=20.0 + index,
+                    message=f"Downloading with yt-dlp: {attempt['label']}...",
+                )
+                try:
                     ytdlp_opts = self._build_ytdlp_opts(
                         song_folder=song_folder,
                         audio_format=audio_format,
                         quality=quality,
                         progress_callback=progress_hook,
-                        use_cookies=True,
-                        use_android_client=True,
+                        use_cookies=attempt["use_cookies"],
+                        player_clients=attempt["player_clients"],
                     )
                     with YoutubeDL(ytdlp_opts) as ydl:
                         info = ydl.extract_info(url, download=True)
-                else:
-                    raise
+                    break
+                except Exception as attempt_error:
+                    attempt_errors.append(f"{attempt['label']}: {clean_ytdlp_error(str(attempt_error))}")
+
+            if not info:
+                raise Exception(
+                    "All yt-dlp download attempts failed. "
+                    "This usually means YouTube requires authenticated browser cookies for this video/network. "
+                    "Set YTDLP_COOKIEFILE to an exported cookies.txt file, or set YTDLP_COOKIES_BROWSER to a browser where YouTube is signed in.\n"
+                    + "\n".join(attempt_errors)
+                )
 
             job_manager.update_job(
                 job_id,
@@ -356,4 +496,13 @@ class DownloadService:
                 error=str(e),
                 message=f"Download failed: {str(e)}",
             )
-            raise
+            return {"error": str(e)}
+
+
+def clean_ytdlp_error(message: str) -> str:
+    return (
+        message
+        .replace("\x1b[0;31m", "")
+        .replace("\x1b[0m", "")
+        .replace("ERROR:", "ERROR:")
+    )

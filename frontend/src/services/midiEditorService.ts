@@ -170,6 +170,19 @@ export interface ChatResponse {
   }
 }
 
+export interface MusicXMLConvertRequest {
+  song_id: string
+  stem_name?: string
+}
+
+export interface MusicXMLConvertResponse {
+  musicxml: string
+  measures: number
+  key: string
+  time_signature: string
+  tempo?: number
+}
+
 class MIDIEditorService {
   private async request<T>(
     endpoint: string,
@@ -236,6 +249,13 @@ class MIDIEditorService {
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
     return this.request<ChatResponse>('/chat', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
+  }
+
+  async convertToMusicXML(request: MusicXMLConvertRequest): Promise<MusicXMLConvertResponse> {
+    return this.request<MusicXMLConvertResponse>('/convert/musicxml', {
       method: 'POST',
       body: JSON.stringify(request),
     })

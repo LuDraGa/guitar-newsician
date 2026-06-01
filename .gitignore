@@ -28,3 +28,15 @@ outputs/
 werecode.log
 
 *node_modules*
+
+# Next.js / pnpm
+.next/
+.pnpm-store/
+tsconfig.tsbuildinfo
+pnpm-debug.log*
+
+# Local scratch scripts
+test_mps.py
+
+# Local Supabase CLI state
+supabase/.temp/
