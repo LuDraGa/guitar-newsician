@@ -4,6 +4,7 @@ import { routeErrorResponse } from '@/lib/http/route-error';
 import { runSeparateWorkflow, separateWorkflowSchema } from '@/server/werecode/modal-workflows';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {

@@ -71,6 +71,7 @@ export async function listMidiEditSessions(songId: string) {
 export async function createMidiEditSession(songId: string, input: z.infer<typeof createMidiEditSessionSchema>) {
   const { user, supabase } = await getWereCodeRequestContext();
   const body = createMidiEditSessionSchema.parse(input);
+  await assertOwnedSong(supabase, user.id, songId);
   const { data, error } = await supabase
     .from('midi_edit_sessions')
     .insert({
@@ -136,7 +137,7 @@ export async function convertNoteEventsToMusicXml(input: z.infer<typeof musicXml
         source_asset_id: sourceAsset.id,
       },
     });
-    const updatedJob = await updateJob(supabase, job.id, {
+    const updatedJob = await updateJob(supabase, user.id, job.id, {
       status: 'ready',
       progress: 100,
       message: 'MusicXML generated from note events',
@@ -148,7 +149,7 @@ export async function convertNoteEventsToMusicXml(input: z.infer<typeof musicXml
 
     return { job: updatedJob, assets: [asset] };
   } catch (error) {
-    await failJob(supabase, job.id, error);
+    await failJob(supabase, user.id, job.id, error);
     throw error;
   }
 }
@@ -192,7 +193,7 @@ export async function applyMidiEditManifest(input: z.infer<typeof midiEditApplyS
       status: 'applied',
       output_midi_asset_id: asset.id,
     });
-    const updatedJob = await updateJob(supabase, job.id, {
+    const updatedJob = await updateJob(supabase, user.id, job.id, {
       status: 'ready',
       progress: 100,
       message: 'MIDI edit manifest applied',
@@ -205,7 +206,7 @@ export async function applyMidiEditManifest(input: z.infer<typeof midiEditApplyS
 
     return { job: updatedJob, session: updatedSession, assets: [asset] };
   } catch (error) {
-    await failJob(supabase, job.id, error);
+    await failJob(supabase, user.id, job.id, error);
     throw error;
   }
 }
@@ -268,6 +269,19 @@ async function getOwnedAsset(supabase: SupabaseClient, ownerId: string, songId: 
   return data;
 }
 
+async function assertOwnedSong(supabase: SupabaseClient, ownerId: string, songId: string) {
+  const { error } = await supabase
+    .from('songs')
+    .select('id')
+    .eq('id', songId)
+    .eq('owner_id', ownerId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+}
+
 async function readJsonAsset(supabase: SupabaseClient, asset: AssetRow) {
   const { data, error } = await supabase.storage.from(asset.bucket_id).download(asset.object_path);
   if (error) {
@@ -284,6 +298,7 @@ async function createJob(
   jobType: string,
   requestPayload: Record<string, unknown>
 ) {
+  await assertOwnedSong(supabase, ownerId, songId);
   const { data, error } = await supabase
     .from('jobs')
     .insert({
@@ -304,8 +319,14 @@ async function createJob(
   return data;
 }
 
-async function updateJob(supabase: SupabaseClient, jobId: string, values: Record<string, unknown>) {
-  const { data, error } = await supabase.from('jobs').update(values).eq('id', jobId).select('*').single<JobRow>();
+async function updateJob(supabase: SupabaseClient, ownerId: string, jobId: string, values: Record<string, unknown>) {
+  const { data, error } = await supabase
+    .from('jobs')
+    .update(values)
+    .eq('id', jobId)
+    .eq('owner_id', ownerId)
+    .select('*')
+    .single<JobRow>();
   if (error) {
     throw error;
   }
@@ -313,8 +334,8 @@ async function updateJob(supabase: SupabaseClient, jobId: string, values: Record
   return data;
 }
 
-async function failJob(supabase: SupabaseClient, jobId: string, error: unknown) {
-  await updateJob(supabase, jobId, {
+async function failJob(supabase: SupabaseClient, ownerId: string, jobId: string, error: unknown) {
+  await updateJob(supabase, ownerId, jobId, {
     status: 'failed',
     progress: 0,
     message: 'Next product workflow failed',

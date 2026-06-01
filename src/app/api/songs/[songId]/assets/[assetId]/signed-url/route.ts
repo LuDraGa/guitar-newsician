@@ -20,13 +20,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const { searchParams } = new URL(request.url);
     const expiresIn = Math.min(Math.max(Number(searchParams.get('expiresIn') ?? 3600), 60), 86_400);
     const download = searchParams.get('download');
-    const { supabase } = await getWereCodeRequestContext();
+    const { user, supabase } = await getWereCodeRequestContext();
 
     const { data: asset, error } = await supabase
       .from('assets')
       .select('*')
       .eq('song_id', songId)
       .eq('id', assetId)
+      .eq('owner_id', user.id)
       .single<AssetRow>();
 
     if (error) {
