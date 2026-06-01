@@ -219,7 +219,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         sourceAsset &&
         runWorkflow('Stem separation', '/api/workflows/separate', {
           source_asset_id: sourceAsset.id,
-          stems: ['vocals', 'drums', 'bass', 'other'],
+          stems: ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'],
           model: 'htdemucs_6s',
           shifts: 2,
         }),

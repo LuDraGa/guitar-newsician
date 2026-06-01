@@ -92,7 +92,7 @@ export const separateWorkflowSchema = sourceAssetInputSchema.extend({
   song_id: z.string().uuid(),
   stems: z
     .array(z.enum(['vocals', 'guitar', 'bass', 'drums', 'piano', 'accompaniment', 'other']))
-    .default(['vocals', 'drums', 'bass', 'other']),
+    .default(['vocals', 'drums', 'bass', 'other', 'guitar', 'piano']),
   model: z.enum(['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'mdx_extra']).default('htdemucs_6s'),
   shifts: z.number().int().min(0).max(20).default(2),
 });
