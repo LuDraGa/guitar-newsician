@@ -56,6 +56,148 @@ http://localhost:3000/api/auth/callback
 https://<your-vercel-domain>/api/auth/callback
 ```
 
+## Manual Vercel Deployment Checklist
+
+Do this from the Vercel and Supabase dashboards. No Vercel CLI flow is required.
+
+### 1. Push Source Branch
+
+The current migration branch is:
+
+```text
+formalizeUI
+```
+
+It has been pushed to GitHub:
+
+```text
+https://github.com/LuDraGa/guitar-newsician
+```
+
+Use this branch when creating the first Vercel preview project/deployment.
+
+### 2. Create Or Connect Vercel Project
+
+In Vercel:
+
+1. Import the GitHub repo `LuDraGa/guitar-newsician`.
+2. Select the `formalizeUI` branch for the initial preview deployment.
+3. Framework preset: `Next.js`.
+4. Root directory: repository root.
+5. Install command: `pnpm install --frozen-lockfile`.
+6. Build command: `pnpm build`.
+7. Output directory: leave default.
+
+The repo already contains:
+
+```text
+vercel.json
+package.json
+pnpm-lock.yaml
+next.config.mjs
+```
+
+### 3. Set Vercel Environment Variables
+
+Set these in Vercel Project Settings -> Environment Variables.
+
+Production and Preview:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://olquywzupxszttgiptco.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<supabase-publishable-key>
+NEXT_PUBLIC_AUTH_ENABLED=true
+MODAL_GATEWAY_URL=https://abhirooprasad--werecode-modal-apis-fastapi-app.modal.run
+MODAL_GATEWAY_TOKEN=<only-if-modal-gateway-auth-is-enabled>
+```
+
+Production only after the production domain is known:
+
+```env
+NEXT_PUBLIC_SITE_URL=https://<your-vercel-domain>
+```
+
+Do not set these on Vercel:
+
+```env
+WERECODE_ENABLE_DEV_IDENTITY
+WERECODE_DEV_USER_ID
+NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD
+LOCAL_WERECODE_API_URL
+LOCAL_YOUTUBE_DOWNLOAD_TIMEOUT_MS
+LOCAL_YOUTUBE_DOWNLOAD_POLL_MS
+YTDLP_NODE_PATH
+YTDLP_COOKIEFILE
+YTDLP_COOKIES_BROWSER
+```
+
+`SUPABASE_SERVICE_ROLE_KEY` should not be required in production. Production
+routes use Supabase Auth cookies and owner-scoped RLS. Keep the service role key
+for local dev identity only unless a future server-only admin workflow explicitly
+needs it.
+
+### 4. Configure Supabase Auth URLs
+
+In Supabase Dashboard -> Authentication -> URL Configuration:
+
+1. Set Site URL to the final Vercel production URL.
+2. Add redirect URL:
+
+```text
+https://<your-vercel-domain>/api/auth/callback
+```
+
+3. Keep local callback for dev:
+
+```text
+http://localhost:3000/api/auth/callback
+```
+
+For preview deployments, Google OAuth will not work until the exact preview
+callback URL is added. Keep auth testing focused on production unless you want to
+maintain preview redirect URLs.
+
+### 5. Confirm Supabase API Settings
+
+In Supabase Dashboard -> Project Settings -> API:
+
+1. Ensure `werecode` is in exposed schemas.
+2. Confirm the client uses the publishable key, not service role.
+3. Confirm storage buckets exist:
+
+```text
+werecode-sources
+werecode-artifacts
+werecode-previews
+```
+
+### 6. Deploy And Smoke Test
+
+After the Vercel build completes:
+
+1. Open `/api/health`.
+2. Open `/api/supabase/health`.
+3. Sign in with Google.
+4. Open `/library`.
+5. Upload or create a song row.
+6. Confirm rows appear under the signed-in user only.
+7. Run one lightweight workflow first, then Modal-backed workflows:
+   - source audio upload
+   - analysis
+   - stems
+   - lyrics alignment
+   - MIDI transcription
+
+### 7. Known Remaining Hardening
+
+Before calling this production-complete:
+
+- Verify RLS with two real Google users.
+- Confirm storage object access is user-scoped for both upload and download.
+- Decide whether Preview deployments should allow Google auth.
+- Add cleanup policy for abandoned failed job artifacts.
+- Finish UI/UX completion after deployment plumbing is stable.
+
 ## Local Dev Identity Mode
 
 Google OAuth is not required for the local migration loop. While:
