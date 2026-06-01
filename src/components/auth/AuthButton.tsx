@@ -25,6 +25,7 @@ type SessionPayload = {
 export function AuthButton() {
   const [session, setSession] = useState<SessionPayload | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function loadSession() {
     const response = await fetch('/api/auth/session', { cache: 'no-store' });
@@ -45,21 +46,35 @@ export function AuthButton() {
 
   async function signIn() {
     setBusy(true);
+    setError(null);
     const supabase = getSupabaseBrowserClient();
-    await supabase.auth.signInWithOAuth({
+    const { error: signInError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/api/auth/callback?next=${encodeURIComponent(window.location.pathname)}`,
+        redirectTo: `${window.location.origin}/api/auth/callback`,
       },
     });
+
+    if (signInError) {
+      setError(signInError.message);
+      setBusy(false);
+    }
   }
 
   async function signOut() {
     setBusy(true);
+    setError(null);
     const supabase = getSupabaseBrowserClient();
-    await supabase.auth.signOut();
+    const { error: signOutError } = await supabase.auth.signOut();
+    if (signOutError) {
+      setError(signOutError.message);
+    }
     await loadSession();
     setBusy(false);
+  }
+
+  if (session === null) {
+    return <span className="muted text-xs">Checking auth...</span>;
   }
 
   if (!session?.configured) {
@@ -68,15 +83,18 @@ export function AuthButton() {
 
   if (!session.user) {
     return (
-      <button
-        type="button"
-        onClick={signIn}
-        disabled={busy}
-        className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-sm text-slate-100 hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
-      >
-        <LogIn className="h-4 w-4" />
-        Google
-      </button>
+      <div className="flex items-center gap-2">
+        {error ? <span className="max-w-48 truncate text-xs text-red-300">{error}</span> : null}
+        <button
+          type="button"
+          onClick={signIn}
+          disabled={busy}
+          className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-sm text-slate-100 hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
+        >
+          <LogIn className="h-4 w-4" />
+          Google
+        </button>
+      </div>
     );
   }
 
