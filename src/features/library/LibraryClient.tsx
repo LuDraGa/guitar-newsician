@@ -71,8 +71,17 @@ export function LibraryClient() {
   }
 
   useEffect(() => {
+    const authError = new URLSearchParams(window.location.search).get('authError');
+    if (authError) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+
     const timer = window.setTimeout(() => {
-      void loadLibrary();
+      void loadLibrary().finally(() => {
+        if (authError) {
+          setError(authError);
+        }
+      });
     }, 0);
 
     return () => window.clearTimeout(timer);

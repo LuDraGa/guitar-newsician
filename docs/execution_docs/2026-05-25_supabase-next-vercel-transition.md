@@ -153,6 +153,20 @@ https://<your-vercel-domain>/api/auth/callback
 http://localhost:3000/api/auth/callback
 ```
 
+In Supabase Dashboard -> Authentication -> Providers -> Google, confirm Google
+is enabled. In the Google Cloud OAuth client backing that provider, the
+authorized redirect URI must be the Supabase callback, not the Vercel callback:
+
+```text
+https://olquywzupxszttgiptco.supabase.co/auth/v1/callback
+```
+
+The app's Google sign-in sends an exact Vercel callback URL with no query string:
+
+```text
+https://<your-vercel-domain>/api/auth/callback
+```
+
 For preview deployments, Google OAuth will not work until the exact preview
 callback URL is added. Keep auth testing focused on production unless you want to
 maintain preview redirect URLs.
