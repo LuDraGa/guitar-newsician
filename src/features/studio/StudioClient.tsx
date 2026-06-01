@@ -4,6 +4,7 @@ import {
   Activity,
   AlertCircle,
   AudioLines,
+  FileText,
   FileMusic,
   ListMusic,
   Loader2,
@@ -22,6 +23,10 @@ type WorkflowResult = {
   job?: JobRow;
   assets?: AssetRow[];
   song?: SongRow;
+  lyricsLookup?: {
+    skipped_modal?: boolean;
+    reason?: string;
+  };
 };
 
 export function StudioClient({ initialSongId }: { initialSongId?: string }) {
@@ -218,6 +223,13 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
           model: 'htdemucs_6s',
           shifts: 2,
         }),
+    },
+    {
+      id: 'lyrics_fetch',
+      label: 'Lyrics',
+      icon: FileText,
+      disabled: !song,
+      run: () => runWorkflow('Lyrics fetch', '/api/workflows/lyrics/fetch', {}),
     },
     {
       id: 'lyrics_align',

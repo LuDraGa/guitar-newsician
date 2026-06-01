@@ -10,7 +10,8 @@ import {
   createSignedStorageUploadUrl,
 } from '@/lib/supabase/storage';
 import { getWereCodeRequestContext } from '@/server/werecode/context';
-import type { AssetKind, AssetRow, JobRow, JobType, Json } from '@/types/werecode';
+import { lookupLyrics, type LyricsLookupResult } from '@/server/werecode/lyrics-lookup';
+import type { AssetKind, AssetRow, JobRow, JobType, Json, LyricsRow, SongRow } from '@/types/werecode';
 
 type SupabaseClient = Awaited<ReturnType<typeof getWereCodeRequestContext>>['supabase'];
 
@@ -46,6 +47,14 @@ type OutputSpec = {
   bucket: WereCodeStorageBucket;
   objectPath: string;
   contentType?: string;
+};
+
+type LyricsResolution = {
+  lyrics: LyricsRow[];
+  syncedLyrics: LyricsRow | null;
+  plainLyrics: LyricsRow | null;
+  lookup: LyricsLookupResult | null;
+  responsePayload: Record<string, unknown>;
 };
 
 const sourceAssetInputSchema = z
@@ -92,6 +101,12 @@ export const lyricsAlignWorkflowSchema = sourceAssetInputSchema.extend({
   song_id: z.string().uuid(),
   known_lyrics: z.string().optional(),
   language: z.string().trim().min(1).optional(),
+  force_modal_alignment: z.boolean().default(false),
+});
+
+export const lyricsFetchWorkflowSchema = z.object({
+  song_id: z.string().uuid(),
+  allow_unsynced: z.boolean().default(true),
 });
 
 export const midiTranscribeWorkflowSchema = sourceAssetInputSchema.extend({
@@ -124,6 +139,8 @@ export async function runStoredJob(jobId: string) {
       return runSeparateWorkflow(separateWorkflowSchema.parse(payload), job);
     case 'lyrics_align':
       return runLyricsAlignWorkflow(lyricsAlignWorkflowSchema.parse(payload), job);
+    case 'lyrics_fetch':
+      return runLyricsFetchWorkflow(lyricsFetchWorkflowSchema.parse(payload), job);
     case 'midi_transcribe':
       return runMidiTranscribeWorkflow(midiTranscribeWorkflowSchema.parse(payload), job);
     default:
@@ -197,6 +214,31 @@ export async function runSeparateWorkflow(input: z.infer<typeof separateWorkflow
 
 export async function runLyricsAlignWorkflow(input: z.infer<typeof lyricsAlignWorkflowSchema>, existingJob?: JobRow) {
   const context = await workflowContext('lyrics_align', '/lyrics/align', input, existingJob);
+  let knownLyrics = input.known_lyrics;
+
+  if (!input.force_modal_alignment) {
+    const lyricsResolution = await resolveLyricsLocally({
+      supabase: context.supabase,
+      ownerId: context.userId,
+      songId: input.song_id,
+      job: context.job,
+      allowUnsynced: true,
+    });
+
+    if (lyricsResolution.syncedLyrics) {
+      const job = await completeJobWithSyncedLyrics(context.supabase, context.userId, context.job, lyricsResolution);
+      return {
+        job,
+        assets: [],
+        modal: lyricsResolution.responsePayload,
+        lyrics: lyricsResolution.syncedLyrics,
+        lyricsLookup: lyricsResolution.responsePayload,
+      };
+    }
+
+    knownLyrics = knownLyrics ?? lyricsResolution.plainLyrics?.content ?? undefined;
+  }
+
   const outputSpecs = [
     jsonOutput(context.userId, input.song_id, context.job.id, 'lyrics_alignment', 'lyrics_alignment', 'lyrics_alignment.json'),
   ];
@@ -210,7 +252,7 @@ export async function runLyricsAlignWorkflow(input: z.infer<typeof lyricsAlignWo
     payload: {
       input_url: inputUrl,
       output_upload_urls,
-      known_lyrics: input.known_lyrics,
+      known_lyrics: knownLyrics,
       language: input.language,
       job_id: context.job.id,
     },
@@ -225,6 +267,40 @@ export async function runLyricsAlignWorkflow(input: z.infer<typeof lyricsAlignWo
   return {
     ...result,
     lyrics,
+  };
+}
+
+export async function runLyricsFetchWorkflow(input: z.infer<typeof lyricsFetchWorkflowSchema>, existingJob?: JobRow) {
+  const context = await workflowContext('lyrics_fetch', null, input, existingJob);
+  await updateJob(context.supabase, context.userId, context.job.id, {
+    status: 'processing',
+    progress: 10,
+    started_at: new Date().toISOString(),
+    message: 'Checking LRCLIB for synced lyrics',
+    modal_endpoint: null,
+  });
+
+  const lyricsResolution = await resolveLyricsLocally({
+    supabase: context.supabase,
+    ownerId: context.userId,
+    songId: input.song_id,
+    job: context.job,
+    allowUnsynced: input.allow_unsynced,
+  });
+  const hasLyrics = lyricsResolution.lyrics.length > 0;
+  const job = await updateJob(context.supabase, context.userId, context.job.id, {
+    status: 'ready',
+    progress: 100,
+    message: hasLyrics ? 'Lyrics lookup completed' : 'No lyrics found',
+    response_payload: lyricsResolution.responsePayload as Json,
+    diagnostics: [],
+    completed_at: new Date().toISOString(),
+  });
+
+  return {
+    job,
+    lyrics: lyricsResolution.lyrics,
+    lyricsLookup: lyricsResolution.responsePayload,
   };
 }
 
@@ -260,7 +336,107 @@ export async function runMidiTranscribeWorkflow(input: z.infer<typeof midiTransc
   });
 }
 
-async function workflowContext(jobType: JobType, endpoint: string, requestPayload: unknown, existingJob?: JobRow) {
+async function resolveLyricsLocally(options: {
+  supabase: SupabaseClient;
+  ownerId: string;
+  songId: string;
+  job: JobRow;
+  allowUnsynced: boolean;
+}): Promise<LyricsResolution> {
+  await updateJob(options.supabase, options.ownerId, options.job.id, {
+    status: 'processing',
+    progress: 15,
+    started_at: options.job.started_at ?? new Date().toISOString(),
+    message: 'Checking existing synced lyrics',
+  });
+
+  const [existingSynced, existingPlain] = await Promise.all([
+    findExistingSyncedLyrics(options.supabase, options.ownerId, options.songId),
+    findExistingPlainLyrics(options.supabase, options.ownerId, options.songId),
+  ]);
+
+  if (existingSynced) {
+    return {
+      lyrics: [existingSynced, existingPlain].filter((row): row is LyricsRow => Boolean(row)),
+      syncedLyrics: existingSynced,
+      plainLyrics: existingPlain,
+      lookup: null,
+      responsePayload: {
+        status: 'skipped',
+        skipped_modal: true,
+        reason: 'existing_synced_lyrics',
+        lyrics: summarizeLyricsRows([existingSynced, existingPlain].filter((row): row is LyricsRow => Boolean(row))),
+      },
+    };
+  }
+
+  const song = await getOwnedSong(options.supabase, options.ownerId, options.songId);
+  await updateJob(options.supabase, options.ownerId, options.job.id, {
+    progress: 25,
+    message: 'Checking LRCLIB for synced lyrics',
+  });
+
+  const lookup = await lookupLyrics({
+    title: song.title,
+    artist: song.artist,
+    album: song.album,
+    durationSec: song.duration_sec,
+    allowUnsynced: options.allowUnsynced,
+  });
+  const persistedLyrics = lookup.attempted && lookup.response ? await persistLocalLookupLyrics(options.supabase, {
+    ownerId: options.ownerId,
+    songId: options.songId,
+    jobId: options.job.id,
+    lookup: lookup.response,
+  }) : [];
+  const syncedLyrics = persistedLyrics.find((row) => row.lyrics_type === 'lrc') ?? null;
+  const plainLyrics = persistedLyrics.find((row) => row.lyrics_type === 'plain') ?? existingPlain;
+  const lyrics = [...persistedLyrics];
+  if (existingPlain && !lyrics.some((row) => row.id === existingPlain.id)) {
+    lyrics.push(existingPlain);
+  }
+
+  return {
+    lyrics,
+    syncedLyrics,
+    plainLyrics,
+    lookup,
+    responsePayload: {
+      status: syncedLyrics ? 'skipped' : persistedLyrics.length > 0 ? 'ready' : 'not_found',
+      skipped_modal: Boolean(syncedLyrics),
+      reason: syncedLyrics
+        ? 'lrclib_synced_lyrics_found'
+        : persistedLyrics.length > 0
+          ? 'lrclib_plain_lyrics_found'
+          : 'lyrics_not_found',
+      lyrics_lookup: summarizeLyricsLookup(lookup),
+      lyrics: summarizeLyricsRows(lyrics),
+    },
+  };
+}
+
+async function completeJobWithSyncedLyrics(
+  supabase: SupabaseClient,
+  ownerId: string,
+  job: JobRow,
+  lyricsResolution: LyricsResolution
+) {
+  const reason = lyricsResolution.responsePayload.reason;
+  return updateJob(supabase, ownerId, job.id, {
+    status: 'ready',
+    progress: 100,
+    message:
+      reason === 'existing_synced_lyrics'
+        ? 'Synced lyrics already available; skipped Modal alignment'
+        : 'Synced lyrics fetched locally; skipped Modal alignment',
+    modal_endpoint: null,
+    response_payload: lyricsResolution.responsePayload as Json,
+    diagnostics: [],
+    completed_at: new Date().toISOString(),
+  });
+}
+
+async function workflowContext(jobType: JobType, endpoint: string | null, requestPayload: unknown, existingJob?: JobRow) {
   const { user, supabase } = await getWereCodeRequestContext();
 
   if (existingJob) {
@@ -407,6 +583,143 @@ async function assertOwnedSong(supabase: SupabaseClient, ownerId: string, songId
     .eq('owner_id', ownerId)
     .single();
 
+  if (error) {
+    throw error;
+  }
+}
+
+async function getOwnedSong(supabase: SupabaseClient, ownerId: string, songId: string) {
+  const { data, error } = await supabase
+    .from('songs')
+    .select('*')
+    .eq('id', songId)
+    .eq('owner_id', ownerId)
+    .single<SongRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function findExistingSyncedLyrics(supabase: SupabaseClient, ownerId: string, songId: string) {
+  const { data, error } = await supabase
+    .from('lyrics')
+    .select('*')
+    .eq('song_id', songId)
+    .eq('owner_id', ownerId)
+    .in('lyrics_type', ['lrc', 'alignment_json'])
+    .not('content', 'is', null)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<LyricsRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
+}
+
+async function findExistingPlainLyrics(supabase: SupabaseClient, ownerId: string, songId: string) {
+  const { data, error } = await supabase
+    .from('lyrics')
+    .select('*')
+    .eq('song_id', songId)
+    .eq('owner_id', ownerId)
+    .eq('lyrics_type', 'plain')
+    .not('content', 'is', null)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<LyricsRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
+}
+
+async function persistLocalLookupLyrics(
+  supabase: SupabaseClient,
+  options: {
+    ownerId: string;
+    songId: string;
+    jobId: string;
+    lookup: {
+      plain_lyrics?: string | null;
+      synced_lyrics?: string | null;
+      sources?: string[];
+      sources_tried?: string[];
+    };
+  }
+) {
+  const rows = [];
+  const source = sourceForLocalLookup(options.lookup);
+  const metadata = {
+    job_id: options.jobId,
+    provider_sources: options.lookup.sources ?? [],
+    sources_tried: options.lookup.sources_tried ?? [],
+    fetched_at: new Date().toISOString(),
+  };
+
+  if (options.lookup.plain_lyrics?.trim()) {
+    rows.push({
+      owner_id: options.ownerId,
+      song_id: options.songId,
+      lyrics_type: 'plain',
+      source,
+      content: options.lookup.plain_lyrics,
+      asset_id: null,
+      metadata,
+    });
+  }
+
+  if (options.lookup.synced_lyrics?.trim()) {
+    rows.push({
+      owner_id: options.ownerId,
+      song_id: options.songId,
+      lyrics_type: 'lrc',
+      source,
+      content: options.lookup.synced_lyrics,
+      asset_id: null,
+      metadata,
+    });
+  }
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('lyrics')
+    .upsert(rows, { onConflict: 'song_id,lyrics_type' })
+    .select('*')
+    .returns<LyricsRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  await updateSongLyricsFlags(supabase, options.ownerId, options.songId, data ?? []);
+  return data ?? [];
+}
+
+async function updateSongLyricsFlags(supabase: SupabaseClient, ownerId: string, songId: string, lyrics: LyricsRow[]) {
+  const patch: Record<string, boolean> = {};
+  if (lyrics.some((row) => row.lyrics_type === 'plain')) {
+    patch.has_plain_lyrics = true;
+  }
+  if (lyrics.some((row) => row.lyrics_type === 'lrc' || row.lyrics_type === 'alignment_json')) {
+    patch.has_synced_lyrics = true;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return;
+  }
+
+  const { error } = await supabase.from('songs').update(patch).eq('id', songId).eq('owner_id', ownerId);
   if (error) {
     throw error;
   }
@@ -673,6 +986,42 @@ function stemToAssetKind(stem: string): AssetKind {
 function getSongId(value: unknown) {
   const record = assertRecord(value);
   return typeof record.song_id === 'string' ? record.song_id : null;
+}
+
+function sourceForLocalLookup(lookup: { sources?: string[] }) {
+  return lookup.sources?.length ? lookup.sources.join(', ') : 'lyrics_lookup';
+}
+
+function summarizeLyricsLookup(lookup: LyricsLookupResult | null) {
+  if (!lookup) {
+    return {
+      attempted: false,
+      reason: 'existing_synced_lyrics',
+    };
+  }
+
+  if (!lookup.attempted) {
+    return lookup;
+  }
+
+  return {
+    attempted: true,
+    error: lookup.error,
+    success: Boolean(lookup.response?.success),
+    message: lookup.response?.message ?? null,
+    has_synced_lyrics: Boolean(lookup.response?.has_synced_lyrics),
+    has_plain_lyrics: Boolean(lookup.response?.has_plain_lyrics),
+    sources: lookup.response?.sources ?? [],
+    sources_tried: lookup.response?.sources_tried ?? [],
+  };
+}
+
+function summarizeLyricsRows(rows: LyricsRow[]) {
+  return rows.map((row) => ({
+    id: row.id,
+    lyrics_type: row.lyrics_type,
+    source: row.source,
+  }));
 }
 
 function assertRecord(value: unknown): Record<string, unknown> {
