@@ -111,7 +111,7 @@ Then keep the Next app running from the repository root with `pnpm dev`.
 
 - `src/`: production Next.js app
 - `supabase/sql/`: manual Supabase schema and verification SQL
-- `backend/`: legacy/local Python backend and model behavior reference
+- `backend/`: local-only Python YouTube download backend
 - `frontend/`: legacy Vite UI reference during the port
 - `docs/execution_docs/`: migration and task tracking docs
 

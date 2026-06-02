@@ -46,11 +46,8 @@ These directories remain significant migration inputs and should not be deleted 
 | `frontend/src/store/appStore.ts`             | Current Zustand app state                | Split into feature-local stores under `src/features/*/store.ts`                  |
 | `frontend/src/utils/*`                       | Music parsing/render helpers             | `src/lib/music/*` or feature-local utilities                                     |
 | `frontend/src/types/*`                       | UI/domain types                          | `src/types/*`                                                                    |
-| `backend/app/api/routes/*`                   | Legacy FastAPI behavior                  | `src/app/api/*/route.ts` and server actions                                      |
-| `backend/app/api/services/*`                 | Legacy orchestration behavior            | `src/server/jobs/*` and `src/lib/modal/*`                                        |
-| `backend/app/analyzers/*`                    | Analysis shape reference                 | Modal `/analyze/music` plus `src/types/analysis.ts`                              |
-| `backend/app/stem_separators/*`              | Stem model behavior reference            | Modal `/separate`                                                                |
-| `backend/app/converters/wav2midi/*`          | Basic Pitch behavior reference           | Modal `/midi/transcribe` and `/transcribe/instrument`                            |
+| `backend/app/api/routes/download.py`         | Local-only YouTube download bridge       | Keep local-only; production source upload stays in Next/Supabase                 |
+| `backend/app/api/services/download_service.py` | Local-only yt-dlp service              | Keep local-only; Modal owns production compute                                   |
 
 ## Target structure
 
@@ -79,7 +76,7 @@ WereCode/
 │   │   └── supabase/
 │   └── types/
 ├── frontend/        # Legacy Vite source reference during migration
-├── backend/         # Legacy/local backend and model behavior reference
+├── backend/         # Local-only YouTube download backend
 └── supabase/sql/    # Schema migrations to run manually in Supabase
 ```
 

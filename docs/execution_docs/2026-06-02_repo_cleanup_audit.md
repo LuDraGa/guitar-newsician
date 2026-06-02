@@ -53,11 +53,15 @@ Remove:
   - `docs/STUDIO_IMPROVEMENTS.md`
   - `docs/TRANSCRIPTION_UI_GUIDE.md`
   - `docs/UI_DOCUMENTATION.md`
+- Backend compute/API artifacts after the Next/Modal split:
+  - analysis, conversion, stems, MIDI editor, AI chat, static API UI, and old
+    CLI downloader modules
+  - heavyweight Python dependencies for Basic Pitch, Demucs, Essentia, MSAF,
+    LangGraph/OpenAI, Music21, librosa, soundfile, and pydub
 
 Keep:
 
-- `backend/` because it is still the local-only YouTube backend and model
-  behavior reference.
+- `backend/` only as the local-only YouTube download backend.
 - `frontend/src/` because it still contains unported AI/tabs/studio interaction
   reference code.
 - Current 2026 migration docs and Supabase SQL.

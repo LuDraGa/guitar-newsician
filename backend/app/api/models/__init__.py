@@ -1,34 +1,13 @@
-"""Pydantic models for API requests and responses."""
+"""Pydantic models for the local download backend."""
 
-from .requests import (
-    DownloadRequest,
-    ConvertRequest,
-    StemSeparationRequest,
-    AnalysisRequest,
-    AnalysisQueryRequest,
-)
-from .responses import (
-    JobResponse,
-    JobStatusResponse,
-    AnalysisResponse,
-    DownloadResponse,
-    ConvertResponse,
-    StemResponse,
-)
 from .jobs import JobState, JobStatus, JobType
+from .requests import DownloadRequest
+from .responses import JobResponse, JobStatusResponse
 
 __all__ = [
     "DownloadRequest",
-    "ConvertRequest",
-    "StemSeparationRequest",
-    "AnalysisRequest",
-    "AnalysisQueryRequest",
     "JobResponse",
     "JobStatusResponse",
-    "AnalysisResponse",
-    "DownloadResponse",
-    "ConvertResponse",
-    "StemResponse",
     "JobState",
     "JobStatus",
     "JobType",
