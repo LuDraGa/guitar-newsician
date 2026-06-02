@@ -1,34 +1,126 @@
-#### The theme of this codebase is to have the various scrapers, downloaders, converter and analyzer scripts in one place. Mostly just backend, with at best a super simplistic ui(No UX thoughts)
+# WereCode
 
-#### Bare Setup
+WereCode is now a root Next.js application intended for Vercel deployment. The
+app owns the product surface: Google auth through Supabase, the library and
+studio UI, job state, Supabase database rows, Supabase Storage signed URLs, and
+orchestration calls to Modal.
 
-1. uv package manager
-2. pydantic: for models and typing
-3. rich: for a nice terminal experience
-4. pyyaml: for yaml based configs
-5. python-dotenv: to read envs and work with them
-6. uvicorn: This is the server
-7. m4a -> wav -> midi
-8. essentia vs librosa
-9. msaf, madmom(facing issue with 3.12), pyACA(more experimental so not using currently)
-10. music21
-11. soundfile vs pydub
-12. spleeter vs demucs
+Modal is reserved for heavy media/model work. Supabase owns durable data,
+private object storage, and owner-scoped RLS.
 
-#### Downloaders
+## Runtime Split
 
-1. YT Audio Downloader: downloaders/yt_music_downloader
-   1. uses yt-dlp
-   2. runs in terminal
-   3. has a configuration file for the ytdlp-opts
-   4. **_`<span style="color:#E52B50">`Unique terminal dir selector `</span>`_**
+### Next/Vercel
 
-#### Scrapers
+- App Router UI for `/`, `/library`, and `/studio/[songId]`
+- Supabase Auth session handling
+- Next route handlers for songs, assets, jobs, lyrics, MIDI edit state, and
+  workflow orchestration
+- Supabase Storage signed upload/download URL creation
+- Calls to the Modal compute gateway
 
-- DEF: Scraper extracts specific, targeted data from web pages
+### Supabase
 
-#### Crawlers
+- `werecode` schema tables and RLS policies
+- Google-authenticated users
+- Private buckets:
+  - `werecode-sources`
+  - `werecode-artifacts`
+  - `werecode-previews`
 
-- DEF: navigates and indexes websites to discover links and pages
+### Modal
 
-#### Crons
+Modal should expose compute and metadata endpoints only:
+
+- `GET /health`
+- `GET /models`
+- `GET /api-info`
+- `POST /analyze/music`
+- `POST /separate`
+- `POST /lyrics/align`
+- `POST /midi/transcribe`
+
+## Local Development
+
+Use pnpm from the repository root.
+
+```bash
+pnpm install
+pnpm dev
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+Checks:
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm build
+```
+
+## Environment Variables
+
+Required for Vercel production/preview:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://olquywzupxszttgiptco.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<supabase-publishable-key>
+NEXT_PUBLIC_AUTH_ENABLED=true
+MODAL_GATEWAY_URL=https://abhirooprasad--werecode-modal-apis-fastapi-app.modal.run
+```
+
+Optional if the Modal gateway is protected:
+
+```env
+MODAL_GATEWAY_TOKEN=<modal-gateway-token>
+```
+
+Local-only development variables:
+
+```env
+SUPABASE_SERVICE_ROLE_KEY=<local-dev-only>
+WERECODE_ENABLE_DEV_IDENTITY=true
+WERECODE_DEV_USER_ID=<auth.users.id>
+NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD=true
+LOCAL_WERECODE_API_URL=http://localhost:8001
+```
+
+Do not set dev identity or local YouTube download variables on Vercel.
+
+## Local YouTube Download
+
+YouTube download is not part of the production Vercel or Modal path. It is a
+local-only bridge for development.
+
+Run the legacy backend separately when the local flag is enabled:
+
+```bash
+cd backend
+uv sync
+uv run python run_api.py
+```
+
+Then keep the Next app running from the repository root with `pnpm dev`.
+
+## Repository Map
+
+- `src/`: production Next.js app
+- `supabase/sql/`: manual Supabase schema and verification SQL
+- `backend/`: legacy/local Python backend and model behavior reference
+- `frontend/`: legacy Vite UI reference during the port
+- `studio_Design/`: visual reference material
+- `docs/execution_docs/`: migration and task tracking docs
+
+The Vercel project root should be this repository root. The legacy `backend/`
+and `frontend/` directories are not production deployment roots.
+
+## Deployment
+
+The current manual deployment checklist is maintained in:
+
+`docs/execution_docs/2026-05-25_supabase-next-vercel-transition.md`
