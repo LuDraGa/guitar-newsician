@@ -1,19 +1,19 @@
 # Next/Pnpm Root Migration
 
 **Date:** 2026-05-25
-**Status:** In progress
+**Status:** In progress; Vercel root app and production Google auth smoke are wired
 
 ## Living plan status
 
 This document is the working tracker for the Next/Vercel migration. Update it whenever a phase changes, scope is adjusted, or we learn a new implementation constraint.
 
 - Phase 1: root Next.js + pnpm scaffold is complete.
-- Phase 2: Supabase foundation is complete at the app/framework layer; waiting on manual SQL run and real environment values.
+- Phase 2: Supabase foundation is complete; SQL and schema exposure have been run manually.
 - Phase 3: shared frontend types/utilities port is complete.
-- Phase 4: route-level job/asset persistence is in progress; base authenticated CRUD routes are complete.
-- Phase 5: library UI port is pending.
-- Phase 6: studio/transcription/MIDI UI port is pending.
-- Phase 7: production hardening and Vercel deployment wiring is pending.
+- Phase 4: route-level job/asset persistence and workflow orchestration routes are complete for the current Modal contract.
+- Phase 5: library UI is ported to Next/Supabase, including upload, local-only YouTube download, archive, recent jobs, and workflow controls.
+- Phase 6: studio route and core panels are ported, but UX/UI completion is still pending.
+- Phase 7: Vercel deployment wiring and production Google auth smoke are complete; RLS/storage hardening still needs a two-user pass.
 
 ## Objective
 
@@ -79,9 +79,9 @@ WereCode/
 │   │   ├── modal/
 │   │   └── supabase/
 │   └── types/
-├── frontend/        # Temporary Vite source reference during migration
-├── studio_Design/   # Temporary design source reference during migration
-├── backend/         # Temporary legacy behavior reference during migration
+├── frontend/        # Legacy Vite source reference during migration
+├── studio_Design/   # Legacy design source reference during migration
+├── backend/         # Legacy/local backend and model behavior reference
 └── supabase/sql/    # Schema migrations to run manually in Supabase
 ```
 
@@ -155,15 +155,24 @@ These are required once the Supabase project is wired into local/prod environmen
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `NEXT_PUBLIC_AUTH_ENABLED=false` locally, omitted or `true` in production because production also enables auth from `VERCEL_ENV=production`.
+- `NEXT_PUBLIC_AUTH_ENABLED=false` locally, `true` in production.
+- `MODAL_GATEWAY_URL`
 
 After the URL and publishable key are added, `/api/supabase/health` should move from `supabase_env_missing` to `configured`. SQL readiness is validated through authenticated app routes because the app is not keeping a Supabase secret key.
 
+`SUPABASE_SERVICE_ROLE_KEY`, `WERECODE_ENABLE_DEV_IDENTITY`, and
+`WERECODE_DEV_USER_ID` are local development escape hatches only. They must not
+be set on Vercel.
+
+`NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD` and `LOCAL_WERECODE_API_URL` are also
+local-only and keep yt-dlp out of production.
+
 ## Verification log
 
-- `pnpm lint` passes under Node `v20.20.0`.
-- `pnpm typecheck` passes under Node `v20.20.0`.
-- `pnpm build` passes under Node `v20.20.0`; it needs to run outside the sandbox because Turbopack/PostCSS binds an internal worker port.
+- `pnpm lint` passes under Node `v22.20.0`.
+- `pnpm typecheck` passes under Node `v22.20.0`.
+- `pnpm build` is the Vercel build command; earlier local build checks were constrained by local disk/sandbox conditions.
+- Production Google login has been smoke-tested successfully on the Vercel deployment.
 - Local dev route checks:
   - `GET /api/auth/session` returns `{ authEnabled: false, configured: false, user: null }` before local Supabase env is added.
   - `GET /api/supabase/health` returns `supabase_env_missing` before local Supabase URL/publishable key is added.
@@ -172,8 +181,8 @@ After the URL and publishable key are added, `/api/supabase/health` should move 
 
 ## Next implementation slices
 
-1. Run the Supabase SQL manually, add Supabase env values, and verify `/api/supabase/health`.
-2. Wire Modal orchestration routes that create jobs, call Modal endpoints, persist assets/results, and update job status.
-3. Port library UI from `frontend/src/views/library` and `frontend/src/components/library`.
-4. Port studio UI from `frontend/src/components/panels` and `frontend/src/components/studio`.
-5. Replace old FastAPI service calls with Next route handlers that create Supabase signed URLs and call Modal.
+1. Complete the repo/Vercel shape cleanup so the root Next app is the only production deployment target.
+2. Run a two-user production RLS/storage smoke test: user A must not read, sign, mutate, or archive user B rows or objects.
+3. Finish the studio UX/UI pass for playback, waveform, lyrics, stems, MIDI, and transcription panels.
+4. Decide artifact cleanup behavior for failed or abandoned workflow jobs.
+5. Remove or further quarantine legacy Vite/FastAPI references once their remaining reference value is exhausted.

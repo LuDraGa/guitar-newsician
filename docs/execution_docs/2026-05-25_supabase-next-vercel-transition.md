@@ -1,7 +1,7 @@
 # Supabase And Next/Vercel Transition
 
 Date: 2026-05-25
-Status: In progress
+Status: In progress; production auth and root Vercel deployment are wired
 
 ## Goal
 
@@ -284,22 +284,14 @@ and `NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD=true`.
 
 ## Current UX Run Command
 
-The current local Next bridge expects the legacy API on port `8001`.
+The production-shaped UI now runs from the repository root as a Next app.
 
-Terminal 1:
-
-```bash
-cd /Users/abhiroopprasad/code/side-projects/WereCode/backend
-uv sync
-uv run python run_api.py
-```
-
-Terminal 2:
+Terminal:
 
 ```bash
-cd /Users/abhiroopprasad/code/side-projects/WereCode/frontend
-npm install
-npm run dev
+cd /Users/abhiroopprasad/code/side-projects/WereCode
+pnpm install
+pnpm dev
 ```
 
 Open:
@@ -308,7 +300,27 @@ Open:
 http://localhost:3000
 ```
 
-The visible app currently has routes for `/` and `/library`. The library/studio data is still based on the local `downloads/` folder and the FastAPI backend.
+The visible app has routes for `/`, `/library`, `/studio`, and
+`/studio/[songId]`. Library data, jobs, assets, lyrics, MIDI edit sessions, and
+workflow state are now backed by Supabase/Next route handlers. Modal is used
+only through workflow orchestration routes for compute endpoints.
+
+Start the legacy backend only when testing local YouTube download mode:
+
+```bash
+cd /Users/abhiroopprasad/code/side-projects/WereCode/backend
+uv sync
+uv run python run_api.py
+```
+
+Then enable the local-only flags in the root `.env`:
+
+```text
+NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD=true
+LOCAL_WERECODE_API_URL=http://localhost:8001
+```
+
+Do not enable those flags in Vercel.
 
 ## Target Runtime Split
 
@@ -356,6 +368,9 @@ Owns:
 - `/separate`
 - `/lyrics/align`
 - `/midi/transcribe`
+- `/transcribe/instrument` if retained by the Modal service for direct
+  instrument-specific experimentation; the product app currently uses
+  `/midi/transcribe` for the main workflow.
 
 Everything else is product/backend state and belongs in this Next app.
 
@@ -367,8 +382,8 @@ Everything else is product/backend state and belongs in this Next app.
 2. Add environment variables for local and Vercel:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-   - `SUPABASE_SERVICE_ROLE_KEY`
    - `MODAL_GATEWAY_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY` only for local dev identity
    - `WERECODE_ENABLE_DEV_IDENTITY=true` for local development only
 3. Create storage path helpers using `<owner_id>/<song_id>/...`.
 4. Add typed DB access helpers for the `werecode` schema.
@@ -475,10 +490,28 @@ Implementation tasks:
 ### Phase 5: Remove FastAPI From Production
 
 1. Keep Python backend scripts only as local/dev tools if useful.
-2. Remove production dependence on `uvicorn`.
-3. Remove local `downloads/` assumptions from the frontend.
-4. Deploy frontend as a Next app on Vercel.
+2. Keep production independent of `uvicorn`.
+3. Keep production independent of local `downloads/` assumptions.
+4. Deploy the root Next app on Vercel.
 5. Configure Vercel env vars and Modal API URL.
+
+Current status:
+
+- Root Next app deployment is wired.
+- Production Google auth has passed an initial smoke test.
+- Local YouTube download remains local-only through the legacy backend.
+- Legacy `backend/`, `frontend/`, and `studio_Design/` directories remain in the
+  repository as reference/local paths and are excluded from the root Vercel
+  deployment payload.
+
+## Next Work Queue
+
+1. Run two-user RLS and storage isolation checks in production.
+2. Finish studio UX/UI completion for waveform, playback, lyrics, stems, MIDI,
+   and transcription surfaces.
+3. Decide cleanup policy for failed jobs and abandoned storage objects.
+4. Retire or further quarantine legacy reference directories when they are no
+   longer needed.
 
 ## Open Decisions
 
