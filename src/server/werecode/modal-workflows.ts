@@ -2,6 +2,7 @@ import 'server-only';
 
 import { z } from 'zod';
 
+import { RouteNotFoundError } from '@/lib/http/route-error';
 import { modalFetch } from '@/lib/modal/client';
 import {
   WERECODE_STORAGE_BUCKETS,
@@ -9,11 +10,11 @@ import {
   createSignedStorageDownloadUrl,
   createSignedStorageUploadUrl,
 } from '@/lib/supabase/storage';
-import { getWereCodeRequestContext } from '@/server/werecode/context';
+import { getWereCodeRequestContext, requireOwnedSong, type WereCodeSupabaseClient } from '@/server/werecode/context';
 import { lookupLyrics, type LyricsLookupResult } from '@/server/werecode/lyrics-lookup';
-import type { AssetKind, AssetRow, JobRow, JobType, Json, LyricsRow, SongRow } from '@/types/werecode';
+import type { AssetKind, AssetRow, JobRow, JobType, Json, LyricsRow } from '@/types/werecode';
 
-type SupabaseClient = Awaited<ReturnType<typeof getWereCodeRequestContext>>['supabase'];
+type SupabaseClient = WereCodeSupabaseClient;
 
 type Diagnostic = {
   stage?: string;
@@ -123,10 +124,14 @@ export async function runStoredJob(jobId: string) {
     .select('*')
     .eq('id', jobId)
     .eq('owner_id', user.id)
-    .single<JobRow>();
+    .maybeSingle<JobRow>();
 
   if (error) {
     throw error;
+  }
+
+  if (!job) {
+    throw new RouteNotFoundError('Job not found', 'job_not_found');
   }
 
   const payload = assertRecord(job.request_payload);
@@ -452,7 +457,7 @@ async function workflowContext(jobType: JobType, endpoint: string | null, reques
 
   const songId = getSongId(requestPayload);
   if (songId) {
-    await assertOwnedSong(supabase, user.id, songId);
+    await requireOwnedSong(supabase, user.id, songId);
   }
 
   const job = await createJob(supabase, user.id, {
@@ -575,32 +580,8 @@ async function createJob(
   return data;
 }
 
-async function assertOwnedSong(supabase: SupabaseClient, ownerId: string, songId: string) {
-  const { error } = await supabase
-    .from('songs')
-    .select('id')
-    .eq('id', songId)
-    .eq('owner_id', ownerId)
-    .single();
-
-  if (error) {
-    throw error;
-  }
-}
-
 async function getOwnedSong(supabase: SupabaseClient, ownerId: string, songId: string) {
-  const { data, error } = await supabase
-    .from('songs')
-    .select('*')
-    .eq('id', songId)
-    .eq('owner_id', ownerId)
-    .single<SongRow>();
-
-  if (error) {
-    throw error;
-  }
-
-  return data;
+  return requireOwnedSong(supabase, ownerId, songId);
 }
 
 async function findExistingSyncedLyrics(supabase: SupabaseClient, ownerId: string, songId: string) {
@@ -923,10 +904,14 @@ async function resolveInputUrl(
     .eq('id', input.source_asset_id)
     .eq('owner_id', ownerId)
     .eq('song_id', songId)
-    .single<AssetRow>();
+    .maybeSingle<AssetRow>();
 
   if (error) {
     throw error;
+  }
+
+  if (!asset) {
+    throw new RouteNotFoundError('Asset not found', 'asset_not_found');
   }
 
   const signed = await createSignedStorageDownloadUrl({

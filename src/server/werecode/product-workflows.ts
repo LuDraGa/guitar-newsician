@@ -2,11 +2,12 @@ import 'server-only';
 
 import { z } from 'zod';
 
+import { RouteNotFoundError } from '@/lib/http/route-error';
 import { WERECODE_STORAGE_BUCKETS } from '@/lib/supabase/storage';
-import { getWereCodeRequestContext } from '@/server/werecode/context';
+import { getWereCodeRequestContext, requireOwnedSong, type WereCodeSupabaseClient } from '@/server/werecode/context';
 import type { AssetKind, AssetRow, JobRow, Json, MidiEditSessionRow, SongRow } from '@/types/werecode';
 
-type SupabaseClient = Awaited<ReturnType<typeof getWereCodeRequestContext>>['supabase'];
+type SupabaseClient = WereCodeSupabaseClient;
 
 export const createMidiEditSessionSchema = z.object({
   source_midi_asset_id: z.string().uuid().nullable().optional(),
@@ -53,6 +54,8 @@ export const arrangementManifestSchema = z.object({
 
 export async function listMidiEditSessions(songId: string) {
   const { user, supabase } = await getWereCodeRequestContext();
+  await requireOwnedSong(supabase, user.id, songId);
+
   const { data, error } = await supabase
     .from('midi_edit_sessions')
     .select('*')
@@ -71,7 +74,7 @@ export async function listMidiEditSessions(songId: string) {
 export async function createMidiEditSession(songId: string, input: z.infer<typeof createMidiEditSessionSchema>) {
   const { user, supabase } = await getWereCodeRequestContext();
   const body = createMidiEditSessionSchema.parse(input);
-  await assertOwnedSong(supabase, user.id, songId);
+  await requireOwnedSong(supabase, user.id, songId);
   const { data, error } = await supabase
     .from('midi_edit_sessions')
     .insert({
@@ -100,10 +103,14 @@ export async function updateMidiEditSession(songId: string, sessionId: string, i
     .eq('song_id', songId)
     .eq('owner_id', user.id)
     .select('*')
-    .single<MidiEditSessionRow>();
+    .maybeSingle<MidiEditSessionRow>();
 
   if (error) {
     throw error;
+  }
+
+  if (!data) {
+    throw new RouteNotFoundError('MIDI edit session not found', 'midi_edit_session_not_found');
   }
 
   return data;
@@ -214,16 +221,7 @@ export async function applyMidiEditManifest(input: z.infer<typeof midiEditApplyS
 export async function saveArrangementManifest(input: z.infer<typeof arrangementManifestSchema>) {
   const { user, supabase } = await getWereCodeRequestContext();
   const body = arrangementManifestSchema.parse(input);
-  const { data: song, error: songError } = await supabase
-    .from('songs')
-    .select('*')
-    .eq('id', body.song_id)
-    .eq('owner_id', user.id)
-    .single<SongRow>();
-
-  if (songError) {
-    throw songError;
-  }
+  const song = await requireOwnedSong(supabase, user.id, body.song_id);
 
   const manifest = {
     name: body.name,
@@ -260,26 +258,17 @@ async function getOwnedAsset(supabase: SupabaseClient, ownerId: string, songId: 
     .eq('id', assetId)
     .eq('song_id', songId)
     .eq('owner_id', ownerId)
-    .single<AssetRow>();
+    .maybeSingle<AssetRow>();
 
   if (error) {
     throw error;
+  }
+
+  if (!data) {
+    throw new RouteNotFoundError('Asset not found', 'asset_not_found');
   }
 
   return data;
-}
-
-async function assertOwnedSong(supabase: SupabaseClient, ownerId: string, songId: string) {
-  const { error } = await supabase
-    .from('songs')
-    .select('id')
-    .eq('id', songId)
-    .eq('owner_id', ownerId)
-    .single();
-
-  if (error) {
-    throw error;
-  }
 }
 
 async function readJsonAsset(supabase: SupabaseClient, asset: AssetRow) {
@@ -298,7 +287,7 @@ async function createJob(
   jobType: string,
   requestPayload: Record<string, unknown>
 ) {
-  await assertOwnedSong(supabase, ownerId, songId);
+  await requireOwnedSong(supabase, ownerId, songId);
   const { data, error } = await supabase
     .from('jobs')
     .insert({

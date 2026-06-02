@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { routeErrorResponse } from '@/lib/http/route-error';
-import { getWereCodeRequestContext } from '@/server/werecode/context';
+import { getWereCodeRequestContext, requireOwnedSong } from '@/server/werecode/context';
 import type { AnalysisResultRow } from '@/types/werecode';
 
 export const dynamic = 'force-dynamic';
@@ -16,6 +16,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   try {
     const { songId } = await context.params;
     const { user, supabase } = await getWereCodeRequestContext();
+    await requireOwnedSong(supabase, user.id, songId);
+
     const { data, error } = await supabase
       .from('analysis_results')
       .select('*')

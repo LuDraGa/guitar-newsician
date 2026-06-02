@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { jsonError } from '@/lib/http/responses';
-import { routeErrorResponse } from '@/lib/http/route-error';
+import { RouteNotFoundError, routeErrorResponse } from '@/lib/http/route-error';
 import { getWereCodeRequestContext } from '@/server/werecode/context';
 import { updateSongSchema } from '@/server/werecode/schemas';
 import type { SongRow } from '@/types/werecode';
@@ -23,10 +22,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       .select('*')
       .eq('id', songId)
       .eq('owner_id', user.id)
-      .single<SongRow>();
+      .maybeSingle<SongRow>();
 
     if (error) {
       throw error;
+    }
+
+    if (!data) {
+      throw new RouteNotFoundError('Song not found', 'song_not_found');
     }
 
     return NextResponse.json({ song: data });
@@ -46,10 +49,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       .eq('id', songId)
       .eq('owner_id', user.id)
       .select('*')
-      .single<SongRow>();
+      .maybeSingle<SongRow>();
 
     if (error) {
       throw error;
+    }
+
+    if (!data) {
+      throw new RouteNotFoundError('Song not found', 'song_not_found');
     }
 
     return NextResponse.json({ song: data });
@@ -71,14 +78,14 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
       .eq('id', songId)
       .eq('owner_id', user.id)
       .select('*')
-      .single<SongRow>();
+      .maybeSingle<SongRow>();
 
     if (error) {
       throw error;
     }
 
     if (!data) {
-      return jsonError('Song not found', { status: 404, code: 'song_not_found' });
+      throw new RouteNotFoundError('Song not found', 'song_not_found');
     }
 
     return NextResponse.json({ song: data });
