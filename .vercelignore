@@ -2,7 +2,6 @@
 # src/ and does not need these directories in the deployment payload.
 backend/
 frontend/
-studio_Design/
 docs/
 
 # Local runtime output and machine state.

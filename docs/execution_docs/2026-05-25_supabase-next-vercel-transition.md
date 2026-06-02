@@ -500,9 +500,10 @@ Current status:
 - Root Next app deployment is wired.
 - Production Google auth has passed an initial smoke test.
 - Local YouTube download remains local-only through the legacy backend.
-- Legacy `backend/`, `frontend/`, and `studio_Design/` directories remain in the
-  repository as reference/local paths and are excluded from the root Vercel
-  deployment payload.
+- Legacy `backend/` and `frontend/` directories remain in the repository as
+  reference/local paths and are excluded from the root Vercel deployment payload.
+- Old `studio_Design/` screenshot artifacts have been removed; future design
+  work should happen directly in the Next app or in new committed assets.
 
 ## Next Work Queue
 

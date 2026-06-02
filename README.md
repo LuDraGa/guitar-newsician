@@ -113,7 +113,6 @@ Then keep the Next app running from the repository root with `pnpm dev`.
 - `supabase/sql/`: manual Supabase schema and verification SQL
 - `backend/`: legacy/local Python backend and model behavior reference
 - `frontend/`: legacy Vite UI reference during the port
-- `studio_Design/`: visual reference material
 - `docs/execution_docs/`: migration and task tracking docs
 
 The Vercel project root should be this repository root. The legacy `backend/`

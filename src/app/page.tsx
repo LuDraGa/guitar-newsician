@@ -38,7 +38,7 @@ export default async function HomePage() {
               <div className="text-sm text-[var(--accent-strong)]">Studio</div>
               <div className="mt-2 text-lg font-medium">Analysis, stems, lyrics, MIDI</div>
               <p className="muted mt-2 text-sm">
-                The Vite studio panels and design references will be ported into this route.
+                Run compute workflows, inspect artifacts, manage lyrics, and review MIDI or score outputs.
               </p>
             </Link>
           </div>
