@@ -46,7 +46,6 @@ These directories remain significant migration inputs and should not be deleted 
 | `frontend/src/store/appStore.ts`             | Current Zustand app state                | Split into feature-local stores under `src/features/*/store.ts`                  |
 | `frontend/src/utils/*`                       | Music parsing/render helpers             | `src/lib/music/*` or feature-local utilities                                     |
 | `frontend/src/types/*`                       | UI/domain types                          | `src/types/*`                                                                    |
-| `studio_Design/*`                            | Studio visual references                 | `docs/design/studio/*` or `public/design/studio/*` after asset review            |
 | `backend/app/api/routes/*`                   | Legacy FastAPI behavior                  | `src/app/api/*/route.ts` and server actions                                      |
 | `backend/app/api/services/*`                 | Legacy orchestration behavior            | `src/server/jobs/*` and `src/lib/modal/*`                                        |
 | `backend/app/analyzers/*`                    | Analysis shape reference                 | Modal `/analyze/music` plus `src/types/analysis.ts`                              |
@@ -80,7 +79,6 @@ WereCode/
 │   │   └── supabase/
 │   └── types/
 ├── frontend/        # Legacy Vite source reference during migration
-├── studio_Design/   # Legacy design source reference during migration
 ├── backend/         # Legacy/local backend and model behavior reference
 └── supabase/sql/    # Schema migrations to run manually in Supabase
 ```
