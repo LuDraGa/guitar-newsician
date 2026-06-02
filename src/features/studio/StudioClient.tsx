@@ -17,6 +17,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
+import { StemMixerPanel } from './StemMixerPanel';
 import { assetLabel, fetchJson, formatBytes, formatDate, signDownload, statusClass } from './studio-utils';
 import { StudioWorkflowPanels } from './StudioWorkflowPanels';
 import { TranscriptionWorkspace } from './TranscriptionWorkspace';
@@ -394,6 +395,8 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                 })
               }
             />
+
+            <StemMixerPanel assets={assets} onOpenAsset={(asset) => void openAsset(asset)} />
 
             <TranscriptionWorkspace
               song={song}
