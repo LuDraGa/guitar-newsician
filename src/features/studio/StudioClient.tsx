@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
 import { assetLabel, fetchJson, formatBytes, formatDate, signDownload, statusClass } from './studio-utils';
+import { StudioWorkflowPanels } from './StudioWorkflowPanels';
 
 type WorkflowResult = {
   job?: JobRow;
@@ -59,6 +60,8 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     latestAssetsByKind.get('source_audio') ??
     latestAssetsByKind.get('preview_audio');
   const vocalAsset = latestAssetsByKind.get('stem_vocals');
+  const noteEventsAsset = latestAssetsByKind.get('note_events');
+  const musicXmlAsset = latestAssetsByKind.get('musicxml') ?? latestAssetsByKind.get('tab_musicxml');
   const plainLyrics = useMemo(() => lyrics.find((item) => item.lyrics_type === 'plain'), [lyrics]);
   const syncedLyrics = useMemo(() => lyrics.find((item) => item.lyrics_type === 'lrc' || item.lyrics_type === 'alignment_json'), [lyrics]);
 
@@ -255,6 +258,18 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
           stem_name: vocalAsset ? 'vocals' : undefined,
         }),
     },
+    {
+      id: 'musicxml',
+      label: 'MusicXML',
+      icon: FileMusic,
+      disabled: !noteEventsAsset,
+      run: () =>
+        noteEventsAsset &&
+        runWorkflow('MusicXML conversion', '/api/workflows/midi/convert-musicxml', {
+          note_events_asset_id: noteEventsAsset.id,
+          title: song?.title,
+        }),
+    },
   ];
 
   return (
@@ -360,6 +375,24 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                 })}
               </div>
             </div>
+
+            <StudioWorkflowPanels
+              assets={assets}
+              sourceAsset={sourceAsset}
+              syncedLyrics={syncedLyrics}
+              plainLyrics={plainLyrics}
+              noteEventsAsset={noteEventsAsset}
+              musicXmlAsset={musicXmlAsset}
+              running={running}
+              onOpenAsset={(asset) => void openAsset(asset)}
+              onRunMusicXml={() =>
+                noteEventsAsset &&
+                void runWorkflow('MusicXML conversion', '/api/workflows/midi/convert-musicxml', {
+                  note_events_asset_id: noteEventsAsset.id,
+                  title: song?.title,
+                })
+              }
+            />
 
             <div className="surface overflow-hidden">
               <div className="border-b border-white/10 p-4">
