@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { routeErrorResponse } from '@/lib/http/route-error';
-import { getWereCodeRequestContext } from '@/server/werecode/context';
+import { getWereCodeRequestContext, requireOwnedSong } from '@/server/werecode/context';
 import { createJobSchema } from '@/server/werecode/schemas';
 import type { JobRow } from '@/types/werecode';
 
@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
       .limit(limit);
 
     if (songId) {
+      await requireOwnedSong(supabase, user.id, songId);
       query = query.eq('song_id', songId);
     }
 
@@ -46,6 +47,10 @@ export async function POST(request: NextRequest) {
   try {
     const body = createJobSchema.parse(await request.json().catch(() => null));
     const { user, supabase } = await getWereCodeRequestContext();
+    if (body.song_id) {
+      await requireOwnedSong(supabase, user.id, body.song_id);
+    }
+
     const { data, error } = await supabase
       .from('jobs')
       .insert({

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { routeErrorResponse } from '@/lib/http/route-error';
-import { getWereCodeRequestContext } from '@/server/werecode/context';
+import { getWereCodeRequestContext, requireOwnedSong } from '@/server/werecode/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,16 +18,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = saveLyricsSchema.parse(await request.json().catch(() => null));
     const { user, supabase } = await getWereCodeRequestContext();
-    const { error: songAccessError } = await supabase
-      .from('songs')
-      .select('id')
-      .eq('id', body.song_id)
-      .eq('owner_id', user.id)
-      .single();
-
-    if (songAccessError) {
-      throw songAccessError;
-    }
+    await requireOwnedSong(supabase, user.id, body.song_id);
 
     const { data, error } = await supabase
       .from('lyrics')

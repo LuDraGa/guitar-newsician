@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { routeErrorResponse } from '@/lib/http/route-error';
+import { RouteNotFoundError, routeErrorResponse } from '@/lib/http/route-error';
 import { getWereCodeRequestContext } from '@/server/werecode/context';
 import { updateJobSchema } from '@/server/werecode/schemas';
 import type { JobRow } from '@/types/werecode';
@@ -22,10 +22,14 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       .select('*')
       .eq('id', jobId)
       .eq('owner_id', user.id)
-      .single<JobRow>();
+      .maybeSingle<JobRow>();
 
     if (error) {
       throw error;
+    }
+
+    if (!data) {
+      throw new RouteNotFoundError('Job not found', 'job_not_found');
     }
 
     return NextResponse.json({ job: data });
@@ -45,10 +49,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       .eq('id', jobId)
       .eq('owner_id', user.id)
       .select('*')
-      .single<JobRow>();
+      .maybeSingle<JobRow>();
 
     if (error) {
       throw error;
+    }
+
+    if (!data) {
+      throw new RouteNotFoundError('Job not found', 'job_not_found');
     }
 
     return NextResponse.json({ job: data });
