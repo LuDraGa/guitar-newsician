@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
 import { assetLabel, fetchJson, formatBytes, formatDate, signDownload, statusClass } from './studio-utils';
 import { StudioWorkflowPanels } from './StudioWorkflowPanels';
+import { TranscriptionWorkspace } from './TranscriptionWorkspace';
 
 type WorkflowResult = {
   job?: JobRow;
@@ -392,6 +393,16 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   title: song?.title,
                 })
               }
+            />
+
+            <TranscriptionWorkspace
+              song={song}
+              assets={assets}
+              sourceAsset={sourceAsset}
+              audioUrl={audioUrl}
+              running={running}
+              onOpenAsset={(asset) => void openAsset(asset)}
+              onRunWorkflow={(name, endpoint, payload) => void runWorkflow(name, endpoint, payload)}
             />
 
             <div className="surface overflow-hidden">
