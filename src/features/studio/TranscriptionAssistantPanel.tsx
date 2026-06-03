@@ -13,6 +13,7 @@ export function TranscriptionAssistantPanel({
   error,
   message,
   busy,
+  layout = 'split',
   onInputChange,
   onCreateSession,
   onApply,
@@ -24,13 +25,14 @@ export function TranscriptionAssistantPanel({
   error: string | null;
   message: string | null;
   busy: boolean;
+  layout?: 'split' | 'stacked';
   onInputChange: (value: string) => void;
   onCreateSession: () => void;
   onApply: (session: MidiEditSessionRow) => void;
   onReject: (session: MidiEditSessionRow) => void;
 }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
+    <div className={layout === 'stacked' ? 'grid gap-4' : 'grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]'}>
       <div className="rounded-md border border-white/10 bg-black/20 p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">

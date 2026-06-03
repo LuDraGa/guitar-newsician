@@ -6,7 +6,7 @@ import type { AssetRow, MidiEditSessionRow, SongRow } from '@/types/werecode';
 import { jsonArray } from './TranscriptionAssistantPanel';
 import { fetchJson, signDownload } from './studio-utils';
 
-export type TranscriptionView = 'waveform' | 'piano' | 'sheet' | 'tab' | 'assistant';
+export type TranscriptionView = 'waveform' | 'piano' | 'sheet' | 'tab';
 
 export function useTranscriptionWorkspace({
   song,

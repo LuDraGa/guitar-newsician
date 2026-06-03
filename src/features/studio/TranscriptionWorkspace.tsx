@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  Bot,
   FileMusic,
   Guitar,
   Keyboard,
@@ -9,6 +8,7 @@ import {
   Sparkles,
   Waves,
 } from 'lucide-react';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
 import type { AssetRow, SongRow } from '@/types/werecode';
 import { MusicXmlPreviewPanel } from './MusicXmlPreviewPanel';
@@ -31,7 +31,6 @@ const viewConfig: Array<{ id: TranscriptionView; label: string; icon: typeof Wav
   { id: 'piano', label: 'Piano', icon: Keyboard },
   { id: 'sheet', label: 'Sheet', icon: FileMusic },
   { id: 'tab', label: 'Tab', icon: Guitar },
-  { id: 'assistant', label: 'Assistant', icon: Bot },
 ];
 
 export function TranscriptionWorkspace({
@@ -66,6 +65,57 @@ export function TranscriptionWorkspace({
     applySession,
     rejectSession,
   } = workspace;
+
+  const activePanel = (
+    <>
+      {activeView === 'waveform' && (
+        <WaveformPanel waveform={waveform} error={waveformError} selectedSection={selectedSection} />
+      )}
+      {activeView === 'piano' && (
+        <PianoPanel
+          midiData={midiData}
+          error={midiError}
+          selectedSection={selectedSection}
+          onSelectSection={setSelectedSection}
+        />
+      )}
+      {activeView === 'sheet' && (
+        <MusicXmlPreviewPanel
+          title="Sheet Music"
+          asset={musicXmlAsset}
+          fallback="No MusicXML score is available yet."
+          mode="sheet"
+          onOpenAsset={onOpenAsset}
+        />
+      )}
+      {activeView === 'tab' && (
+        <MusicXmlPreviewPanel
+          title="Tablature"
+          asset={tabAsset ?? musicXmlAsset}
+          fallback="No MusicXML or tab artifact is available yet."
+          mode="tab"
+          estimatedFromScore={!tabAsset && Boolean(musicXmlAsset)}
+          onOpenAsset={onOpenAsset}
+        />
+      )}
+    </>
+  );
+
+  const assistantPanel = (
+    <TranscriptionAssistantPanel
+      sessions={sessions}
+      selectedSection={selectedSection}
+      input={assistantInput}
+      error={assistantError}
+      message={assistantMessage}
+      busy={assistantBusy}
+      layout="stacked"
+      onInputChange={setAssistantInput}
+      onCreateSession={() => void createEditSession()}
+      onApply={(session) => void applySession(session)}
+      onReject={(session) => void rejectSession(session)}
+    />
+  );
 
   return (
     <section className="surface overflow-hidden">
@@ -133,51 +183,25 @@ export function TranscriptionWorkspace({
         </div>
       </div>
 
-      <div className="p-4">
-        {activeView === 'waveform' && (
-          <WaveformPanel waveform={waveform} error={waveformError} selectedSection={selectedSection} />
-        )}
-        {activeView === 'piano' && (
-          <PianoPanel
-            midiData={midiData}
-            error={midiError}
-            selectedSection={selectedSection}
-            onSelectSection={setSelectedSection}
-          />
-        )}
-        {activeView === 'sheet' && (
-          <MusicXmlPreviewPanel
-            title="Sheet Music"
-            asset={musicXmlAsset}
-            fallback="No MusicXML score is available yet."
-            mode="sheet"
-            onOpenAsset={onOpenAsset}
-          />
-        )}
-        {activeView === 'tab' && (
-          <MusicXmlPreviewPanel
-            title="Tablature"
-            asset={tabAsset ?? musicXmlAsset}
-            fallback="No MusicXML or tab artifact is available yet."
-            mode="tab"
-            estimatedFromScore={!tabAsset && Boolean(musicXmlAsset)}
-            onOpenAsset={onOpenAsset}
-          />
-        )}
-        {activeView === 'assistant' && (
-          <TranscriptionAssistantPanel
-            sessions={sessions}
-            selectedSection={selectedSection}
-            input={assistantInput}
-            error={assistantError}
-            message={assistantMessage}
-            busy={assistantBusy}
-            onInputChange={setAssistantInput}
-            onCreateSession={() => void createEditSession()}
-            onApply={(session) => void applySession(session)}
-            onReject={(session) => void rejectSession(session)}
-          />
-        )}
+      <div className="overflow-x-auto">
+        <PanelGroup
+          autoSaveId={`werecode-transcription-workspace-${song?.id ?? 'empty'}`}
+          direction="horizontal"
+          className="min-h-[620px] min-w-[760px]"
+        >
+          <Panel defaultSize={68} minSize={45} className="min-w-0">
+            <div className="h-full overflow-auto p-4">{activePanel}</div>
+          </Panel>
+          <PanelResizeHandle
+            aria-label="Resize transcription panels"
+            className="group flex w-3 items-stretch justify-center border-x border-white/5 bg-white/[0.02] outline-none transition-colors hover:bg-white/[0.06] focus-visible:bg-white/[0.06]"
+          >
+            <span className="my-4 w-0.5 rounded-full bg-white/10 transition-colors group-hover:bg-[var(--accent)]" />
+          </PanelResizeHandle>
+          <Panel defaultSize={32} minSize={24} maxSize={44} className="min-w-[300px]">
+            <div className="h-full overflow-auto p-4">{assistantPanel}</div>
+          </Panel>
+        </PanelGroup>
       </div>
     </section>
   );
