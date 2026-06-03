@@ -14,6 +14,7 @@ import type { AssetRow, SongRow } from '@/types/werecode';
 import { MusicXmlPreviewPanel } from './MusicXmlPreviewPanel';
 import { TranscriptionAssistantPanel } from './TranscriptionAssistantPanel';
 import { PianoPanel, WaveformPanel } from './TranscriptionPanels';
+import { TranscriptionSelectionToolbar } from './TranscriptionSelectionToolbar';
 import { useTranscriptionWorkspace, type TranscriptionView } from './useTranscriptionWorkspace';
 
 type TranscriptionWorkspaceProps = {
@@ -69,7 +70,12 @@ export function TranscriptionWorkspace({
   const activePanel = (
     <>
       {activeView === 'waveform' && (
-        <WaveformPanel waveform={waveform} error={waveformError} selectedSection={selectedSection} />
+        <WaveformPanel
+          waveform={waveform}
+          error={waveformError}
+          selectedSection={selectedSection}
+          onSelectSection={setSelectedSection}
+        />
       )}
       {activeView === 'piano' && (
         <PianoPanel
@@ -182,6 +188,7 @@ export function TranscriptionWorkspace({
           })}
         </div>
       </div>
+      <TranscriptionSelectionToolbar selectedSection={selectedSection} onClear={() => setSelectedSection(null)} />
 
       <div className="overflow-x-auto">
         <PanelGroup

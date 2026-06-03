@@ -1,18 +1,26 @@
 'use client';
 
+import { useState, type PointerEvent } from 'react';
+
 import { formatTime } from '@/lib/music/lrc';
 import { getNoteColor, getPitchRange, type MidiNote, type MidiParsedData } from '@/lib/music/midi';
 import type { DetailedWaveformData } from '@/lib/music/waveform';
+
+type TimeSelection = { start: number; end: number };
 
 export function WaveformPanel({
   waveform,
   error,
   selectedSection,
+  onSelectSection,
 }: {
   waveform: DetailedWaveformData | null;
   error: string | null;
-  selectedSection: { start: number; end: number } | null;
+  selectedSection: TimeSelection | null;
+  onSelectSection: (section: TimeSelection) => void;
 }) {
+  const [dragSelection, setDragSelection] = useState<TimeSelection | null>(null);
+
   if (error) {
     return <EmptyPanel text={error} />;
   }
@@ -22,31 +30,63 @@ export function WaveformPanel({
   }
 
   const bars = compactWaveform(waveform, 180);
-  const selectedStart = selectedSection ? (selectedSection.start / waveform.duration) * 180 : null;
+  const displayedSelection = dragSelection ?? selectedSection;
+  const selectedStart = displayedSelection ? (displayedSelection.start / waveform.duration) * 180 : null;
   const selectedWidth =
-    selectedSection && waveform.duration > 0
-      ? Math.max(1, ((selectedSection.end - selectedSection.start) / waveform.duration) * 180)
+    displayedSelection && waveform.duration > 0
+      ? Math.max(1, ((displayedSelection.end - displayedSelection.start) / waveform.duration) * 180)
       : null;
 
   return (
     <div className="rounded-md border border-white/10 bg-black/20 p-3">
-      <svg viewBox="0 0 180 72" className="h-40 w-full" preserveAspectRatio="none" role="img" aria-label="Audio waveform">
-        {selectedStart !== null && selectedWidth !== null && (
-          <rect x={selectedStart} y="0" width={selectedWidth} height="72" fill="rgba(94, 224, 194, 0.18)" />
-        )}
-        {bars.map((bar) => (
-          <line
-            key={bar.x}
-            x1={bar.x}
-            x2={bar.x}
-            y1={36 - bar.height}
-            y2={36 + bar.height}
-            stroke="var(--accent-strong)"
-            strokeWidth="0.7"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-      </svg>
+      <button
+        type="button"
+        aria-label="Select waveform range"
+        onPointerDown={(event) => {
+          const time = eventToTime(event, waveform.duration);
+          event.currentTarget.setPointerCapture(event.pointerId);
+          setDragSelection({ start: time, end: time });
+        }}
+        onPointerMove={(event) => {
+          if (!dragSelection) {
+            return;
+          }
+
+          const time = eventToTime(event, waveform.duration);
+          setDragSelection(normalizeSelection(dragSelection.start, time, waveform.duration, false));
+        }}
+        onPointerUp={(event) => {
+          if (!dragSelection) {
+            return;
+          }
+
+          const time = eventToTime(event, waveform.duration);
+          const nextSelection = normalizeSelection(dragSelection.start, time, waveform.duration, true);
+          onSelectSection(nextSelection);
+          setDragSelection(null);
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onPointerCancel={() => setDragSelection(null)}
+        className="block w-full cursor-crosshair rounded text-left outline-none focus:ring-1 focus:ring-[var(--accent)]"
+      >
+        <svg viewBox="0 0 180 72" className="h-40 w-full" preserveAspectRatio="none" role="img" aria-label="Audio waveform">
+          {selectedStart !== null && selectedWidth !== null && (
+            <rect x={selectedStart} y="0" width={selectedWidth} height="72" fill="rgba(94, 224, 194, 0.18)" />
+          )}
+          {bars.map((bar) => (
+            <line
+              key={bar.x}
+              x1={bar.x}
+              x2={bar.x}
+              y1={36 - bar.height}
+              y2={36 + bar.height}
+              stroke="var(--accent-strong)"
+              strokeWidth="0.7"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+        </svg>
+      </button>
       <div className="muted mt-2 flex justify-between text-xs">
         <span>0:00</span>
         <span>{formatTime(waveform.duration)}</span>
@@ -63,9 +103,11 @@ export function PianoPanel({
 }: {
   midiData: MidiParsedData | null;
   error: string | null;
-  selectedSection: { start: number; end: number } | null;
-  onSelectSection: (section: { start: number; end: number }) => void;
+  selectedSection: TimeSelection | null;
+  onSelectSection: (section: TimeSelection) => void;
 }) {
+  const [dragSelection, setDragSelection] = useState<TimeSelection | null>(null);
+
   if (error) {
     return <EmptyPanel text={error} />;
   }
@@ -77,17 +119,48 @@ export function PianoPanel({
   const range = getPitchRange(midiData.notes);
   const pitchSpan = Math.max(1, range.max - range.min);
   const timelineWidth = Math.max(720, midiData.duration * 96);
+  const displayedSelection = dragSelection ?? selectedSection;
 
   return (
     <div className="overflow-x-auto rounded-md border border-white/10 bg-black/20">
       <div className="relative h-80" style={{ width: `${timelineWidth}px` }}>
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:96px_20px]" />
-        {selectedSection && (
+        <button
+          type="button"
+          aria-label="Select MIDI range"
+          onPointerDown={(event) => {
+            const time = eventToTimelineTime(event, midiData.duration, timelineWidth);
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setDragSelection({ start: time, end: time });
+          }}
+          onPointerMove={(event) => {
+            if (!dragSelection) {
+              return;
+            }
+
+            const time = eventToTimelineTime(event, midiData.duration, timelineWidth);
+            setDragSelection(normalizeSelection(dragSelection.start, time, midiData.duration, false));
+          }}
+          onPointerUp={(event) => {
+            if (!dragSelection) {
+              return;
+            }
+
+            const time = eventToTimelineTime(event, midiData.duration, timelineWidth);
+            const nextSelection = normalizeSelection(dragSelection.start, time, midiData.duration, true);
+            onSelectSection(nextSelection);
+            setDragSelection(null);
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }}
+          onPointerCancel={() => setDragSelection(null)}
+          className="absolute inset-0 z-10 cursor-crosshair bg-transparent p-0 outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--accent)]"
+        />
+        {displayedSelection && midiData.duration > 0 && (
           <div
-            className="absolute top-0 h-full bg-[var(--accent)]/10"
+            className="pointer-events-none absolute top-0 z-10 h-full bg-[var(--accent)]/10"
             style={{
-              left: `${(selectedSection.start / midiData.duration) * timelineWidth}px`,
-              width: `${Math.max(2, ((selectedSection.end - selectedSection.start) / midiData.duration) * timelineWidth)}px`,
+              left: `${(displayedSelection.start / midiData.duration) * timelineWidth}px`,
+              width: `${Math.max(2, ((displayedSelection.end - displayedSelection.start) / midiData.duration) * timelineWidth)}px`,
             }}
           />
         )}
@@ -127,7 +200,7 @@ function MidiNoteBlock({
   pitchSpan: number;
   duration: number;
   timelineWidth: number;
-  onSelectSection: (section: { start: number; end: number }) => void;
+  onSelectSection: (section: TimeSelection) => void;
 }) {
   const left = (note.time / duration) * timelineWidth;
   const width = Math.max(4, (note.duration / duration) * timelineWidth);
@@ -138,7 +211,7 @@ function MidiNoteBlock({
       type="button"
       title={`${note.pitchName} ${formatTime(note.time)}`}
       onClick={() => onSelectSection({ start: note.time, end: note.time + Math.max(note.duration, 0.25) })}
-      className="absolute h-2 rounded-sm opacity-90 outline-none ring-offset-0 hover:opacity-100 focus:ring-1 focus:ring-white"
+      className="absolute z-20 h-2 rounded-sm opacity-90 outline-none ring-offset-0 hover:opacity-100 focus:ring-1 focus:ring-white"
       style={{
         left,
         bottom,
@@ -167,4 +240,33 @@ function compactWaveform(waveform: DetailedWaveformData, width: number) {
   }
 
   return bars;
+}
+
+function eventToTime(event: PointerEvent<HTMLElement>, duration: number) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+  return clamp(ratio * duration, 0, duration);
+}
+
+function eventToTimelineTime(event: PointerEvent<HTMLElement>, duration: number, timelineWidth: number) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const ratio = timelineWidth > 0 ? (event.clientX - rect.left) / rect.width : 0;
+  return clamp(ratio * duration, 0, duration);
+}
+
+function normalizeSelection(start: number, end: number, duration: number, enforceMinimum: boolean): TimeSelection {
+  const min = Math.min(start, end);
+  const max = Math.max(start, end);
+  if (!enforceMinimum || max - min >= 0.15) {
+    return { start: min, end: max };
+  }
+
+  return {
+    start: min,
+    end: Math.min(duration, min + 0.25),
+  };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
