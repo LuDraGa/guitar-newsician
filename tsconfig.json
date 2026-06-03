@@ -37,8 +37,6 @@
   ],
   "exclude": [
     "node_modules",
-    "backend",
-    "frontend",
-    "studio_Design"
+    "backend"
   ]
 }
