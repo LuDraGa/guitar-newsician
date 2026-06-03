@@ -11,8 +11,9 @@ import {
 } from 'lucide-react';
 
 import type { AssetRow, SongRow } from '@/types/werecode';
+import { MusicXmlPreviewPanel } from './MusicXmlPreviewPanel';
 import { TranscriptionAssistantPanel } from './TranscriptionAssistantPanel';
-import { ArtifactPanel, PianoPanel, WaveformPanel } from './TranscriptionPanels';
+import { PianoPanel, WaveformPanel } from './TranscriptionPanels';
 import { useTranscriptionWorkspace, type TranscriptionView } from './useTranscriptionWorkspace';
 
 type TranscriptionWorkspaceProps = {
@@ -145,18 +146,21 @@ export function TranscriptionWorkspace({
           />
         )}
         {activeView === 'sheet' && (
-          <ArtifactPanel
+          <MusicXmlPreviewPanel
             title="Sheet Music"
             asset={musicXmlAsset}
             fallback="No MusicXML score is available yet."
+            mode="sheet"
             onOpenAsset={onOpenAsset}
           />
         )}
         {activeView === 'tab' && (
-          <ArtifactPanel
+          <MusicXmlPreviewPanel
             title="Tablature"
-            asset={tabAsset}
-            fallback="No tab artifact is available yet."
+            asset={tabAsset ?? musicXmlAsset}
+            fallback="No MusicXML or tab artifact is available yet."
+            mode="tab"
+            estimatedFromScore={!tabAsset && Boolean(musicXmlAsset)}
             onOpenAsset={onOpenAsset}
           />
         )}
