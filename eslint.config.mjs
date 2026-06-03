@@ -8,7 +8,6 @@ const eslintConfig = [
     ignores: [
       ".next/**",
       "backend/**",
-      "studio_Design/**",
       "downloads/**",
     ],
   },
