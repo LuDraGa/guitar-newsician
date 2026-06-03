@@ -43,8 +43,6 @@ type BackendJobStatusResponse = {
       artist?: string | null;
       duration?: number | null;
       file_size?: number | null;
-      has_lyrics?: boolean;
-      has_synced_lyrics?: boolean;
     } | null;
   };
 };
@@ -101,12 +99,6 @@ export async function POST(request: NextRequest) {
         jobId: job.id,
         songFolder: result?.song_folder ?? dirname(audioFile),
       });
-      const lyricRows = await persistLocalLyrics(supabase, {
-        ownerId: user.id,
-        songId: song.id,
-        jobId: job.id,
-        songFolder: result?.song_folder ?? dirname(audioFile),
-      });
 
       const updatedSong = await updateSong(supabase, user.id, song.id, {
         title: result?.title || song.title,
@@ -114,8 +106,6 @@ export async function POST(request: NextRequest) {
         duration_sec: typeof result?.duration === 'number' ? result.duration : song.duration_sec,
         status: 'ready',
         has_audio: true,
-        has_plain_lyrics: lyricRows.some((row) => row.lyrics_type === 'plain'),
-        has_synced_lyrics: lyricRows.some((row) => row.lyrics_type === 'lrc'),
         metadata: {
           ...jsonObject(song.metadata),
           source_audio_required: false,
@@ -144,7 +134,7 @@ export async function POST(request: NextRequest) {
         song: updatedSong,
         job: updatedJob,
         assets: [audioAsset, metadataAsset].filter(Boolean),
-        lyrics: lyricRows,
+        lyrics: [],
       });
     } catch (downloadError) {
       await Promise.allSettled([
@@ -411,67 +401,6 @@ async function maybeUploadMetadataAsset(
         local_path: metadataPath,
       },
     });
-  } catch {
-    return null;
-  }
-}
-
-async function persistLocalLyrics(
-  supabase: SupabaseClient,
-  options: {
-    ownerId: string;
-    songId: string;
-    jobId: string;
-    songFolder: string;
-  }
-) {
-  const rows = [];
-  const plainPath = join(options.songFolder, 'lyrics.txt');
-  const lrcPath = join(options.songFolder, 'lyrics.lrc');
-  const [plain, lrc] = await Promise.all([readOptionalText(plainPath), readOptionalText(lrcPath)]);
-
-  if (plain?.trim()) {
-    rows.push({
-      owner_id: options.ownerId,
-      song_id: options.songId,
-      lyrics_type: 'plain',
-      source: 'local_youtube_download',
-      content: plain,
-      metadata: {
-        job_id: options.jobId,
-        local_path: plainPath,
-      },
-    });
-  }
-  if (lrc?.trim()) {
-    rows.push({
-      owner_id: options.ownerId,
-      song_id: options.songId,
-      lyrics_type: 'lrc',
-      source: 'local_youtube_download',
-      content: lrc,
-      metadata: {
-        job_id: options.jobId,
-        local_path: lrcPath,
-      },
-    });
-  }
-
-  if (rows.length === 0) {
-    return [];
-  }
-
-  const { data, error } = await supabase.from('lyrics').upsert(rows, { onConflict: 'song_id,lyrics_type' }).select('*');
-  if (error) {
-    throw error;
-  }
-
-  return data ?? [];
-}
-
-async function readOptionalText(path: string) {
-  try {
-    return await readFile(path, 'utf8');
   } catch {
     return null;
   }
