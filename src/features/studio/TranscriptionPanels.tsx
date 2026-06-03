@@ -1,12 +1,8 @@
 'use client';
 
-import { FileMusic } from 'lucide-react';
-
 import { formatTime } from '@/lib/music/lrc';
 import { getNoteColor, getPitchRange, type MidiNote, type MidiParsedData } from '@/lib/music/midi';
 import type { DetailedWaveformData } from '@/lib/music/waveform';
-import type { AssetRow } from '@/types/werecode';
-import { assetLabel, formatDate } from './studio-utils';
 
 export function WaveformPanel({
   waveform,
@@ -113,43 +109,6 @@ export function PianoPanel({
           {midiData.tempo.toFixed(0)} BPM - {midiData.timeSignature.join('/')}
         </span>
         <span>{formatTime(midiData.duration)}</span>
-      </div>
-    </div>
-  );
-}
-
-export function ArtifactPanel({
-  title,
-  asset,
-  fallback,
-  onOpenAsset,
-}: {
-  title: string;
-  asset: AssetRow | undefined;
-  fallback: string;
-  onOpenAsset: (asset: AssetRow) => void;
-}) {
-  if (!asset) {
-    return <EmptyPanel text={fallback} />;
-  }
-
-  return (
-    <div className="rounded-md border border-white/10 bg-black/20 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="font-medium text-white">{title}</h3>
-          <p className="muted mt-1 text-sm">
-            {assetLabel(asset.kind)} - {asset.content_type ?? 'unknown'} - {formatDate(asset.created_at)}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => onOpenAsset(asset)}
-          className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-sm text-slate-100 hover:bg-white/10"
-        >
-          <FileMusic className="h-4 w-4" />
-          Open
-        </button>
       </div>
     </div>
   );
