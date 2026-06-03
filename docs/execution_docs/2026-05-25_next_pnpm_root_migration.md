@@ -33,25 +33,13 @@ Move WereCode to a single Vercel-deployable Next.js application at the repositor
 
 ## Current source paths to preserve
 
-These directories remain significant migration inputs and should not be deleted until their behavior has been ported and verified.
+The legacy `frontend/` source reference was removed during cleanup after the
+root Next app became the only frontend source.
 
 | Current path                                 | Role                                     | Target path                                                                      |
 | -------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------- |
-| `frontend/src/views/library/LibraryPage.tsx` | Current library screen                   | `src/app/(app)/library/page.tsx` plus `src/features/library/*`                   |
-| `frontend/src/components/library/*`          | Current library UI components            | `src/features/library/components/*`                                              |
-| `frontend/src/components/panels/*`           | Current studio/transcription/MIDI panels | `src/features/studio/components/*` and `src/features/transcription/components/*` |
-| `frontend/src/components/studio/*`           | Stem mixer, lyrics, playback controls    | `src/features/studio/components/*`                                               |
-| `frontend/src/services/api.ts`               | Old FastAPI client                       | Replace with `src/lib/modal/*`, `src/lib/supabase/*`, and Next route handlers    |
-| `frontend/src/services/midiEditorService.ts` | Old MIDI editor client                   | `src/features/midi/api/*` and Next route handlers                                |
-| `frontend/src/store/appStore.ts`             | Current Zustand app state                | Split into feature-local stores under `src/features/*/store.ts`                  |
-| `frontend/src/utils/*`                       | Music parsing/render helpers             | `src/lib/music/*` or feature-local utilities                                     |
-| `frontend/src/types/*`                       | UI/domain types                          | `src/types/*`                                                                    |
-| `studio_Design/*`                            | Studio visual references                 | `docs/design/studio/*` or `public/design/studio/*` after asset review            |
-| `backend/app/api/routes/*`                   | Legacy FastAPI behavior                  | `src/app/api/*/route.ts` and server actions                                      |
-| `backend/app/api/services/*`                 | Legacy orchestration behavior            | `src/server/jobs/*` and `src/lib/modal/*`                                        |
-| `backend/app/analyzers/*`                    | Analysis shape reference                 | Modal `/analyze/music` plus `src/types/analysis.ts`                              |
-| `backend/app/stem_separators/*`              | Stem model behavior reference            | Modal `/separate`                                                                |
-| `backend/app/converters/wav2midi/*`          | Basic Pitch behavior reference           | Modal `/midi/transcribe` and `/transcribe/instrument`                            |
+| `backend/app/api/routes/download.py`         | Local-only YouTube download bridge       | Keep local-only; production source upload stays in Next/Supabase                 |
+| `backend/app/api/services/download_service.py` | Local-only yt-dlp service              | Keep local-only; Modal owns production compute                                   |
 
 ## Target structure
 
@@ -79,9 +67,7 @@ WereCode/
 │   │   ├── modal/
 │   │   └── supabase/
 │   └── types/
-├── frontend/        # Legacy Vite source reference during migration
-├── studio_Design/   # Legacy design source reference during migration
-├── backend/         # Legacy/local backend and model behavior reference
+├── backend/         # Local-only YouTube download backend
 └── supabase/sql/    # Schema migrations to run manually in Supabase
 ```
 
@@ -185,4 +171,4 @@ local-only and keep yt-dlp out of production.
 2. Run a two-user production RLS/storage smoke test: user A must not read, sign, mutate, or archive user B rows or objects.
 3. Finish the studio UX/UI pass for playback, waveform, lyrics, stems, MIDI, and transcription panels.
 4. Decide artifact cleanup behavior for failed or abandoned workflow jobs.
-5. Remove or further quarantine legacy Vite/FastAPI references once their remaining reference value is exhausted.
+5. Keep old frontend/FastAPI references out of the production-shaped tree.

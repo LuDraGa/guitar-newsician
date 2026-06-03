@@ -1,13 +1,10 @@
-# Legacy/reference code is kept in the repo, but the root Vercel app builds from
-# src/ and does not need these directories in the deployment payload.
+# The root Vercel app builds from src/ and does not need local-only support
+# directories in the deployment payload.
 backend/
-frontend/
-studio_Design/
 docs/
 
 # Local runtime output and machine state.
 downloads/
-outputs/
 .claude/
 .werecode_session.json
 .DS_Store

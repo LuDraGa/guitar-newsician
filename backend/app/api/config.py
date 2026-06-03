@@ -1,4 +1,4 @@
-"""Centralized configuration system for WereCode API."""
+"""Configuration for the local YouTube download backend."""
 
 import os
 from pathlib import Path
@@ -18,31 +18,12 @@ load_dotenv(_project_root / ".env")
 class WereCodeConfig(BaseModel):
     """Global configuration for WereCode API."""
 
-    # Base directories (resolved relative to project root)
     downloads_dir: Path = Field(
         default_factory=lambda: _project_root / Path(os.getenv("DOWNLOADS_DIR", "downloads"))
     )
-    outputs_dir: Path = Field(
-        default_factory=lambda: _project_root / Path(os.getenv("OUTPUTS_DIR", "outputs"))
-    )
 
-    # File organization
     organize_by_song: bool = Field(
         default_factory=lambda: os.getenv("ORGANIZE_BY_SONG", "true").lower() == "true"
-    )
-    stems_subfolder: str = Field(
-        default_factory=lambda: os.getenv("STEMS_SUBFOLDER", "stems")
-    )
-    analysis_subfolder: str = Field(
-        default_factory=lambda: os.getenv("ANALYSIS_SUBFOLDER", "analysis")
-    )
-
-    # Analysis settings
-    transpose_to_key: Optional[str] = Field(
-        default_factory=lambda: os.getenv("TRANSPOSE_TO_KEY") or None
-    )
-    default_analysis_preset: str = Field(
-        default_factory=lambda: os.getenv("DEFAULT_ANALYSIS_PRESET", "full")
     )
 
     # Job settings
@@ -61,7 +42,7 @@ class WereCodeConfig(BaseModel):
         default_factory=lambda: os.getenv("LOG_FILE")
     )
 
-    @field_validator("downloads_dir", "outputs_dir", mode="before")
+    @field_validator("downloads_dir", mode="before")
     @classmethod
     def convert_to_path(cls, v):
         """Convert string paths to Path objects."""
@@ -72,7 +53,6 @@ class WereCodeConfig(BaseModel):
     def ensure_directories(self):
         """Create all configured directories if they don't exist."""
         self.downloads_dir.mkdir(parents=True, exist_ok=True)
-        self.outputs_dir.mkdir(parents=True, exist_ok=True)
 
     def get_song_folder(self, song_title: str) -> Path:
         """
@@ -82,25 +62,15 @@ class WereCodeConfig(BaseModel):
         Otherwise returns downloads_dir/
         """
         if self.organize_by_song:
-            # Sanitize title for filesystem
             from .utils.path_helpers import sanitize_filename
             safe_title = sanitize_filename(song_title, max_length=70)
             return self.downloads_dir / safe_title
         return self.downloads_dir
 
-    def get_stems_folder(self, song_folder: Path) -> Path:
-        """Get the stems folder for a song."""
-        return song_folder / self.stems_subfolder
-
-    def get_stem_analysis_folder(self, song_folder: Path) -> Path:
-        """Get the stem analysis folder for a song."""
-        return song_folder / self.stems_subfolder / self.analysis_subfolder
-
     def model_dump_safe(self) -> dict:
         """Export config as dict with string paths."""
         data = self.model_dump()
         data["downloads_dir"] = str(self.downloads_dir)
-        data["outputs_dir"] = str(self.outputs_dir)
         return data
 
 

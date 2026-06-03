@@ -1,103 +1,64 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
-
-## Quick Links
-
-- **[README.md](README.md)**: Project overview and setup
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: Detailed architecture and design patterns
-- **[docs/WORKFLOWS.md](docs/WORKFLOWS.md)**: Common development workflows and examples
-- **[docs/execution_docs/](execution_docs/)**: Task execution tracking and status docs
+This file gives Codex repository guidance for WereCode.
 
 ## Project Essentials
 
-**WereCode**: Music analysis toolkit for downloading, converting, and analyzing audio from YouTube/YouTube Music.
+WereCode is a root Next.js app deployed on Vercel. The app owns UI, Supabase
+auth/data/storage, job state, and orchestration. Modal owns heavy compute. The
+Python backend is local-only and exists only for development YouTube download.
 
-- **Language**: Python 3.12+
-- **Package Manager**: `uv` (NOT pip)
-- **Key Dependencies**: essentia, msaf, yt-dlp, pydub, rich, pydantic
+## Current Runtime Split
 
-## Tool Preferences
+- `src/`: production Next.js app and API routes
+- `supabase/sql/`: manual Supabase schema and verification SQL
+- `backend/`: local-only YouTube download API used when
+  `NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD=true`
 
-### Search & Code Analysis
-
-- **Use `rg` (ripgrep)** instead of `grep` for searching codebase
-- **Use `ast-grep`** for structural code search when available
-- **Use `fd`** instead of `find` for file finding if available
-- Prefer Rich tool (Grep, Glob) over bash commands for file operations
-
-### Development Tools
-
-```bash
-# Package management - ALWAYS use uv
-uv sync                    # Install dependencies
-uv add <package>           # Add new package
-uv remove <package>        # Remove package
-
-# Activate environment
-source .venv/bin/activate
-```
+Do not add production CRUD, jobs, storage, auth, or product state back into the
+Python backend. Those belong in Next route handlers and Supabase.
 
 ## Common Commands
 
-See **[docs/WORKFLOWS.md](docs/WORKFLOWS.md)** for detailed workflows.
-
-### Quick Reference
+Root Next app:
 
 ```bash
-# Download YouTube audio (interactive Rich TUI)
-python downloaders/yt_music_downloader/main.py
-
-# Convert audio to WAV
-python converters/audio2wav.py
-
-# Analyze WAV files with pretty dashboard
-python analyzers/main.py outputs/converted/audio2wav/ --pretty
-
-# List available analyzers
-python analyzers/main.py --list-analyzers
+pnpm install
+pnpm dev
+pnpm typecheck
+pnpm lint
+pnpm build
 ```
 
-## Project Structure
+Local YouTube backend:
 
+```bash
+cd backend
+uv sync
+uv run python run_api.py
 ```
-WereCode/
-├── downloaders/yt_music_downloader/  # YouTube audio downloader
-├── converters/                        # Audio format converters
-├── analyzers/                         # Music analysis (tempo, key, chords, structure)
-├── downloads/                         # Default download directory
-├── outputs/                           # Analysis results and converted files
-├── docs/                              # Detailed documentation
-└── execution_docs/                    # Task tracking documents
+
+Backend local endpoints:
+
+```text
+POST /api/v1/download
+GET  /api/v1/download/diagnostics
+GET  /api/v1/jobs/{job_id}
+GET  /health
 ```
 
 ## Development Guidelines
 
-### Execution Documentation
+- Use `rg` for text search.
+- Use `uv` for Python package management inside `backend/`.
+- Use `pnpm` for the root Next app.
+- For significant changes, add or update an execution document in
+  `docs/execution_docs/`.
+- Keep Modal compute concerns out of this repo except for typed orchestration
+  requests/responses.
 
-**IMPORTANT**: When performing significant changes or long-tail tasks, create a markdown execution document in `docs/execution_docs/` directory. Label properly: `docs/execution_docs/YYYY-MM-DD_task-name.md`
+## Backend Boundary
 
-### Code Patterns
-
-- **Configuration**: YAML files with Pydantic models for validation
-- **Analysis**: Modular `Analyzer` base class pattern (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
-- **Terminal UI**: Use `rich` library for all user-facing output
-- **Error Handling**: Return structured errors, don't crash on single file failures
-
-### File Operations
-
-- Use `Read`, `Write`, `Edit` tools over bash commands for file operations
-- Use `Glob` for finding files by pattern
-- Use `Grep` for searching file contents
-
-## Key Environment Variables
-
-- `TRANSPOSE_TO_KEY`: Transpose chord progressions to target key (e.g., `C`, `A`, `F#`)
-
-## Known Issues
-
-- **MSAF numpy compatibility**: Monkey patch included for `scipy.inf`
-- **madmom on Python 3.12**: Currently disabled (compatibility issue)
-- **YouTube 403 errors**: Auto-retries with browser cookies + Android client
-
-For detailed architecture, analysis pipeline details, and development workflows, see the [docs/](docs/) directory.
+The backend must stay local-only. It should not expose analysis, stems, MIDI,
+lyrics alignment, AI editing, library CRUD, or storage APIs. Those are either
+Modal compute endpoints or Next-owned product routes.
