@@ -62,6 +62,9 @@ Remove:
 Keep:
 
 - `backend/` only as the local-only YouTube download backend.
-- `frontend/src/` because it still contains unported AI/tabs/studio interaction
-  reference code.
 - Current 2026 migration docs and Supabase SQL.
+
+Follow-up completed:
+
+- Removed the remaining `frontend/` source reference after deciding migration
+  should continue in a separate branch.

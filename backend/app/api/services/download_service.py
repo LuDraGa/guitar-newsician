@@ -230,89 +230,6 @@ class DownloadService:
         with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-    def _fetch_lyrics(self, video_id: str, output_dir: Path, metadata: Dict[str, Any] = None) -> Dict[str, bool]:
-        """Fetch and save lyrics using cascading strategy: YTMusic first, then syncedlyrics."""
-        from ytmusicapi import YTMusic
-        from app.downloaders.yt_music_downloader.helpers import fetch_lyrics
-        import logging
-
-        logger = logging.getLogger(__name__)
-        lyrics_info = {"has_synced_lyrics": False, "has_plain_lyrics": False}
-
-        synced_lyrics = None
-        plain_lyrics = None
-
-        # Strategy 1: Try YTMusic API first (gets lyrics from YouTube Music)
-        if video_id:
-            try:
-                logger.info(f"Attempting YTMusic lyrics fetch for video_id: {video_id}")
-                ytmusic = YTMusic()
-                ytm_synced, ytm_plain = fetch_lyrics(video_id, ytmusic)
-
-                if ytm_synced:
-                    synced_lyrics = ytm_synced
-                    logger.info(f"YTMusic: Found synced lyrics")
-
-                if ytm_plain:
-                    plain_lyrics = ytm_plain
-                    logger.info(f"YTMusic: Found plain lyrics")
-
-            except Exception as e:
-                logger.warning(f"YTMusic lyrics fetch failed: {str(e)}")
-        else:
-            logger.warning("No video ID provided for lyrics fetching")
-
-        # Strategy 2: If no synced lyrics from YTMusic, try syncedlyrics
-        if not synced_lyrics and metadata:
-            try:
-                logger.info("Attempting syncedlyrics fetch as fallback")
-                from app.lyrics.synced_lyrics import fetch_synced_lyrics, has_syncedlyrics
-
-                if has_syncedlyrics():
-                    title = metadata.get("title", "")
-                    artist = metadata.get("artist", "")
-
-                    if title:
-                        result = fetch_synced_lyrics(
-                            title=title,
-                            artist=artist,
-                            allow_unsynced=True  # Allow fallback to unsynced
-                        )
-
-                        if result.found and result.lyrics:
-                            # Check if it's LRC format (synced)
-                            if '[' in result.lyrics and ']' in result.lyrics[:10]:
-                                synced_lyrics = result.lyrics
-                                logger.info(f"syncedlyrics: Found synced lyrics via {result.provider}")
-                            else:
-                                # Unsynced fallback
-                                if not plain_lyrics:  # Only if we don't have plain from YTMusic
-                                    plain_lyrics = result.lyrics
-                                    logger.info(f"syncedlyrics: Found plain lyrics via {result.provider}")
-                else:
-                    logger.info("syncedlyrics package not installed")
-
-            except Exception as e:
-                logger.warning(f"syncedlyrics fetch failed: {str(e)}")
-
-        # Save lyrics to output directory
-        if synced_lyrics:
-            lyrics_path = output_dir / "lyrics.lrc"
-            lyrics_path.write_text(synced_lyrics, encoding="utf-8")
-            lyrics_info["has_synced_lyrics"] = True
-            logger.info(f"Saved synced lyrics to {lyrics_path}")
-
-        if plain_lyrics:
-            lyrics_txt_path = output_dir / "lyrics.txt"
-            lyrics_txt_path.write_text(plain_lyrics, encoding="utf-8")
-            lyrics_info["has_plain_lyrics"] = True
-            logger.info(f"Saved plain lyrics to {lyrics_txt_path}")
-
-        if not synced_lyrics and not plain_lyrics:
-            logger.info("No lyrics available from any source")
-
-        return lyrics_info
-
     async def download(
         self,
         job_id: str,
@@ -387,8 +304,6 @@ class DownloadService:
                 raise Exception("Failed to fetch video metadata")
 
             title = info.get("title", "Unknown")
-            video_id = info.get("id")
-
             # Create song folder
             song_folder = config.get_song_folder(title)
             song_folder.mkdir(parents=True, exist_ok=True)
@@ -439,28 +354,6 @@ class DownloadService:
             # Create metadata.json
             self._create_metadata_file(info, song_folder)
 
-            # Fetch lyrics (pass metadata for syncedlyrics fallback)
-            job_manager.update_job(
-                job_id,
-                progress=90.0,
-                message="Fetching lyrics...",
-            )
-            # Prepare metadata dict for syncedlyrics
-            metadata_for_lyrics = {
-                "title": info.get("title"),
-                "artist": info.get("artist") or info.get("uploader"),
-            }
-            lyrics_info = self._fetch_lyrics(video_id, song_folder, metadata_for_lyrics)
-
-            # Update metadata with lyrics info
-            metadata_path = song_folder / "metadata.json"
-            if metadata_path.exists():
-                with open(metadata_path, "r", encoding="utf-8") as f:
-                    metadata = json.load(f)
-                metadata.update(lyrics_info)
-                with open(metadata_path, "w", encoding="utf-8") as f:
-                    json.dump(metadata, f, indent=2, ensure_ascii=False)
-
             # Find the downloaded audio file
             from ..utils.path_helpers import find_audio_file
             audio_file = find_audio_file(song_folder)
@@ -475,8 +368,6 @@ class DownloadService:
                 "artist": info.get("artist") or info.get("uploader"),
                 "duration": info.get("duration"),
                 "file_size": audio_file.stat().st_size,
-                "has_lyrics": lyrics_info["has_plain_lyrics"],
-                "has_synced_lyrics": lyrics_info["has_synced_lyrics"],
             }
 
             job_manager.update_job(

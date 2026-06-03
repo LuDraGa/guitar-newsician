@@ -277,8 +277,8 @@ the sign-in/bot-check block for the current video or network.
 
 The Next route `POST /api/local/youtube-download` starts
 `POST /api/v1/download`, polls `GET /api/v1/jobs/:id`, reads the resulting local
-audio file, uploads it to Supabase Storage, creates a source asset row, and
-persists downloaded lyrics if the backend created `lyrics.txt` or `lyrics.lrc`.
+audio file and metadata, uploads them to Supabase Storage, and creates source
+asset rows.
 This route is blocked unless `NODE_ENV=development`, no `VERCEL_ENV` is present,
 and `NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD=true`.
 
@@ -395,7 +395,7 @@ Everything else is product/backend state and belongs in this Next app.
    - `/`
    - `/library`
    - `/studio/[songId]`
-3. Replace `frontend/src/services/api.ts` FastAPI calls with relative `/api/*` route calls.
+3. Replace old FastAPI client calls with relative `/api/*` route calls.
 4. Add Supabase auth client and login/session components.
 
 ### Phase 3: Next API Routes
@@ -499,9 +499,9 @@ Current status:
 
 - Root Next app deployment is wired.
 - Production Google auth has passed an initial smoke test.
-- Local YouTube download remains local-only through the legacy backend.
-- Legacy `backend/` and `frontend/` directories remain in the repository as
-  reference/local paths and are excluded from the root Vercel deployment payload.
+- Local YouTube download remains local-only through `backend/`.
+- The legacy `frontend/` directory has been removed; the root Next app is the
+  only frontend source.
 - Old `studio_Design/` screenshot artifacts have been removed; future design
   work should happen directly in the Next app or in new committed assets.
 

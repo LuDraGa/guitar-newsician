@@ -14,7 +14,6 @@ Python backend is local-only and exists only for development YouTube download.
 - `supabase/sql/`: manual Supabase schema and verification SQL
 - `backend/`: local-only YouTube download API used when
   `NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD=true`
-- `frontend/`: legacy Vite reference for unported AI/tabs/studio interactions
 
 Do not add production CRUD, jobs, storage, auth, or product state back into the
 Python backend. Those belong in Next route handlers and Supabase.

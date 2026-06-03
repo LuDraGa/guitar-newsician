@@ -8,10 +8,8 @@ dependencies = [
     "fastapi>=0.119.1",
     "pydantic>=2.12.3",
     "python-dotenv>=1.1.1",
-    "syncedlyrics>=1.0.0",
     "uvicorn>=0.38.0",
     "yt-dlp[default]>=2025.10.14",
-    "ytmusicapi>=1.12.0",
 ]
 
 [dependency-groups]

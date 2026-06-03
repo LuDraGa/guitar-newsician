@@ -19,9 +19,8 @@ wheels/
 # Session history
 .werecode_session.json
 
-# Output directories
+# Local download output
 downloads/
-outputs/
 
 # Logs
 *.log

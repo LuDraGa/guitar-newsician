@@ -17,14 +17,13 @@ local YouTube download during development.
 - `GET /api/v1/jobs/{job_id}`
 - local in-memory job tracking
 - yt-dlp download service
-- minimal YouTube Music/syncedlyrics helpers used to create `lyrics.txt` and
-  `lyrics.lrc` for the Next local import bridge
 
 ## Removed
 
 - Python analysis, conversion, stem separation, MIDI editor, and AI chat APIs
 - old static API UI and OpenAI tools JSON
 - old CLI analyzer/converter/stem/downloader modules
+- YouTube Music/syncedlyrics helpers and local lyric file import
 - heavyweight backend dependencies that now belong to Modal or are no longer
   used locally
 
