@@ -144,6 +144,14 @@ Rework the WereCode app UI using the exported `newsician 2` design bundle as the
 **Result**: Studio mode tabs and Guitar submode tabs now use the Newsician standalone pill color treatment instead of the dark segmented container. Karaoke keeps stable Stems/Lyrics card sizing when empty states are replaced by content, and the chord panel now renders a current/next chord state from timed analysis data when available.
 **Notes**: The single shared Studio playback remains the intended product direction. Lyric expressivity and stem meter behavior were intentionally left unchanged.
 
+---
+
+### 2026-06-04
+
+**Action**: Corrected Library intake and destructive song actions after design review.
+**Result**: Library now presents Upload audio as the only primary product CTA, while the source URL probe/add surface is no longer exposed as a normal add-song path. Uploads render as muted in-library progress placeholders in both grid and list views, with the record cover acting as the loading affordance. Song cards and rows now expose a delete action with a confirmation dialog backed by the existing archive endpoint.
+**Notes**: The local-only YouTube download form remains gated by `NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD=true`.
+
 ## Blockers
 
 - [x] Local default Node was `v18.20.3`, below the repo requirement.
@@ -183,6 +191,7 @@ Rework the WereCode app UI using the exported `newsician 2` design bundle as the
 - [x] Browser verification for Pipeline refresh placement and multi-select filters
 - [x] Browser verification for Pipeline started/duration table columns and collapsible JSON sections
 - [x] Browser verification for Studio typography, mode tabs, track switcher, full-width shell, and coach dock
+- [x] Browser verification for Library upload-first CTA, grid/list delete controls, and delete confirmation dialog
 
 ## Results
 
