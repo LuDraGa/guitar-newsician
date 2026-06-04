@@ -7,6 +7,7 @@ import {
   Bot,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   DownloadCloud,
@@ -62,6 +63,7 @@ type StemPlaybackSource = { id: string; kind: AssetRow['kind']; url: string; lev
 type SeekCommand = { id: number; time: number };
 type PlaybackCommand = { id: number; action: 'toggle' };
 type EditorLyricLine = { id: string; time: number | null; text: string };
+type ChordEvent = { time: number; endTime: number | null; chord: string };
 
 const stemKindSet = new Set(['stem_vocals', 'stem_drums', 'stem_bass', 'stem_other', 'stem_guitar', 'stem_piano']);
 const stemKindOrder = ['stem_vocals', 'stem_guitar', 'stem_bass', 'stem_drums', 'stem_piano', 'stem_other'];
@@ -88,8 +90,8 @@ const studioTabs = [
 ] as const;
 const guitarModes = [
   ['chords', 'Chords', Music2],
-  ['sheet', 'Sheet', Sheet],
   ['tab', 'Tab', Guitar],
+  ['sheet', 'Sheet', Sheet],
 ] as const;
 
 export function StudioClient({ initialSongId }: { initialSongId?: string }) {
@@ -440,7 +442,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   };
 
   return (
-    <section className="mx-auto flex min-h-[calc(100vh-140px)] max-w-[1180px] flex-col overflow-visible pb-6 md:h-[calc(100vh-140px)] md:min-h-0 md:overflow-hidden">
+    <section className="flex h-full min-h-0 w-full flex-col overflow-visible pb-0 md:overflow-hidden">
       {!song && !loading ? (
         <div className="surface grid min-h-[420px] place-items-center px-6 py-16 text-center">
           <div>
@@ -458,7 +460,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
           </div>
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1">
+        <div className="relative flex min-h-0 flex-1 gap-4">
           <div className="flex min-w-0 flex-1 flex-col">
             <SongHeader
               song={song}
@@ -470,33 +472,16 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
               onRefresh={() => void loadStudio(songId)}
             />
 
-            <div className="mb-4 flex flex-wrap items-center gap-2">
-              {studioTabs.map(([id, label, Icon]) => (
-                <button
-                  key={id as StudioTab}
-                  type="button"
-                  onClick={() => setTab(id as StudioTab)}
-                  className={`inline-flex h-10 items-center gap-2 rounded-full px-5 text-sm font-bold ${
-                    tab === id
-                      ? 'bg-[var(--ink)] text-[var(--paper)]'
-                      : 'text-[var(--muted)] shadow-[inset_0_0_0_1.5px_var(--line)]'
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  {label as string}
-                  {id === 'lyrics' && <span className="chip accent min-h-[18px] px-2 text-[10px]">flagship</span>}
-                </button>
-              ))}
-            </div>
+            <StudioModeTabs activeTab={tab} onChange={setTab} />
 
-            {(message || error) && (
-              <div className="-mt-1 flex">
+            <div className="mb-3 min-h-[26px]">
+              {(message || error) && (
                 <span className={`chip ${error ? 'danger' : 'live'}`}>
                   {error ? <AlertCircle className="h-3.5 w-3.5 shrink-0" /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
                   {error ?? message}
                 </span>
-              </div>
-            )}
+              )}
+            </div>
 
             <div className="min-h-0 flex-1">
               {tab === 'karaoke' && (
@@ -510,7 +495,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   stemUrls={stemUrls}
                   stemSignError={stemSignError}
                   sourceAsset={sourceAsset}
-                  analysisReady={analysisResults.length > 0}
+                  analysisResults={analysisResults}
                   running={running}
                   onUpdateStemMix={updateStemMix}
                   onSoloStem={soloStem}
@@ -601,16 +586,18 @@ function SongHeader({
   onRefresh: () => void;
 }) {
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-4">
-      <Link href="/library" className="iconbtn" title="Back to library">
-        <ArrowLeft className="h-5 w-5" />
-      </Link>
-      <CoverArt id={song?.id ?? songId} size={52} />
-      <div className="min-w-0">
-        <h1 className="display truncate text-[26px]">{song?.title ?? 'Studio'}</h1>
-        <div className="mt-1 text-sm text-[var(--muted)]">{song ? song.artist ?? 'Unknown artist' : 'Select a song'}</div>
+    <div className="mb-3 grid gap-3 lg:grid-cols-[minmax(300px,1fr)_auto] lg:items-center xl:grid-cols-[minmax(320px,1fr)_auto_minmax(300px,380px)]">
+      <div className="flex min-w-0 items-center gap-4">
+        <Link href="/library" className="iconbtn shrink-0" title="Back to library">
+          <ArrowLeft className="h-5 w-5" />
+        </Link>
+        <CoverArt id={song?.id ?? songId} size={52} />
+        <div className="min-w-0">
+          <h1 className="display truncate text-[26px]">{song?.title ?? 'Studio'}</h1>
+          <div className="mt-1 truncate text-[13.5px] text-[var(--muted)]">{song ? song.artist ?? 'Unknown artist' : 'Select a song'}</div>
+        </div>
       </div>
-      <div className="flex-1" />
+
       <div className="hidden flex-wrap justify-end gap-4 md:flex">
         {facts.map(([label, value]) => (
           <div key={label} className="border-l border-[var(--line)] pl-4 text-right">
@@ -619,21 +606,66 @@ function SongHeader({
           </div>
         ))}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <select value={songId} onChange={(event) => onLoadStudio(event.target.value)} className="wc-input h-10 min-w-56 px-4 text-sm">
-          <option value="">Select song</option>
-          {songs.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.title}
-            </option>
-          ))}
-        </select>
-        <button type="button" onClick={onRefresh} disabled={loading} className="pill ghost sm">
-          <PillIcon>
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-          </PillIcon>
-          Refresh
+
+      <div className="flex h-11 min-w-0 items-center overflow-hidden rounded-full bg-[var(--card)] shadow-[inset_0_0_0_1.5px_var(--line),var(--shadow-card)] lg:col-span-2 xl:col-span-1">
+        <div className="relative min-w-0 flex-1">
+          <select
+            value={songId}
+            onChange={(event) => onLoadStudio(event.target.value)}
+            className="h-11 w-full min-w-0 appearance-none bg-transparent pl-5 pr-10 text-sm font-semibold text-[var(--ink)] outline-none"
+            aria-label="Studio song"
+          >
+            <option value="">Select song</option>
+            {songs.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.title}
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" />
+        </div>
+        <span className="h-6 w-px bg-[var(--line)]" />
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={loading}
+          className="mr-1 grid h-9 w-9 shrink-0 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--card-2)] hover:text-[var(--ink)] disabled:opacity-45"
+          aria-label="Refresh studio"
+          title="Refresh"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
+      </div>
+    </div>
+  );
+}
+
+function StudioModeTabs({ activeTab, onChange }: { activeTab: StudioTab; onChange: (tab: StudioTab) => void }) {
+  return (
+    <div className="mb-3 flex">
+      <div className="flex max-w-full flex-wrap items-center gap-2" role="tablist" aria-label="Studio mode">
+        {studioTabs.map(([id, label, Icon]) => {
+          const active = activeTab === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => onChange(id)}
+              className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-5 text-sm font-bold transition ${
+                active
+                  ? 'shadow-none'
+                  : 'bg-transparent text-[var(--muted)] shadow-[inset_0_0_0_1.5px_var(--line)] hover:bg-[var(--card)] hover:text-[var(--ink)]'
+              }`}
+              style={active ? { background: 'var(--ink)', color: 'var(--paper)' } : undefined}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+              {id === 'lyrics' && <span className="chip accent min-h-[18px] px-2 text-[10px]">flagship</span>}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -649,7 +681,7 @@ function KaraokeProductView({
   stemUrls,
   stemSignError,
   sourceAsset,
-  analysisReady,
+  analysisResults,
   running,
   onUpdateStemMix,
   onSoloStem,
@@ -670,7 +702,7 @@ function KaraokeProductView({
   stemUrls: Record<string, string>;
   stemSignError: string | null;
   sourceAsset: AssetRow | undefined;
-  analysisReady: boolean;
+  analysisResults: AnalysisResultRow[];
   running: string | null;
   onUpdateStemMix: (assetId: string, patch: Partial<StemMixState>) => void;
   onSoloStem: (assetId: string) => void;
@@ -683,9 +715,9 @@ function KaraokeProductView({
   onSeekLyric: (time: number) => void;
 }) {
   return (
-    <div className="flex h-auto min-h-0 flex-col gap-4 md:h-full">
-      <div className="grid min-h-0 gap-4 md:flex-1 lg:grid-cols-[1fr_1.55fr]">
-        <div className="flex min-h-0 flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(320px,1fr)_minmax(0,1.55fr)]">
+        <div className="grid min-h-[360px] gap-4 lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_76px]">
           <StemsPanel
             stemAssets={stemAssets}
             stemMix={stemMix}
@@ -698,7 +730,7 @@ function KaraokeProductView({
             onOpenAsset={onOpenAsset}
             onRunStems={onRunStems}
           />
-          <CurrentChordPanel analysisReady={analysisReady} running={running} onRunAnalyze={onRunAnalyze} />
+          <CurrentChordPanel currentTime={currentTime} analysisResults={analysisResults} running={running} onRunAnalyze={onRunAnalyze} />
         </div>
         <LyricsPane
           currentTime={currentTime}
@@ -751,7 +783,7 @@ function StemsPanel({
   const anySolo = Object.values(stemMix).some((state) => state.solo);
 
   return (
-    <section className="surface flex min-h-[278px] flex-1 flex-col overflow-hidden p-4 md:min-h-0">
+    <section className="surface flex min-h-[278px] flex-col overflow-hidden p-4 lg:min-h-0">
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Layers className="h-4 w-4 text-[var(--muted)]" />
@@ -923,23 +955,32 @@ function StemLevelControl({
 }
 
 function CurrentChordPanel({
-  analysisReady,
+  currentTime,
+  analysisResults,
   running,
   onRunAnalyze,
 }: {
-  analysisReady: boolean;
+  currentTime: number;
+  analysisResults: AnalysisResultRow[];
   running: string | null;
   onRunAnalyze: () => void;
 }) {
+  const chordEvents = useMemo(() => deriveChordEvents(analysisResults), [analysisResults]);
+  const currentIndex = useMemo(() => activeChordIndex(chordEvents, currentTime), [chordEvents, currentTime]);
+  const currentChord = currentIndex >= 0 ? chordEvents[currentIndex] : null;
+  const nextChord = chordEvents.find((event, index) => index > currentIndex && event.chord !== currentChord?.chord) ?? null;
+  const hasAnalysis = analysisResults.length > 0;
+
   return (
-    <section className="surface flex min-h-[72px] items-center justify-between gap-4 p-5">
-      {analysisReady ? (
-        <div className="flex items-center gap-4">
-          <span className="label">Now</span>
-          <span className="display text-4xl">Ready</span>
-          <span className="text-sm font-bold text-[var(--faint)]">analysis</span>
+    <section className="surface flex h-[76px] items-center justify-between gap-4 px-5">
+      {chordEvents.length > 0 ? (
+        <div className="flex min-w-0 items-center gap-4">
+          <span className="label shrink-0">Now</span>
+          <span className="display min-w-[58px] truncate text-[34px]">{currentChord?.chord ?? '--'}</span>
+          {nextChord && <span className="truncate text-base font-bold text-[var(--faint)]">to {nextChord.chord}</span>}
+          <span className="chip live hidden sm:inline-flex">chords</span>
         </div>
-      ) : (
+      ) : !hasAnalysis ? (
         <div className="flex items-center gap-3">
           <span className="label">Chords</span>
           <button type="button" onClick={onRunAnalyze} disabled={Boolean(running)} className="pill ghost sm">
@@ -949,8 +990,14 @@ function CurrentChordPanel({
             Detect chords
           </button>
         </div>
+      ) : (
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="label shrink-0">Chords</span>
+          <span className="chip accent">analysis ready</span>
+          <span className="truncate text-sm font-semibold text-[var(--muted)]">No timed chord track found</span>
+        </div>
       )}
-      <SlidersHorizontal className="h-5 w-5 text-[var(--muted)]" />
+      <SlidersHorizontal className="h-5 w-5 shrink-0 text-[var(--muted)]" />
     </section>
   );
 }
@@ -1008,7 +1055,7 @@ function LyricsPane({
   const stateLabel = syncedLyrics ? '.lrc synced' : plainLyrics ? '.txt not timed' : 'No lyrics';
 
   return (
-    <section className="surface relative flex min-h-[320px] flex-1 flex-col overflow-hidden md:min-h-0">
+    <section className="surface relative flex min-h-[320px] flex-col overflow-hidden lg:min-h-0">
       {lines.length > 0 && (
         <>
           <div className="pointer-events-none absolute left-0 right-0 top-0 z-[1] h-24 bg-gradient-to-b from-[var(--card)] to-transparent" />
@@ -1479,9 +1526,12 @@ function GuitarLearnerView({
             key={id as GuitarMode}
             type="button"
             onClick={() => setMode(id as GuitarMode)}
-            className={`inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-bold ${
-              mode === id ? 'bg-[var(--ink)] text-[var(--paper)]' : 'bg-[var(--card)] text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line)]'
+            className={`inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-bold transition ${
+              mode === id
+                ? 'shadow-none'
+                : 'bg-[var(--card)] text-[var(--muted)] shadow-[inset_0_0_0_1.5px_var(--line)] hover:text-[var(--ink)]'
             }`}
+            style={mode === id ? { background: 'var(--ink)', color: 'var(--paper)' } : undefined}
           >
             <Icon className="h-4 w-4" />
             {label as string}
@@ -2135,14 +2185,10 @@ function AICoachDock({
   } satisfies Record<StudioTab, Array<{ tag: string; text: string; action: string }>>;
 
   return (
-    <>
-      <button
-        type="button"
-        className="fixed inset-0 z-40 bg-[oklch(0.2_0.01_60_/_0.18)] backdrop-blur-[2px]"
-        aria-label="Close coach"
-        onClick={onClose}
-      />
-      <aside className="fixed bottom-4 right-4 top-4 z-50 flex w-[min(360px,calc(100vw-32px))] flex-col overflow-hidden rounded-[var(--radius)] bg-[var(--card)] shadow-[var(--shadow-pop)] sm:top-20 sm:w-[360px]">
+    <aside
+      className="flex h-full min-h-0 shrink-0 flex-col overflow-hidden rounded-[var(--radius)] bg-[var(--card)] shadow-[var(--shadow-card)]"
+      style={{ width: 'clamp(280px, 24vw, 360px)' }}
+    >
       <div className="flex items-center justify-between gap-3 border-b border-[var(--line-2)] p-5">
         <div className="flex items-center gap-3">
           <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[var(--ink)] text-[var(--paper)]">
@@ -2200,8 +2246,7 @@ function AICoachDock({
           </button>
         </div>
       </div>
-      </aside>
-    </>
+    </aside>
   );
 }
 
@@ -2394,6 +2439,122 @@ function parseAlignmentLyrics(content: string): LyricDisplayLine[] {
   } catch {
     return [];
   }
+}
+
+function deriveChordEvents(analysisResults: AnalysisResultRow[]): ChordEvent[] {
+  const events = analysisResults
+    .filter((result) => result.ok)
+    .flatMap((result) => collectChordEvents(result.data, 0))
+    .filter((event) => Number.isFinite(event.time) && event.time >= 0 && event.chord);
+  const seen = new Set<string>();
+
+  return events
+    .sort((a, b) => a.time - b.time)
+    .filter((event) => {
+      const key = `${event.time.toFixed(2)}:${event.chord}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function collectChordEvents(value: unknown, depth: number): ChordEvent[] {
+  if (depth > 5 || value === null || typeof value !== 'object') {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    const direct = value.map((item) => chordEventFromUnknown(item)).filter((event): event is ChordEvent => Boolean(event));
+    if (direct.length > 0) {
+      return direct;
+    }
+    return value.flatMap((item) => collectChordEvents(item, depth + 1));
+  }
+
+  const record = value as Record<string, unknown>;
+  const direct = chordEventFromRecord(record);
+  if (direct) {
+    return [direct];
+  }
+
+  const prioritizedKeys = ['chords', 'chord_track', 'chordTrack', 'chord_events', 'chordEvents', 'events', 'segments'];
+  const prioritized = prioritizedKeys.flatMap((key) => collectChordEvents(record[key], depth + 1));
+  if (prioritized.length > 0) {
+    return prioritized;
+  }
+
+  return Object.values(record).flatMap((entry) => collectChordEvents(entry, depth + 1));
+}
+
+function chordEventFromUnknown(value: unknown) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? chordEventFromRecord(value as Record<string, unknown>) : null;
+}
+
+function chordEventFromRecord(record: Record<string, unknown>): ChordEvent | null {
+  const chord = readChordLabel(record);
+  const time = readNumber(record, ['time', 'start', 'start_sec', 'start_time', 'timestamp', 'onset']);
+  if (!chord || time === null) {
+    return null;
+  }
+
+  return {
+    chord,
+    time,
+    endTime: readNumber(record, ['end', 'end_sec', 'end_time', 'stop', 'stop_sec']),
+  };
+}
+
+function readChordLabel(record: Record<string, unknown>) {
+  for (const key of ['chord', 'chord_name', 'symbol', 'label']) {
+    const value = record[key];
+    if (typeof value === 'string' && isChordLike(value)) {
+      return normalizeChordLabel(value);
+    }
+  }
+
+  const root = typeof record.root === 'string' ? record.root.trim() : '';
+  const quality = typeof record.quality === 'string' ? record.quality.trim() : '';
+  const combined = `${root}${quality}`;
+  return isChordLike(combined) ? normalizeChordLabel(combined) : null;
+}
+
+function isChordLike(value: string) {
+  const trimmed = value.trim();
+  return /^(?:N\.?C\.?|no chord|[A-G](?:#|b|♭|♯)?(?::?(?:m|min|maj|dim|aug|sus|add|dom|ø|o|\+|-)?[0-9#b♭♯+\-/()]*)?)$/i.test(trimmed);
+}
+
+function normalizeChordLabel(value: string) {
+  const trimmed = value.trim();
+  return /^no chord$/i.test(trimmed) ? 'N.C.' : trimmed.replaceAll('♭', 'b').replaceAll('♯', '#');
+}
+
+function readNumber(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function activeChordIndex(events: ChordEvent[], currentTime: number) {
+  let active = -1;
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    const nextTime = events[index + 1]?.time ?? Infinity;
+    const endTime = event.endTime ?? nextTime;
+    if (currentTime >= event.time && currentTime < endTime) {
+      active = index;
+      break;
+    }
+    if (currentTime >= event.time) {
+      active = index;
+    }
+  }
+  return active;
 }
 
 function buildSongFacts(song: SongRow | null): Array<[string, string]> {

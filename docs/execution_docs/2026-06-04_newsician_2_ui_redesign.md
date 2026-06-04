@@ -120,6 +120,30 @@ Rework the WereCode app UI using the exported `newsician 2` design bundle as the
 **Result**: Stem level, mute, and solo changes now guard against stale stem time updates moving the shared transport backwards. Mute and solo controls have distinct active styling. Pipeline refresh now lives with the search/control strip, and jobs can be filtered by multiple songs, job types, endpoints, and statuses.
 **Notes**: Browser verification confirmed a 0:56 synced-lyric seek stayed at 0:56 after level, mute, and solo changes. Pipeline verification confirmed multi-select status filtering, selected counts, and Clear filters behavior.
 
+---
+
+### 2026-06-04
+
+**Action**: Added Pipeline runtime timing and a collapsible JSON inspector.
+**Result**: The jobs table now shows started time and run duration. Job details render metadata, request payload, response payload, and diagnostics as collapsible code-editor-style JSON sections, with nested object and array nodes independently expandable.
+**Notes**: Browser verification confirmed started/duration table values, response payload expansion, and nested JSON node collapse behavior.
+
+---
+
+### 2026-06-04
+
+**Action**: Corrected Studio layout and typography against the design handoff.
+**Result**: Studio now uses the prepared design font stack, occupies the full app viewport instead of a narrow max-width frame, uses a stronger segmented mode selector, combines song switching and refresh into one header control, and renders Ask coach as a layout dock that pushes the Studio canvas.
+**Notes**: Browser verification confirmed the design fonts, active tab fill, zero horizontal overflow, and a static right-side coach dock.
+
+---
+
+### 2026-06-04
+
+**Action**: Reworked the current Studio drift pass after cleanup.
+**Result**: Studio mode tabs and Guitar submode tabs now use the Newsician standalone pill color treatment instead of the dark segmented container. Karaoke keeps stable Stems/Lyrics card sizing when empty states are replaced by content, and the chord panel now renders a current/next chord state from timed analysis data when available.
+**Notes**: The single shared Studio playback remains the intended product direction. Lyric expressivity and stem meter behavior were intentionally left unchanged.
+
 ## Blockers
 
 - [x] Local default Node was `v18.20.3`, below the repo requirement.
@@ -157,6 +181,8 @@ Rework the WereCode app UI using the exported `newsician 2` design bundle as the
 - [x] Browser verification for lyric hit target geometry and stem-volume changes preserving transport time
 - [x] Browser verification for level, mute, and solo changes preserving the non-zero Studio transport time
 - [x] Browser verification for Pipeline refresh placement and multi-select filters
+- [x] Browser verification for Pipeline started/duration table columns and collapsible JSON sections
+- [x] Browser verification for Studio typography, mode tabs, track switcher, full-width shell, and coach dock
 
 ## Results
 
