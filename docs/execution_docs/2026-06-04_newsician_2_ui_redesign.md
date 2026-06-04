@@ -152,6 +152,14 @@ Rework the WereCode app UI using the exported `newsician 2` design bundle as the
 **Result**: Library now presents Upload audio as the only primary product CTA, while the source URL probe/add surface is no longer exposed as a normal add-song path. Uploads render as muted in-library progress placeholders in both grid and list views, with the record cover acting as the loading affordance. Song cards and rows now expose a delete action with a confirmation dialog backed by the existing archive endpoint.
 **Notes**: The local-only YouTube download form remains gated by `NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD=true`.
 
+---
+
+### 2026-06-04
+
+**Action**: Continued Studio UX alignment from current screenshots.
+**Result**: Karaoke lyric scrolling now starts naturally near the top and only follows once the active line leaves the focus band; the shared Studio transport can be minimized on every Studio tab and defaults to the compact seek/play state in Lyrics editor; the duplicate Sync editor playback strip was removed; `/studio` now stays an empty Studio stub instead of auto-loading the first library song; Library upload and Lyrics editor chevrons were re-centered.
+**Notes**: Chord analysis reliability and chord-shape correctness are tracked as a separate follow-up. That work should inspect the persisted analysis result contract, then replace the placeholder hardcoded chord diagram shapes with real chord-fingering data while keeping the existing product aesthetic.
+
 ## Blockers
 
 - [x] Local default Node was `v18.20.3`, below the repo requirement.
@@ -192,6 +200,7 @@ Rework the WereCode app UI using the exported `newsician 2` design bundle as the
 - [x] Browser verification for Pipeline started/duration table columns and collapsible JSON sections
 - [x] Browser verification for Studio typography, mode tabs, track switcher, full-width shell, and coach dock
 - [x] Browser verification for Library upload-first CTA, grid/list delete controls, and delete confirmation dialog
+- [x] Browser verification for bare `/studio` empty state, Karaoke lyric top anchoring, Lyrics editor compact transport, and Library upload select chevron
 
 ## Results
 

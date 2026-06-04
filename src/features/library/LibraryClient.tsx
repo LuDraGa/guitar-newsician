@@ -3,6 +3,7 @@
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronDown,
   DownloadCloud,
   Grid3X3,
   List,
@@ -412,20 +413,23 @@ export function LibraryClient() {
                 onChange={handleFileChange}
                 className="h-11 w-full rounded-full bg-[var(--paper)] px-4 py-2 text-sm text-[var(--muted)] shadow-[inset_0_0_0_1.5px_var(--line)] file:mr-3 file:h-7 file:rounded-full file:border-0 file:bg-[var(--ink)] file:px-3 file:text-sm file:font-medium file:text-[var(--paper)]"
               />
-              <select
-                id="upload-song"
-                value={uploadSongId}
-                onChange={(event) => setUploadSongId(event.target.value)}
-                className="wc-input h-11 px-4 text-sm"
-                aria-label="Attach audio to song"
-              >
-                <option value="">New song</option>
-                {songsNeedingAudio.map((song) => (
-                  <option key={song.id} value={song.id}>
-                    {song.title}
-                  </option>
-                ))}
-              </select>
+              <div className="relative min-w-0">
+                <select
+                  id="upload-song"
+                  value={uploadSongId}
+                  onChange={(event) => setUploadSongId(event.target.value)}
+                  className="wc-input h-11 appearance-none px-4 pr-10 text-sm"
+                  aria-label="Attach audio to song"
+                >
+                  <option value="">New song</option>
+                  {songsNeedingAudio.map((song) => (
+                    <option key={song.id} value={song.id}>
+                      {song.title}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" />
+              </div>
               <input
                 id="upload-title"
                 value={uploadTitle}

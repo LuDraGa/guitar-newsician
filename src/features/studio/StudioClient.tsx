@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   DownloadCloud,
   FileMusic,
   Flag,
@@ -22,7 +23,6 @@ import {
   Music2,
   Pause,
   Play,
-  RefreshCw,
   Repeat,
   Save,
   Scissors,
@@ -96,7 +96,6 @@ const guitarModes = [
 
 export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const [songId, setSongId] = useState(initialSongId ?? '');
-  const [songs, setSongs] = useState<SongRow[]>([]);
   const [song, setSong] = useState<SongRow | null>(null);
   const [assets, setAssets] = useState<AssetRow[]>([]);
   const [analysisResults, setAnalysisResults] = useState<AnalysisResultRow[]>([]);
@@ -112,6 +111,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const [message, setMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<StudioTab>('karaoke');
   const [coachOpen, setCoachOpen] = useState(false);
+  const [transportMinimized, setTransportMinimized] = useState(false);
   const [transportTime, setTransportTime] = useState(0);
   const [transportPlaying, setTransportPlaying] = useState(false);
   const [seekCommand, setSeekCommand] = useState<SeekCommand | null>(null);
@@ -173,6 +173,11 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
 
   const requestPlaybackToggle = useCallback(() => {
     setPlaybackCommand({ id: Date.now(), action: 'toggle' });
+  }, []);
+
+  const changeTab = useCallback((nextTab: StudioTab) => {
+    setTab(nextTab);
+    setTransportMinimized(nextTab === 'lyrics');
   }, []);
 
   const updateStemMix = useCallback(
@@ -245,10 +250,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     setLoading(true);
     setError(null);
     try {
-      const songsPayload = await fetchJson<{ songs: SongRow[] }>('/api/songs?limit=100');
-      setSongs(songsPayload.songs);
-
-      const selectedSongId = nextSongId || songsPayload.songs[0]?.id || '';
+      const selectedSongId = nextSongId;
       setSongId(selectedSongId);
 
       if (!selectedSongId) {
@@ -449,7 +451,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
             <Music2 className="mx-auto h-11 w-11 text-[var(--faint)]" />
             <h1 className="display mt-4 text-3xl">No song selected</h1>
             <p className="mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
-              Create or ingest a song from the library before opening the product studio.
+              Choose a song from the library to open its dedicated Studio workspace.
             </p>
             <Link href="/library" className="pill mt-5">
               <PillIcon>
@@ -465,14 +467,10 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
             <SongHeader
               song={song}
               songId={songId}
-              songs={songs}
               facts={facts}
-              loading={loading}
-              onLoadStudio={(id) => void loadStudio(id)}
-              onRefresh={() => void loadStudio(songId)}
             />
 
-            <StudioModeTabs activeTab={tab} onChange={setTab} />
+            <StudioModeTabs activeTab={tab} onChange={changeTab} />
 
             <div className="mb-3 min-h-[26px]">
               {(message || error) && (
@@ -504,7 +502,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   onRunAnalyze={() => void workflowActions.analyze()}
                   onFetchLyrics={() => void workflowActions.lyricsFetch()}
                   onAlignLyrics={() => void workflowActions.lyricsAlign()}
-                  onEditLyrics={() => setTab('lyrics')}
+                  onEditLyrics={() => changeTab('lyrics')}
                   onSeekLyric={(time) => requestTransportSeek(time - 0.35)}
                 />
               )}
@@ -547,6 +545,8 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                 stemSources={stemPlaybackSources}
                 seekCommand={seekCommand}
                 playbackCommand={playbackCommand}
+                minimized={transportMinimized}
+                onMinimizedChange={setTransportMinimized}
                 onTimeChange={setTransportTime}
                 onPlayingChange={setTransportPlaying}
               />
@@ -571,22 +571,14 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
 function SongHeader({
   song,
   songId,
-  songs,
   facts,
-  loading,
-  onLoadStudio,
-  onRefresh,
 }: {
   song: SongRow | null;
   songId: string;
-  songs: SongRow[];
   facts: Array<[string, string]>;
-  loading: boolean;
-  onLoadStudio: (id: string) => void;
-  onRefresh: () => void;
 }) {
   return (
-    <div className="mb-3 grid gap-3 lg:grid-cols-[minmax(300px,1fr)_auto] lg:items-center xl:grid-cols-[minmax(320px,1fr)_auto_minmax(300px,380px)]">
+    <div className="mb-3 grid gap-3 lg:grid-cols-[minmax(300px,1fr)_auto] lg:items-center">
       <div className="flex min-w-0 items-center gap-4">
         <Link href="/library" className="iconbtn shrink-0" title="Back to library">
           <ArrowLeft className="h-5 w-5" />
@@ -605,36 +597,6 @@ function SongHeader({
             <div className="mono mt-1 text-sm font-bold">{value}</div>
           </div>
         ))}
-      </div>
-
-      <div className="flex h-11 min-w-0 items-center overflow-hidden rounded-full bg-[var(--card)] shadow-[inset_0_0_0_1.5px_var(--line),var(--shadow-card)] lg:col-span-2 xl:col-span-1">
-        <div className="relative min-w-0 flex-1">
-          <select
-            value={songId}
-            onChange={(event) => onLoadStudio(event.target.value)}
-            className="h-11 w-full min-w-0 appearance-none bg-transparent pl-5 pr-10 text-sm font-semibold text-[var(--ink)] outline-none"
-            aria-label="Studio song"
-          >
-            <option value="">Select song</option>
-            {songs.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" />
-        </div>
-        <span className="h-6 w-px bg-[var(--line)]" />
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={loading}
-          className="mr-1 grid h-9 w-9 shrink-0 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--card-2)] hover:text-[var(--ink)] disabled:opacity-45"
-          aria-label="Refresh studio"
-          title="Refresh"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
       </div>
     </div>
   );
@@ -1048,8 +1010,26 @@ function LyricsPane({
       return;
     }
 
-    const top = activeLine.offsetTop - container.clientHeight / 2 + activeLine.clientHeight / 2;
-    container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    if (activeIndex <= 1) {
+      if (container.scrollTop > 0) {
+        container.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+      return;
+    }
+
+    const activeCenter = activeLine.offsetTop + activeLine.clientHeight / 2;
+    const currentCenter = activeCenter - container.scrollTop;
+    const upperFocus = container.clientHeight * 0.28;
+    const lowerFocus = container.clientHeight * 0.52;
+
+    if (currentCenter >= upperFocus && currentCenter <= lowerFocus) {
+      return;
+    }
+
+    const targetFocus = container.clientHeight * 0.42;
+    const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const top = Math.min(maxScrollTop, Math.max(0, activeCenter - targetFocus));
+    container.scrollTo({ top, behavior: 'smooth' });
   }, [activeIndex, autoScroll]);
 
   const stateLabel = syncedLyrics ? '.lrc synced' : plainLyrics ? '.txt not timed' : 'No lyrics';
@@ -1058,8 +1038,8 @@ function LyricsPane({
     <section className="surface relative flex min-h-[320px] flex-col overflow-hidden lg:min-h-0">
       {lines.length > 0 && (
         <>
-          <div className="pointer-events-none absolute left-0 right-0 top-0 z-[1] h-24 bg-gradient-to-b from-[var(--card)] to-transparent" />
-          <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[1] h-24 bg-gradient-to-t from-[var(--card)] to-transparent" />
+          <div className="pointer-events-none absolute left-0 right-0 top-0 z-[1] h-16 bg-gradient-to-b from-[var(--card)] to-transparent" />
+          <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[1] h-20 bg-gradient-to-t from-[var(--card)] to-transparent" />
         </>
       )}
       <div className="absolute left-4 right-4 top-3 z-[2] flex items-center justify-between gap-3">
@@ -1090,7 +1070,7 @@ function LyricsPane({
         </div>
       </div>
       {lines.length > 0 ? (
-        <div ref={scrollRef} className="h-full overflow-y-auto px-6 py-[20%]">
+        <div ref={scrollRef} className="h-full overflow-y-auto px-6 pb-20 pt-14">
           {lines.map((line, index) => {
             const active = index === activeIndex;
             const past = activeIndex >= 0 && index < activeIndex;
@@ -1146,6 +1126,8 @@ function TransportCard({
   stemSources,
   seekCommand,
   playbackCommand,
+  minimized,
+  onMinimizedChange,
   onTimeChange,
   onPlayingChange,
 }: {
@@ -1154,6 +1136,8 @@ function TransportCard({
   stemSources: StemPlaybackSource[];
   seekCommand: SeekCommand | null;
   playbackCommand: PlaybackCommand | null;
+  minimized: boolean;
+  onMinimizedChange: (minimized: boolean) => void;
   onTimeChange: (time: number) => void;
   onPlayingChange: (playing: boolean) => void;
 }) {
@@ -1323,6 +1307,49 @@ function TransportCard({
         })()
       : null;
 
+  function renderWaveform(heightClass: string, showLoopRange: boolean) {
+    return (
+      <div className={`relative flex ${heightClass} flex-1 items-center gap-[2px] border-l border-r border-[var(--line-2)] px-3`}>
+        {showLoopRange && loopRange && (
+          <div
+            className="pointer-events-none absolute bottom-2 top-2 rounded-[6px] bg-[var(--accent-soft)]"
+            style={{ left: `${loopRange.left}%`, width: `${loopRange.width}%` }}
+          />
+        )}
+        {bars.map((bar, index) => {
+          const played = index / bars.length <= progress;
+          return (
+            <div
+              key={index}
+              className="flex-1 rounded-full"
+              style={{
+                height: `${bar}%`,
+                background: played ? 'var(--ink)' : 'var(--hair)',
+              }}
+            />
+          );
+        })}
+        <input
+          type="range"
+          min={0}
+          max={duration || 1}
+          step={0.1}
+          value={time}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            seekTo(next);
+          }}
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          aria-label="Seek playback"
+        />
+        <div
+          className="pointer-events-none absolute bottom-[-4px] top-[-4px] w-0.5 bg-[var(--accent)]"
+          style={{ left: `${Math.min(100, Math.max(0, progress * 100))}%` }}
+        />
+      </div>
+    );
+  }
+
   return (
     <section className="surface shrink-0 px-5 py-4">
       {!hasStemPlayback && audioUrl && (
@@ -1396,101 +1423,108 @@ function TransportCard({
             className="hidden"
           />
         ))}
-      <div className="flex items-center gap-5">
-        <button
-          type="button"
-          onClick={() => void toggle()}
-          disabled={!hasPlayableAudio}
-          className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
-          aria-label={playing ? 'Pause' : 'Play'}
-        >
-          {playing ? <Pause className="h-5 w-5" /> : <Play className="h-6 w-6" />}
-        </button>
-        <div className="relative flex h-16 flex-1 items-center gap-[2px] border-l border-r border-[var(--line-2)] px-3">
-          {loopRange && (
-            <div
-              className="pointer-events-none absolute bottom-2 top-2 rounded-[6px] bg-[var(--accent-soft)]"
-              style={{ left: `${loopRange.left}%`, width: `${loopRange.width}%` }}
-            />
-          )}
-          {bars.map((bar, index) => {
-            const played = index / bars.length <= progress;
-            return (
-              <div
-                key={index}
-                className="flex-1 rounded-full"
-                style={{
-                  height: `${bar}%`,
-                  background: played ? 'var(--ink)' : 'var(--hair)',
-                }}
-              />
-            );
-          })}
-          <input
-            type="range"
-            min={0}
-            max={duration || 1}
-            step={0.1}
-            value={time}
-            onChange={(event) => {
-              const next = Number(event.target.value);
-              seekTo(next);
-            }}
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            aria-label="Seek playback"
-          />
-          <div
-            className="pointer-events-none absolute bottom-[-4px] top-[-4px] w-0.5 bg-[var(--accent)]"
-            style={{ left: `${Math.min(100, Math.max(0, progress * 100))}%` }}
-          />
-        </div>
-      </div>
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+      {minimized ? (
         <div className="flex items-center gap-3">
-          <span className="mono text-sm font-bold">{formatSeconds(time)}</span>
-          <span className="text-xs text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</span>
-          <span className="chip accent">Practice</span>
-          <span className={`chip ${hasStemPlayback ? 'live' : ''}`}>{hasStemPlayback ? 'Stems mix' : 'Original'}</span>
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          <div className={`flex items-center gap-1 rounded-full px-2 py-1 ${hasLoop ? 'bg-[var(--accent-soft)]' : 'bg-[var(--paper-2)]'}`}>
-            <Repeat className="h-3.5 w-3.5 text-[var(--accent)]" />
-            <button
-              type="button"
-              onClick={setLoopStartAtPlayhead}
-              disabled={!hasPlayableAudio}
-              className={`chip ${loopStart !== null ? 'on' : ''}`}
-              title="Set loop start"
-            >
-              A {loopStart !== null ? formatSeconds(loopStart) : '--'}
-            </button>
-            <button
-              type="button"
-              onClick={setLoopEndAtPlayhead}
-              disabled={!hasPlayableAudio}
-              className={`chip ${loopEnd !== null ? 'on' : ''}`}
-              title="Set loop end"
-            >
-              B {loopEnd !== null ? formatSeconds(loopEnd) : '--'}
-            </button>
-            {hasLoop && (
-              <button type="button" onClick={clearLoop} className="grid h-7 w-7 place-items-center rounded-full text-[var(--muted)]" aria-label="Clear loop">
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
+          <button
+            type="button"
+            onClick={() => void toggle()}
+            disabled={!hasPlayableAudio}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
+            aria-label={playing ? 'Pause' : 'Play'}
+          >
+            {playing ? <Pause className="h-4 w-4" /> : <Play className="h-5 w-5" />}
+          </button>
+          <div className="hidden min-w-[88px] sm:block">
+            <div className="mono text-sm font-bold">{formatSeconds(time)}</div>
+            <div className="text-[11px] text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</div>
           </div>
-          {[0.5, 0.75, 1, 1.5, 1.75, 2].map((speed) => (
-            <button
-              key={speed}
-              type="button"
-              onClick={() => setRate(speed)}
-              className={`chip ${rate === speed ? 'on' : ''}`}
-            >
-              {speed}x
-            </button>
-          ))}
+          {renderWaveform('h-11', false)}
+          <button
+            type="button"
+            onClick={() => onMinimizedChange(false)}
+            className="iconbtn h-9 w-9 shrink-0"
+            aria-label="Expand playback"
+            title="Expand playback"
+          >
+            <ChevronUp className="h-4 w-4" />
+          </button>
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-5">
+            <button
+              type="button"
+              onClick={() => void toggle()}
+              disabled={!hasPlayableAudio}
+              className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
+              aria-label={playing ? 'Pause' : 'Play'}
+            >
+              {playing ? <Pause className="h-5 w-5" /> : <Play className="h-6 w-6" />}
+            </button>
+            {renderWaveform('h-16', true)}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="mono text-sm font-bold">{formatSeconds(time)}</span>
+              <span className="text-xs text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</span>
+              <span className="chip accent">Practice</span>
+              <span className={`chip ${hasStemPlayback ? 'live' : ''}`}>{hasStemPlayback ? 'Stems mix' : 'Original'}</span>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <div className={`flex items-center gap-1 rounded-full px-2 py-1 ${hasLoop ? 'bg-[var(--accent-soft)]' : 'bg-[var(--paper-2)]'}`}>
+                <Repeat className="h-3.5 w-3.5 text-[var(--accent)]" />
+                <button
+                  type="button"
+                  onClick={setLoopStartAtPlayhead}
+                  disabled={!hasPlayableAudio}
+                  className={`chip ${loopStart !== null ? 'on' : ''}`}
+                  title="Set loop start"
+                >
+                  A {loopStart !== null ? formatSeconds(loopStart) : '--'}
+                </button>
+                <button
+                  type="button"
+                  onClick={setLoopEndAtPlayhead}
+                  disabled={!hasPlayableAudio}
+                  className={`chip ${loopEnd !== null ? 'on' : ''}`}
+                  title="Set loop end"
+                >
+                  B {loopEnd !== null ? formatSeconds(loopEnd) : '--'}
+                </button>
+                {hasLoop && (
+                  <button
+                    type="button"
+                    onClick={clearLoop}
+                    className="grid h-7 w-7 place-items-center rounded-full text-[var(--muted)]"
+                    aria-label="Clear loop"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              {[0.5, 0.75, 1, 1.5, 1.75, 2].map((speed) => (
+                <button
+                  key={speed}
+                  type="button"
+                  onClick={() => setRate(speed)}
+                  className={`chip ${rate === speed ? 'on' : ''}`}
+                >
+                  {speed}x
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => onMinimizedChange(true)}
+                className="iconbtn h-8 w-8"
+                aria-label="Minimize playback"
+                title="Minimize playback"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -1810,7 +1844,7 @@ function LyricsEditorProductView({
   }, [lines.length, onTogglePlayback, saveEditorDraft, stampLine]);
 
   return (
-    <div className="grid h-auto min-h-0 gap-4 md:h-full lg:grid-cols-[1fr_320px]">
+    <div className="grid h-auto min-h-0 gap-4 md:h-full lg:grid-cols-[minmax(0,1fr)_320px]">
       {showImport && (
         <ImportLyricsModal
           initialText={editorLinesToLrc(lines, offsetMs)}
@@ -1821,7 +1855,7 @@ function LyricsEditorProductView({
           }}
         />
       )}
-      <section className="surface flex min-h-0 flex-col overflow-hidden">
+      <section className="surface flex min-h-0 flex-col overflow-hidden md:h-full">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line-2)] p-5">
           <div className="flex items-center gap-3">
             <Type className="h-5 w-5 text-[var(--muted)]" />
@@ -1945,28 +1979,10 @@ function LyricsEditorProductView({
             </button>
           )}
         </div>
-
-        <div className="flex items-center gap-3 border-t border-[var(--line-2)] p-4">
-          <button
-            type="button"
-            onClick={onTogglePlayback}
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)]"
-            aria-label={playing ? 'Pause editor playback' : 'Play editor playback'}
-          >
-            {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-          </button>
-          <span className="mono min-w-14 text-sm font-bold">{formatSeconds(currentTime)}</span>
-          <button type="button" onClick={stampLine} disabled={lines.length === 0} className="pill h-11 flex-1 justify-center bg-[var(--accent)] text-white">
-            <PillIcon>
-              <Flag className="h-3.5 w-3.5" />
-            </PillIcon>
-            Stamp line {lines.length > 0 ? cursorIndex + 1 : 0} & advance
-            <span className="mono opacity-70">↵ / K</span>
-          </button>
-        </div>
       </section>
 
-      <aside className="grid h-fit gap-4">
+      <aside className="min-h-0 overflow-y-auto pr-1">
+        <div className="grid gap-4 pb-1">
         <section className="surface p-5">
           <div className="label mb-3">How to sync</div>
           <div className="grid gap-3 text-sm">
@@ -2007,11 +2023,21 @@ function LyricsEditorProductView({
           <div className="mb-4 flex items-center justify-between gap-3">
             <span className="label">Lyric offset</span>
             <div className="flex items-center gap-1 rounded-full bg-[var(--card-2)] p-1">
-              <button type="button" onClick={() => setOffsetMs((value) => value - 50)} className="iconbtn h-8 w-8" title="-50 ms">
+              <button
+                type="button"
+                onClick={() => setOffsetMs((value) => value - 50)}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--card)] hover:text-[var(--ink)]"
+                title="-50 ms"
+              >
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <span className="mono min-w-16 text-center text-sm font-bold">{offsetMs} ms</span>
-              <button type="button" onClick={() => setOffsetMs((value) => value + 50)} className="iconbtn h-8 w-8" title="+50 ms">
+              <button
+                type="button"
+                onClick={() => setOffsetMs((value) => value + 50)}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--card)] hover:text-[var(--ink)]"
+                title="+50 ms"
+              >
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
@@ -2048,6 +2074,7 @@ function LyricsEditorProductView({
             </button>
           </div>
         </section>
+        </div>
       </aside>
     </div>
   );
@@ -2070,8 +2097,13 @@ function TimestampControl({
 
   return (
     <div className="flex items-center gap-1">
-      <button type="button" onClick={() => onChange(roundTime(value - 0.1))} className="iconbtn h-6 w-6" title="-100 ms">
-        <ChevronLeft className="h-3.5 w-3.5" />
+      <button
+        type="button"
+        onClick={() => onChange(roundTime(value - 0.1))}
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--card)] hover:text-[var(--ink)]"
+        title="-100 ms"
+      >
+        <ChevronLeft className="h-4 w-4" />
       </button>
       <button
         type="button"
@@ -2081,8 +2113,13 @@ function TimestampControl({
       >
         {formatTimestamp(value)}
       </button>
-      <button type="button" onClick={() => onChange(roundTime(value + 0.1))} className="iconbtn h-6 w-6" title="+100 ms">
-        <ChevronRight className="h-3.5 w-3.5" />
+      <button
+        type="button"
+        onClick={() => onChange(roundTime(value + 0.1))}
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[var(--muted)] transition hover:bg-[var(--card)] hover:text-[var(--ink)]"
+        title="+100 ms"
+      >
+        <ChevronRight className="h-4 w-4" />
       </button>
     </div>
   );
