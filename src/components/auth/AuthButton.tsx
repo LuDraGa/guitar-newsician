@@ -89,9 +89,11 @@ export function AuthButton() {
           type="button"
           onClick={signIn}
           disabled={busy}
-          className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-sm text-slate-100 hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
+          className="pill ghost sm"
         >
-          <LogIn className="h-4 w-4" />
+          <span className="dot">
+            <LogIn className="h-3.5 w-3.5" />
+          </span>
           Google
         </button>
       </div>
@@ -102,15 +104,15 @@ export function AuthButton() {
 
   return (
     <div className="flex items-center gap-2">
-      <div className="hidden max-w-[180px] items-center gap-2 truncate text-sm text-slate-200 sm:flex">
-        <UserCircle className="h-4 w-4 shrink-0 text-[var(--accent-strong)]" />
+      <div className="hidden max-w-[180px] items-center gap-2 truncate text-sm text-[var(--muted)] sm:flex">
+        <UserCircle className="h-4 w-4 shrink-0 text-[var(--accent-ink)]" />
         <span className="truncate">{displayName}</span>
       </div>
       <button
         type="button"
         onClick={signOut}
         disabled={busy}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 text-slate-100 hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
+        className="iconbtn"
         title="Sign out"
       >
         <LogOut className="h-4 w-4" />

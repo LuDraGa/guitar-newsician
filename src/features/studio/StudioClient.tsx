@@ -3,24 +3,46 @@
 import {
   Activity,
   AlertCircle,
-  AudioLines,
-  FileText,
+  ArrowLeft,
+  Bot,
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  DownloadCloud,
   FileMusic,
+  Flag,
+  GripVertical,
+  Guitar,
+  Layers,
   ListMusic,
   Loader2,
+  Mic,
   Music2,
+  Pause,
+  Play,
   RefreshCw,
+  Repeat,
+  Save,
   Scissors,
+  Send,
+  Sheet,
+  SlidersHorizontal,
   Sparkles,
+  Trash2,
+  Type,
+  Upload,
+  Wand2,
+  X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
+import { CoverArt, PillIcon, StatusDot } from '@/components/werecode/WereCodePrimitives';
+import { parseLrc } from '@/lib/music/lrc';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
-import { StemMixerPanel } from './StemMixerPanel';
-import { assetLabel, fetchJson, formatBytes, formatDate, signDownload, statusClass } from './studio-utils';
-import { StudioWorkflowPanels } from './StudioWorkflowPanels';
-import { TranscriptionWorkspace } from './TranscriptionWorkspace';
+import { MusicXmlPreviewPanel } from './MusicXmlPreviewPanel';
+import { fetchJson, formatBytes, signDownload } from './studio-utils';
 
 type WorkflowResult = {
   job?: JobRow;
@@ -32,20 +54,66 @@ type WorkflowResult = {
   };
 };
 
+type StudioTab = 'karaoke' | 'guitar' | 'lyrics';
+type GuitarMode = 'chords' | 'sheet' | 'tab';
+type LyricDisplayLine = { id: string; timestamp: number | null; text: string };
+type StemMixState = { level: number; muted: boolean; solo: boolean };
+type StemPlaybackSource = { id: string; kind: AssetRow['kind']; url: string; level: number; muted: boolean; solo: boolean };
+type SeekCommand = { id: number; time: number };
+type PlaybackCommand = { id: number; action: 'toggle' };
+type EditorLyricLine = { id: string; time: number | null; text: string };
+
+const stemKindSet = new Set(['stem_vocals', 'stem_drums', 'stem_bass', 'stem_other', 'stem_guitar', 'stem_piano']);
+const stemKindOrder = ['stem_vocals', 'stem_guitar', 'stem_bass', 'stem_drums', 'stem_piano', 'stem_other'];
+const defaultStemLevels: Record<string, number> = {
+  stem_vocals: 82,
+  stem_guitar: 72,
+  stem_bass: 64,
+  stem_drums: 58,
+  stem_piano: 62,
+  stem_other: 70,
+};
+const stemColors: Record<string, string> = {
+  stem_vocals: '#c8752d',
+  stem_guitar: '#0f9b72',
+  stem_bass: '#5d7bd6',
+  stem_drums: '#c95f5f',
+  stem_piano: '#8f70d5',
+  stem_other: '#a36bb1',
+};
+const studioTabs = [
+  ['karaoke', 'Karaoke', Mic],
+  ['guitar', 'Guitar learner', Guitar],
+  ['lyrics', 'Lyrics editor', Type],
+] as const;
+const guitarModes = [
+  ['chords', 'Chords', Music2],
+  ['sheet', 'Sheet', Sheet],
+  ['tab', 'Tab', Guitar],
+] as const;
+
 export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const [songId, setSongId] = useState(initialSongId ?? '');
   const [songs, setSongs] = useState<SongRow[]>([]);
   const [song, setSong] = useState<SongRow | null>(null);
   const [assets, setAssets] = useState<AssetRow[]>([]);
-  const [jobs, setJobs] = useState<JobRow[]>([]);
   const [analysisResults, setAnalysisResults] = useState<AnalysisResultRow[]>([]);
   const [lyrics, setLyrics] = useState<LyricsRow[]>([]);
   const [lyricsDraft, setLyricsDraft] = useState('');
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [stemUrls, setStemUrls] = useState<Record<string, string>>({});
+  const [stemMix, setStemMix] = useState<Record<string, StemMixState>>({});
+  const [stemSignError, setStemSignError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [tab, setTab] = useState<StudioTab>('karaoke');
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [transportTime, setTransportTime] = useState(0);
+  const [transportPlaying, setTransportPlaying] = useState(false);
+  const [seekCommand, setSeekCommand] = useState<SeekCommand | null>(null);
+  const [playbackCommand, setPlaybackCommand] = useState<PlaybackCommand | null>(null);
 
   const latestAssetsByKind = useMemo(() => {
     const map = new Map<string, AssetRow>();
@@ -64,8 +132,112 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const vocalAsset = latestAssetsByKind.get('stem_vocals');
   const noteEventsAsset = latestAssetsByKind.get('note_events');
   const musicXmlAsset = latestAssetsByKind.get('musicxml') ?? latestAssetsByKind.get('tab_musicxml');
+  const tabAsset = latestAssetsByKind.get('tab_musicxml');
   const plainLyrics = useMemo(() => lyrics.find((item) => item.lyrics_type === 'plain'), [lyrics]);
   const syncedLyrics = useMemo(() => lyrics.find((item) => item.lyrics_type === 'lrc' || item.lyrics_type === 'alignment_json'), [lyrics]);
+  const stemAssets = useMemo(
+    () => assets.filter((asset) => stemKindSet.has(asset.kind)).sort((a, b) => stemKindOrder.indexOf(a.kind) - stemKindOrder.indexOf(b.kind)),
+    [assets]
+  );
+  const lyricLines = useMemo(() => deriveLyricLines(syncedLyrics, plainLyrics), [plainLyrics, syncedLyrics]);
+  const facts = useMemo(() => buildSongFacts(song), [song]);
+  const stemPlaybackSources = useMemo(
+    () =>
+      stemAssets
+        .map((asset) => {
+          const url = stemUrls[asset.id];
+          if (!url) {
+            return null;
+          }
+          const mix = stemMix[asset.id] ?? defaultStemMix(asset);
+          return {
+            id: asset.id,
+            kind: asset.kind,
+            url,
+            level: mix.level,
+            muted: mix.muted,
+            solo: mix.solo,
+          };
+        })
+        .filter((source): source is StemPlaybackSource => Boolean(source)),
+    [stemAssets, stemMix, stemUrls]
+  );
+
+  const requestTransportSeek = useCallback((time: number) => {
+    const target = Math.max(0, time);
+    setTransportTime(target);
+    setSeekCommand({ id: Date.now(), time: target });
+  }, []);
+
+  const requestPlaybackToggle = useCallback(() => {
+    setPlaybackCommand({ id: Date.now(), action: 'toggle' });
+  }, []);
+
+  const updateStemMix = useCallback(
+    (assetId: string, patch: Partial<StemMixState>) => {
+      const asset = stemAssets.find((item) => item.id === assetId);
+      setStemMix((current) => ({
+        ...current,
+        [assetId]: {
+          ...(asset ? defaultStemMix(asset) : { level: 82, muted: false, solo: false }),
+          ...current[assetId],
+          ...patch,
+        },
+      }));
+    },
+    [stemAssets]
+  );
+
+  const soloStem = useCallback(
+    (assetId: string) => {
+      setStemMix((current) => {
+        const currentSolo = current[assetId]?.solo ?? false;
+        const next: Record<string, StemMixState> = {};
+        for (const asset of stemAssets) {
+          next[asset.id] = {
+            ...defaultStemMix(asset),
+            ...current[asset.id],
+            solo: asset.id === assetId ? !currentSolo : false,
+          };
+        }
+        return next;
+      });
+    },
+    [stemAssets]
+  );
+
+  useEffect(() => {
+    if (stemAssets.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void Promise.all(
+        stemAssets.map(async (asset) => {
+          const url = await signDownload(asset);
+          return [asset.id, url] as const;
+        })
+      )
+        .then((entries) => {
+          if (!cancelled) {
+            setStemUrls(Object.fromEntries(entries));
+            setStemSignError(null);
+          }
+        })
+        .catch((signError) => {
+          if (!cancelled) {
+            setStemUrls({});
+            setStemSignError(signError instanceof Error ? signError.message : 'Could not sign stem audio');
+          }
+        });
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [stemAssets]);
 
   const loadStudio = useCallback(async (nextSongId: string) => {
     setLoading(true);
@@ -80,28 +252,41 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
       if (!selectedSongId) {
         setSong(null);
         setAssets([]);
-        setJobs([]);
         setAnalysisResults([]);
         setLyrics([]);
         setLyricsDraft('');
         setAudioUrl(null);
+        setStemUrls({});
+        setStemMix({});
+        setStemSignError(null);
         return;
       }
 
-      const [songPayload, assetsPayload, jobsPayload, analysisPayload, lyricsPayload] = await Promise.all([
+      const [songPayload, assetsPayload, analysisPayload, lyricsPayload] = await Promise.all([
         fetchJson<{ song: SongRow }>(`/api/songs/${selectedSongId}`),
         fetchJson<{ assets: AssetRow[] }>(`/api/songs/${selectedSongId}/assets`),
-        fetchJson<{ jobs: JobRow[] }>(`/api/jobs?songId=${selectedSongId}&limit=30`),
         fetchJson<{ analysisResults: AnalysisResultRow[] }>(`/api/songs/${selectedSongId}/analysis-results`),
         fetchJson<{ lyrics: LyricsRow[] }>(`/api/songs/${selectedSongId}/lyrics`),
       ]);
 
       setSong(songPayload.song);
       setAssets(assetsPayload.assets);
-      setJobs(jobsPayload.jobs);
       setAnalysisResults(analysisPayload.analysisResults);
       setLyrics(lyricsPayload.lyrics);
       setLyricsDraft(lyricsPayload.lyrics.find((item) => item.lyrics_type === 'plain')?.content ?? '');
+      const loadedStemAssets = assetsPayload.assets
+        .filter((asset) => stemKindSet.has(asset.kind))
+        .sort((a, b) => stemKindOrder.indexOf(a.kind) - stemKindOrder.indexOf(b.kind));
+      setStemMix((current) => {
+        const next: Record<string, StemMixState> = {};
+        for (const asset of loadedStemAssets) {
+          next[asset.id] = {
+            ...defaultStemMix(asset),
+            ...current[asset.id],
+          };
+        }
+        return next;
+      });
 
       const playableAsset =
         assetsPayload.assets.find((asset) => asset.kind === 'preview_audio') ??
@@ -129,6 +314,19 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     return () => window.clearTimeout(timer);
   }, [initialSongId, loadStudio]);
 
+  useEffect(() => {
+    const onToggleCoach = () => setCoachOpen((open) => !open);
+    window.addEventListener('werecode:toggle-coach', onToggleCoach);
+    return () => window.removeEventListener('werecode:toggle-coach', onToggleCoach);
+  }, []);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('coach') === '1') {
+      const timer = window.setTimeout(() => setCoachOpen(true), 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, []);
+
   async function runWorkflow(name: string, endpoint: string, payload: Record<string, unknown>) {
     if (!song) {
       setError('Select a song first');
@@ -148,14 +346,17 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         }),
       });
       const jobStatus = result.job?.status;
-      setMessage(
-        jobStatus === 'processing'
-          ? `${name} is still processing`
-          : jobStatus === 'failed'
-          ? `${name} failed`
-          : `${name} completed${result.assets?.length ? ` with ${result.assets.length} artifact(s)` : ''}`
-      );
       await loadStudio(song.id);
+      if (jobStatus === 'failed') {
+        setError(result.job?.error_message ?? `${name} failed`);
+        setMessage(null);
+      } else {
+        setMessage(
+          jobStatus === 'processing'
+            ? `${name} is still processing`
+            : `${name} completed${result.assets?.length ? ` with ${result.assets.length} artifact(s)` : ''}`
+        );
+      }
     } catch (workflowError) {
       setError(workflowError instanceof Error ? workflowError.message : `${name} failed`);
     } finally {
@@ -173,7 +374,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     }
   }
 
-  async function savePlainLyrics() {
+  async function savePlainLyrics(contentOverride?: string) {
     if (!song) {
       setError('Select a song first');
       return;
@@ -190,7 +391,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
           song_id: song.id,
           lyrics_type: 'plain',
           source: 'user',
-          content: lyricsDraft,
+          content: contentOverride ?? lyricsDraft,
         }),
       });
       setMessage('Lyrics saved');
@@ -202,332 +403,2045 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     }
   }
 
-  const actions = [
-    {
-      id: 'analysis',
-      label: 'Analyze',
-      icon: Activity,
-      disabled: !sourceAsset,
-      run: () =>
-        sourceAsset &&
-        runWorkflow('Analysis', '/api/workflows/analyze', {
-          source_asset_id: sourceAsset.id,
-          preset: 'quick',
-        }),
-    },
-    {
-      id: 'stems',
-      label: 'Stems',
-      icon: Scissors,
-      disabled: !sourceAsset,
-      run: () =>
-        sourceAsset &&
-        runWorkflow('Stem separation', '/api/workflows/separate', {
-          source_asset_id: sourceAsset.id,
-          stems: ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'],
-          model: 'htdemucs_6s',
-          shifts: 2,
-        }),
-    },
-    {
-      id: 'lyrics_fetch',
-      label: 'Lyrics',
-      icon: FileText,
-      disabled: !song,
-      run: () => runWorkflow('Lyrics fetch', '/api/workflows/lyrics/fetch', {}),
-    },
-    {
-      id: 'lyrics_align',
-      label: 'Karaoke',
-      icon: ListMusic,
-      disabled: !(vocalAsset ?? sourceAsset),
-      run: () =>
-        (vocalAsset ?? sourceAsset) &&
-        runWorkflow('Lyrics alignment', '/api/workflows/lyrics/align', {
-          source_asset_id: (vocalAsset ?? sourceAsset)!.id,
-          known_lyrics: plainLyrics?.content ?? undefined,
-        }),
-    },
-    {
-      id: 'midi',
-      label: 'MIDI',
-      icon: FileMusic,
-      disabled: !(sourceAsset ?? vocalAsset),
-      run: () =>
-        (sourceAsset ?? vocalAsset) &&
-        runWorkflow('MIDI transcription', '/api/workflows/midi/transcribe', {
-          source_asset_id: (sourceAsset ?? vocalAsset)!.id,
-          stem_name: vocalAsset ? 'vocals' : undefined,
-        }),
-    },
-    {
-      id: 'musicxml',
-      label: 'MusicXML',
-      icon: FileMusic,
-      disabled: !noteEventsAsset,
-      run: () =>
-        noteEventsAsset &&
-        runWorkflow('MusicXML conversion', '/api/workflows/midi/convert-musicxml', {
-          note_events_asset_id: noteEventsAsset.id,
-          title: song?.title,
-        }),
-    },
-  ];
+  const workflowActions = {
+    analyze: () =>
+      sourceAsset &&
+      runWorkflow('Analysis', '/api/workflows/analyze', {
+        source_asset_id: sourceAsset.id,
+        preset: 'quick',
+      }),
+    stems: () =>
+      sourceAsset &&
+      runWorkflow('Stem separation', '/api/workflows/separate', {
+        source_asset_id: sourceAsset.id,
+        stems: ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'],
+        model: 'htdemucs_6s',
+        shifts: 2,
+      }),
+    lyricsFetch: () => runWorkflow('Lyrics fetch', '/api/workflows/lyrics/fetch', {}),
+    lyricsAlign: () =>
+      (vocalAsset ?? sourceAsset) &&
+      runWorkflow('Lyrics alignment', '/api/workflows/lyrics/align', {
+        source_asset_id: (vocalAsset ?? sourceAsset)!.id,
+        known_lyrics: (plainLyrics?.content ?? lyricsDraft) || undefined,
+      }),
+    midi: () =>
+      (sourceAsset ?? vocalAsset) &&
+      runWorkflow('MIDI transcription', '/api/workflows/midi/transcribe', {
+        source_asset_id: (sourceAsset ?? vocalAsset)!.id,
+        stem_name: vocalAsset ? 'vocals' : undefined,
+      }),
+    musicXml: () =>
+      noteEventsAsset &&
+      runWorkflow('MusicXML conversion', '/api/workflows/midi/convert-musicxml', {
+        note_events_asset_id: noteEventsAsset.id,
+        title: song?.title,
+      }),
+  };
 
   return (
-    <section className="grid gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="muted text-sm">Studio orchestration</p>
-          <h1 className="mt-2 text-3xl font-semibold text-white">{song?.title ?? 'Studio'}</h1>
-          {song && <p className="muted mt-1 text-sm">{song.artist ?? 'Unknown artist'}</p>}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={songId}
-            onChange={(event) => void loadStudio(event.target.value)}
-            className="h-10 min-w-64 rounded-md border border-white/10 bg-[#0d121b] px-3 text-sm text-white outline-none focus:border-[var(--accent)]"
-          >
-            <option value="">Select song</option>
-            {songs.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => void loadStudio(songId)}
-            disabled={loading}
-            className="inline-flex h-10 items-center gap-2 rounded-md border border-white/10 px-3 text-sm text-slate-100 hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        </div>
-      </div>
-
-      {message && (
-        <div className="rounded-md border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-100">{message}</div>
-      )}
-      {error && (
-        <div className="flex items-start gap-2 rounded-md border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-100">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-
+    <section className="mx-auto flex min-h-[calc(100vh-140px)] max-w-[1180px] flex-col overflow-visible pb-6 md:h-[calc(100vh-140px)] md:min-h-0 md:overflow-hidden">
       {!song && !loading ? (
-        <div className="surface grid place-items-center px-4 py-16 text-center">
+        <div className="surface grid min-h-[420px] place-items-center px-6 py-16 text-center">
           <div>
-            <Music2 className="mx-auto h-10 w-10 text-slate-600" />
-            <h2 className="mt-3 text-lg font-medium">No song selected</h2>
-            <p className="muted mt-1 text-sm">Create or ingest a song from the library before running studio workflows.</p>
-            <Link
-              href="/library"
-              className="mt-4 inline-flex h-10 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-slate-950 hover:bg-[var(--accent-strong)]"
-            >
-              Open Library
+            <Music2 className="mx-auto h-11 w-11 text-[var(--faint)]" />
+            <h1 className="display mt-4 text-3xl">No song selected</h1>
+            <p className="mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
+              Create or ingest a song from the library before opening the product studio.
+            </p>
+            <Link href="/library" className="pill mt-5">
+              <PillIcon>
+                <Music2 className="h-3.5 w-3.5" />
+              </PillIcon>
+              Open library
             </Link>
           </div>
         </div>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
-          <div className="grid gap-5">
-            <div className="surface p-4">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <AudioLines className="h-4 w-4 text-[var(--accent-strong)]" />
-                  <h2 className="font-medium">Playback Source</h2>
-                </div>
-                {song && <span className={`rounded-md border px-2 py-1 text-xs ${statusClass(song.status)}`}>{song.status}</span>}
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <SongHeader
+              song={song}
+              songId={songId}
+              songs={songs}
+              facts={facts}
+              loading={loading}
+              onLoadStudio={(id) => void loadStudio(id)}
+              onRefresh={() => void loadStudio(songId)}
+            />
+
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              {studioTabs.map(([id, label, Icon]) => (
+                <button
+                  key={id as StudioTab}
+                  type="button"
+                  onClick={() => setTab(id as StudioTab)}
+                  className={`inline-flex h-10 items-center gap-2 rounded-full px-5 text-sm font-bold ${
+                    tab === id
+                      ? 'bg-[var(--ink)] text-[var(--paper)]'
+                      : 'text-[var(--muted)] shadow-[inset_0_0_0_1.5px_var(--line)]'
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label as string}
+                  {id === 'lyrics' && <span className="chip accent min-h-[18px] px-2 text-[10px]">flagship</span>}
+                </button>
+              ))}
+            </div>
+
+            {(message || error) && (
+              <div className="-mt-1 flex">
+                <span className={`chip ${error ? 'danger' : 'live'}`}>
+                  {error ? <AlertCircle className="h-3.5 w-3.5 shrink-0" /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+                  {error ?? message}
+                </span>
               </div>
-              {audioUrl ? (
-                <audio src={audioUrl} controls className="w-full" />
-              ) : (
-                <div className="rounded-md border border-white/10 bg-black/20 p-4 text-sm text-slate-300">
-                  <p>No playable audio asset is available yet.</p>
-                  <Link href="/library" className="mt-2 inline-flex text-[var(--accent-strong)] hover:text-[var(--accent)]">
-                    Upload source audio
-                  </Link>
-                </div>
+            )}
+
+            <div className="min-h-0 flex-1">
+              {tab === 'karaoke' && (
+                <KaraokeProductView
+                  currentTime={transportTime}
+                  lyrics={lyricLines}
+                  syncedLyrics={syncedLyrics}
+                  plainLyrics={plainLyrics}
+                  stemAssets={stemAssets}
+                  stemMix={stemMix}
+                  stemUrls={stemUrls}
+                  stemSignError={stemSignError}
+                  sourceAsset={sourceAsset}
+                  analysisReady={analysisResults.length > 0}
+                  running={running}
+                  onUpdateStemMix={updateStemMix}
+                  onSoloStem={soloStem}
+                  onOpenAsset={(asset) => void openAsset(asset)}
+                  onRunStems={() => void workflowActions.stems()}
+                  onRunAnalyze={() => void workflowActions.analyze()}
+                  onFetchLyrics={() => void workflowActions.lyricsFetch()}
+                  onAlignLyrics={() => void workflowActions.lyricsAlign()}
+                  onEditLyrics={() => setTab('lyrics')}
+                  onSeekLyric={(time) => requestTransportSeek(time - 0.35)}
+                />
+              )}
+              {tab === 'guitar' && (
+                <GuitarLearnerView
+                  currentTime={transportTime}
+                  musicXmlAsset={musicXmlAsset}
+                  tabAsset={tabAsset}
+                  noteEventsAsset={noteEventsAsset}
+                  sourceAsset={sourceAsset}
+                  running={running}
+                  onOpenAsset={(asset) => void openAsset(asset)}
+                  onRunMidi={() => void workflowActions.midi()}
+                  onRunMusicXml={() => void workflowActions.musicXml()}
+                />
+              )}
+              {tab === 'lyrics' && (
+                <LyricsEditorProductView
+                  key={`${song?.id ?? 'song'}:${syncedLyrics?.id ?? 'no-sync'}:${syncedLyrics?.updated_at ?? ''}:${plainLyrics?.id ?? 'no-plain'}:${plainLyrics?.updated_at ?? ''}`}
+                  lyricsDraft={lyricsDraft}
+                  syncedLyrics={syncedLyrics}
+                  plainLyrics={plainLyrics}
+                  currentTime={transportTime}
+                  playing={transportPlaying}
+                  running={running}
+                  onLyricsDraftChange={setLyricsDraft}
+                  onSave={(content) => void savePlainLyrics(content)}
+                  onFetchLyrics={() => void workflowActions.lyricsFetch()}
+                  onAlignLyrics={() => void workflowActions.lyricsAlign()}
+                  onSeek={(time) => requestTransportSeek(time - 0.35)}
+                  onTogglePlayback={requestPlaybackToggle}
+                  canAlign={Boolean(vocalAsset ?? sourceAsset)}
+                />
               )}
             </div>
-
-            <div className="surface p-4">
-              <div className="mb-4 flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-[var(--accent-strong)]" />
-                <h2 className="font-medium">Workflow Actions</h2>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {actions.map((action) => {
-                  const Icon = action.icon;
-                  return (
-                    <button
-                      key={action.id}
-                      type="button"
-                      onClick={() => void action.run()}
-                      disabled={action.disabled || Boolean(running)}
-                      className="flex h-12 items-center justify-center gap-2 rounded-md border border-white/10 px-3 text-sm text-slate-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {running === action.label ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
-                      {action.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <StudioWorkflowPanels
-              assets={assets}
-              sourceAsset={sourceAsset}
-              syncedLyrics={syncedLyrics}
-              plainLyrics={plainLyrics}
-              noteEventsAsset={noteEventsAsset}
-              musicXmlAsset={musicXmlAsset}
-              running={running}
-              onOpenAsset={(asset) => void openAsset(asset)}
-              onRunMusicXml={() =>
-                noteEventsAsset &&
-                void runWorkflow('MusicXML conversion', '/api/workflows/midi/convert-musicxml', {
-                  note_events_asset_id: noteEventsAsset.id,
-                  title: song?.title,
-                })
-              }
-            />
-
-            <StemMixerPanel assets={assets} onOpenAsset={(asset) => void openAsset(asset)} />
-
-            <TranscriptionWorkspace
-              song={song}
-              assets={assets}
-              sourceAsset={sourceAsset}
-              audioUrl={audioUrl}
-              running={running}
-              onOpenAsset={(asset) => void openAsset(asset)}
-              onRunWorkflow={(name, endpoint, payload) => void runWorkflow(name, endpoint, payload)}
-            />
-
-            <div className="surface overflow-hidden">
-              <div className="border-b border-white/10 p-4">
-                <h2 className="font-medium">Assets</h2>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-left text-sm">
-                  <thead className="muted border-b border-white/10 text-xs uppercase">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">Kind</th>
-                      <th className="px-4 py-3 font-medium">Format</th>
-                      <th className="px-4 py-3 font-medium">Size</th>
-                      <th className="px-4 py-3 font-medium">Model</th>
-                      <th className="px-4 py-3 font-medium">Created</th>
-                      <th className="px-4 py-3 font-medium">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {assets.map((asset) => (
-                      <tr key={asset.id} className="border-b border-white/5">
-                        <td className="px-4 py-3 font-medium text-white">{assetLabel(asset.kind)}</td>
-                        <td className="px-4 py-3 text-slate-300">{asset.content_type ?? '--'}</td>
-                        <td className="px-4 py-3 font-mono text-slate-400">{formatBytes(asset.byte_size)}</td>
-                        <td className="px-4 py-3 text-slate-300">{asset.modal_model ?? '--'}</td>
-                        <td className="px-4 py-3 text-slate-400">{formatDate(asset.created_at)}</td>
-                        <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            onClick={() => void openAsset(asset)}
-                            className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-100 hover:bg-white/10"
-                          >
-                            Open
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {!loading && assets.length === 0 && <div className="muted p-4 text-sm">No assets recorded for this song yet.</div>}
-            </div>
-
-            <div className="grid gap-5 lg:grid-cols-2">
-              <div className="surface p-4">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <h2 className="font-medium">Analysis</h2>
-                  <span className="muted text-xs">{analysisResults.length} result(s)</span>
-                </div>
-                <div className="grid gap-3">
-                  {analysisResults.slice(0, 6).map((result) => (
-                    <div key={result.id} className="rounded-md border border-white/10 bg-black/20 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-medium text-white">{result.analyzer_name}</div>
-                        <span className={`rounded-md border px-2 py-1 text-xs ${result.ok ? statusClass('ready') : statusClass('failed')}`}>
-                          {result.ok ? 'ok' : 'failed'}
-                        </span>
-                      </div>
-                      {result.error && <p className="mt-2 text-xs text-red-200">{result.error}</p>}
-                      <pre className="muted mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-xs">
-                        {JSON.stringify(result.data, null, 2)}
-                      </pre>
-                    </div>
-                  ))}
-                  {!loading && analysisResults.length === 0 && <div className="muted text-sm">Run Analyze to populate Supabase analysis results.</div>}
-                </div>
-              </div>
-
-              <div className="surface p-4">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <h2 className="font-medium">Lyrics</h2>
-                  {syncedLyrics && <span className={`rounded-md border px-2 py-1 text-xs ${statusClass('ready')}`}>synced</span>}
-                </div>
-                <textarea
-                  value={lyricsDraft}
-                  onChange={(event) => setLyricsDraft(event.target.value)}
-                  placeholder="Paste lyrics here. Karaoke alignment can use this as known lyrics."
-                  className="min-h-48 w-full resize-y rounded-md border border-white/10 bg-black/20 p-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-[var(--accent)]"
-                />
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <div className="muted text-xs">
-                    {syncedLyrics ? `Latest synced source: ${syncedLyrics.source ?? 'unknown'}` : 'No synced lyrics yet'}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void savePlainLyrics()}
-                    disabled={Boolean(running)}
-                    className="inline-flex h-9 items-center justify-center rounded-md border border-white/10 px-3 text-sm text-slate-100 hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
+            <div className="mt-4 shrink-0">
+              <TransportCard
+                song={song}
+                audioUrl={audioUrl}
+                stemSources={stemPlaybackSources}
+                seekCommand={seekCommand}
+                playbackCommand={playbackCommand}
+                onTimeChange={setTransportTime}
+                onPlayingChange={setTransportPlaying}
+              />
             </div>
           </div>
 
-          <aside className="surface h-fit overflow-hidden">
-            <div className="border-b border-white/10 p-4">
-              <h2 className="font-medium">Song Jobs</h2>
-            </div>
-            <div className="divide-y divide-white/5">
-              {jobs.map((job) => (
-                <div key={job.id} className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium text-white">{job.job_type}</div>
-                      <div className="muted mt-1 text-xs">{job.modal_endpoint ?? 'Next job'}</div>
-                    </div>
-                    <span className={`rounded-md border px-2 py-1 text-xs ${statusClass(job.status)}`}>{job.status}</span>
-                  </div>
-                  {job.error_message && <p className="mt-2 text-xs text-red-200">{job.error_message}</p>}
-                  <div className="muted mt-2 flex justify-between text-xs">
-                    <span>{Math.round(job.progress)}%</span>
-                    <span>{formatDate(job.created_at)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {!loading && jobs.length === 0 && <div className="muted p-4 text-sm">No jobs for this song yet.</div>}
-          </aside>
+          {coachOpen && (
+            <AICoachDock
+              context={tab}
+              song={song}
+              syncedLyrics={syncedLyrics}
+              musicXmlAsset={musicXmlAsset}
+              onClose={() => setCoachOpen(false)}
+            />
+          )}
         </div>
       )}
     </section>
   );
+}
+
+function SongHeader({
+  song,
+  songId,
+  songs,
+  facts,
+  loading,
+  onLoadStudio,
+  onRefresh,
+}: {
+  song: SongRow | null;
+  songId: string;
+  songs: SongRow[];
+  facts: Array<[string, string]>;
+  loading: boolean;
+  onLoadStudio: (id: string) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-4">
+      <Link href="/library" className="iconbtn" title="Back to library">
+        <ArrowLeft className="h-5 w-5" />
+      </Link>
+      <CoverArt id={song?.id ?? songId} size={52} />
+      <div className="min-w-0">
+        <h1 className="display truncate text-[26px]">{song?.title ?? 'Studio'}</h1>
+        <div className="mt-1 text-sm text-[var(--muted)]">{song ? song.artist ?? 'Unknown artist' : 'Select a song'}</div>
+      </div>
+      <div className="flex-1" />
+      <div className="hidden flex-wrap justify-end gap-4 md:flex">
+        {facts.map(([label, value]) => (
+          <div key={label} className="border-l border-[var(--line)] pl-4 text-right">
+            <div className="label text-[9.5px]">{label}</div>
+            <div className="mono mt-1 text-sm font-bold">{value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={songId} onChange={(event) => onLoadStudio(event.target.value)} className="wc-input h-10 min-w-56 px-4 text-sm">
+          <option value="">Select song</option>
+          {songs.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.title}
+            </option>
+          ))}
+        </select>
+        <button type="button" onClick={onRefresh} disabled={loading} className="pill ghost sm">
+          <PillIcon>
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </PillIcon>
+          Refresh
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function KaraokeProductView({
+  currentTime,
+  lyrics,
+  syncedLyrics,
+  plainLyrics,
+  stemAssets,
+  stemMix,
+  stemUrls,
+  stemSignError,
+  sourceAsset,
+  analysisReady,
+  running,
+  onUpdateStemMix,
+  onSoloStem,
+  onOpenAsset,
+  onRunStems,
+  onRunAnalyze,
+  onFetchLyrics,
+  onAlignLyrics,
+  onEditLyrics,
+  onSeekLyric,
+}: {
+  currentTime: number;
+  lyrics: LyricDisplayLine[];
+  syncedLyrics: LyricsRow | undefined;
+  plainLyrics: LyricsRow | undefined;
+  stemAssets: AssetRow[];
+  stemMix: Record<string, StemMixState>;
+  stemUrls: Record<string, string>;
+  stemSignError: string | null;
+  sourceAsset: AssetRow | undefined;
+  analysisReady: boolean;
+  running: string | null;
+  onUpdateStemMix: (assetId: string, patch: Partial<StemMixState>) => void;
+  onSoloStem: (assetId: string) => void;
+  onOpenAsset: (asset: AssetRow) => void;
+  onRunStems: () => void;
+  onRunAnalyze: () => void;
+  onFetchLyrics: () => void;
+  onAlignLyrics: () => void;
+  onEditLyrics: () => void;
+  onSeekLyric: (time: number) => void;
+}) {
+  return (
+    <div className="flex h-auto min-h-0 flex-col gap-4 md:h-full">
+      <div className="grid min-h-0 gap-4 md:flex-1 lg:grid-cols-[1fr_1.55fr]">
+        <div className="flex min-h-0 flex-col gap-4">
+          <StemsPanel
+            stemAssets={stemAssets}
+            stemMix={stemMix}
+            stemUrls={stemUrls}
+            stemSignError={stemSignError}
+            sourceAsset={sourceAsset}
+            running={running}
+            onUpdateStemMix={onUpdateStemMix}
+            onSoloStem={onSoloStem}
+            onOpenAsset={onOpenAsset}
+            onRunStems={onRunStems}
+          />
+          <CurrentChordPanel analysisReady={analysisReady} running={running} onRunAnalyze={onRunAnalyze} />
+        </div>
+        <LyricsPane
+          currentTime={currentTime}
+          lines={lyrics}
+          syncedLyrics={syncedLyrics}
+          plainLyrics={plainLyrics}
+          running={running}
+          onFetchLyrics={onFetchLyrics}
+          onAlignLyrics={onAlignLyrics}
+          onEditLyrics={onEditLyrics}
+          onSeekLyric={onSeekLyric}
+        />
+      </div>
+    </div>
+  );
+}
+
+function StemsPanel({
+  stemAssets,
+  stemMix,
+  stemUrls,
+  stemSignError,
+  sourceAsset,
+  running,
+  onUpdateStemMix,
+  onSoloStem,
+  onOpenAsset,
+  onRunStems,
+}: {
+  stemAssets: AssetRow[];
+  stemMix: Record<string, StemMixState>;
+  stemUrls: Record<string, string>;
+  stemSignError: string | null;
+  sourceAsset: AssetRow | undefined;
+  running: string | null;
+  onUpdateStemMix: (assetId: string, patch: Partial<StemMixState>) => void;
+  onSoloStem: (assetId: string) => void;
+  onOpenAsset: (asset: AssetRow) => void;
+  onRunStems: () => void;
+}) {
+  const latestStems = useMemo(() => {
+    const byKind = new Map<string, AssetRow>();
+    for (const asset of stemAssets) {
+      if (!byKind.has(asset.kind)) {
+        byKind.set(asset.kind, asset);
+      }
+    }
+    return Array.from(byKind.values()).sort((a, b) => stemKindOrder.indexOf(a.kind) - stemKindOrder.indexOf(b.kind));
+  }, [stemAssets]);
+  const anySolo = Object.values(stemMix).some((state) => state.solo);
+
+  return (
+    <section className="surface flex min-h-[278px] flex-1 flex-col overflow-hidden p-4 md:min-h-0">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Layers className="h-4 w-4 text-[var(--muted)]" />
+          <h2 className="font-bold">Stems</h2>
+        </div>
+        {latestStems.length > 0 && <span className="chip">{Object.keys(stemUrls).length === latestStems.length ? 'live mix' : 'signing'}</span>}
+      </div>
+      {stemSignError && <div className="chip danger mb-2 w-fit">{stemSignError}</div>}
+
+      {latestStems.length > 0 ? (
+        <div className="grid flex-1 content-center gap-1.5">
+          {latestStems.map((asset) => {
+            const state = stemMix[asset.id] ?? defaultStemMix(asset);
+            const isMuted = state.muted;
+            const isSolo = state.solo;
+            const silenced = isMuted || (anySolo && !isSolo);
+            const level = state.level;
+            const color = stemColors[asset.kind] ?? 'var(--accent)';
+            return (
+              <div key={asset.id} className={`grid grid-cols-[86px_1fr_auto] items-center gap-3 ${silenced ? 'opacity-45' : ''}`}>
+                <button type="button" onClick={() => onOpenAsset(asset)} className="min-w-0 text-left">
+                  <span className="flex items-center gap-2 truncate text-[13px] font-bold leading-4">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
+                    {stemLabel(asset.kind)}
+                  </span>
+                  <span className="mono block text-[9px] leading-3 text-[var(--faint)]">{formatBytes(asset.byte_size)}</span>
+                </button>
+                <div className="relative h-6">
+                  <StemLevelControl
+                    label={stemLabel(asset.kind)}
+                    level={level}
+                    color={color}
+                    silenced={silenced}
+                    onChange={(nextLevel) => onUpdateStemMix(asset.id, { level: nextLevel })}
+                  />
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onUpdateStemMix(asset.id, { muted: !isMuted })}
+                    aria-label={`Mute ${stemLabel(asset.kind)}`}
+                    aria-pressed={isMuted}
+                    data-active={isMuted || undefined}
+                    className={`grid h-7 w-7 place-items-center rounded-[8px] text-xs font-black ${
+                      isMuted
+                        ? 'bg-[var(--danger)] text-white shadow-[0_0_0_2px_oklch(0.55_0.16_28_/_0.18)]'
+                        : 'bg-[var(--paper-2)] text-[var(--faint)]'
+                    }`}
+                    title="Mute"
+                  >
+                    M
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSoloStem(asset.id)}
+                    aria-label={`Solo ${stemLabel(asset.kind)}`}
+                    aria-pressed={isSolo}
+                    data-active={isSolo || undefined}
+                    className={`grid h-7 w-7 place-items-center rounded-[8px] text-xs font-black ${
+                      isSolo
+                        ? 'bg-[var(--accent)] text-white shadow-[0_0_0_2px_var(--accent-soft)]'
+                        : 'bg-[var(--paper-2)] text-[var(--faint)]'
+                    }`}
+                    title="Solo"
+                  >
+                    S
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState
+          icon={<Scissors className="h-6 w-6" />}
+          title="Stems not extracted"
+          desc="Separate this track into vocals, guitar, bass, drums, and other parts to mix or isolate practice layers."
+          ctas={[
+            {
+              label: running === 'Stem separation' ? 'Extracting' : 'Extract stems',
+              icon: running === 'Stem separation' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />,
+              disabled: !sourceAsset || Boolean(running),
+              onClick: onRunStems,
+            },
+          ]}
+        />
+      )}
+    </section>
+  );
+}
+
+function StemLevelControl({
+  label,
+  level,
+  color,
+  silenced,
+  onChange,
+}: {
+  label: string;
+  level: number;
+  color: string;
+  silenced: boolean;
+  onChange: (level: number) => void;
+}) {
+  const trackRef = useRef<HTMLButtonElement | null>(null);
+
+  const updateFromClientX = useCallback(
+    (clientX: number) => {
+      const track = trackRef.current;
+      if (!track) {
+        return;
+      }
+      const rect = track.getBoundingClientRect();
+      const next = Math.round(((clientX - rect.left) / rect.width) * 100);
+      onChange(Math.min(100, Math.max(0, next)));
+    },
+    [onChange]
+  );
+
+  return (
+    <button
+      ref={trackRef}
+      type="button"
+      role="slider"
+      aria-label={`${label} level`}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={level}
+      data-stem-level={level}
+      onPointerDown={(event) => {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        updateFromClientX(event.clientX);
+      }}
+      onPointerMove={(event) => {
+        if (event.buttons > 0) {
+          updateFromClientX(event.clientX);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          onChange(Math.max(0, level - 5));
+        } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          onChange(Math.min(100, level + 5));
+        } else if (event.key === 'Home') {
+          event.preventDefault();
+          onChange(0);
+        } else if (event.key === 'End') {
+          event.preventDefault();
+          onChange(100);
+        }
+      }}
+      className="absolute inset-0 cursor-pointer rounded-full text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+    >
+      <span className="absolute inset-y-[11px] left-0 right-0 overflow-hidden rounded-full bg-[var(--paper-2)]">
+        <span className="block h-full" style={{ width: `${silenced ? 0 : level}%`, background: color, opacity: 0.55 }} />
+      </span>
+      <span
+        className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_2px_8px_oklch(0.3_0.02_55_/_0.18)]"
+        style={{
+          left: `${level}%`,
+          background: color,
+          opacity: silenced ? 0.45 : 1,
+        }}
+      />
+    </button>
+  );
+}
+
+function CurrentChordPanel({
+  analysisReady,
+  running,
+  onRunAnalyze,
+}: {
+  analysisReady: boolean;
+  running: string | null;
+  onRunAnalyze: () => void;
+}) {
+  return (
+    <section className="surface flex min-h-[72px] items-center justify-between gap-4 p-5">
+      {analysisReady ? (
+        <div className="flex items-center gap-4">
+          <span className="label">Now</span>
+          <span className="display text-4xl">Ready</span>
+          <span className="text-sm font-bold text-[var(--faint)]">analysis</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <span className="label">Chords</span>
+          <button type="button" onClick={onRunAnalyze} disabled={Boolean(running)} className="pill ghost sm">
+            <PillIcon>
+              {running === 'Analysis' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Activity className="h-3.5 w-3.5" />}
+            </PillIcon>
+            Detect chords
+          </button>
+        </div>
+      )}
+      <SlidersHorizontal className="h-5 w-5 text-[var(--muted)]" />
+    </section>
+  );
+}
+
+function LyricsPane({
+  currentTime,
+  lines,
+  syncedLyrics,
+  plainLyrics,
+  running,
+  onFetchLyrics,
+  onAlignLyrics,
+  onEditLyrics,
+  onSeekLyric,
+}: {
+  currentTime: number;
+  lines: LyricDisplayLine[];
+  syncedLyrics: LyricsRow | undefined;
+  plainLyrics: LyricsRow | undefined;
+  running: string | null;
+  onFetchLyrics: () => void;
+  onAlignLyrics: () => void;
+  onEditLyrics: () => void;
+  onSeekLyric: (time: number) => void;
+}) {
+  const [autoScroll, setAutoScroll] = useState(true);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const activeLineRef = useRef<HTMLButtonElement | null>(null);
+  const activeIndex = useMemo(() => {
+    let index = -1;
+    for (let i = 0; i < lines.length; i += 1) {
+      const timestamp = lines[i].timestamp;
+      if (timestamp !== null && currentTime >= timestamp) {
+        index = i;
+      }
+    }
+    return index;
+  }, [currentTime, lines]);
+
+  useEffect(() => {
+    if (!autoScroll || activeIndex < 0) {
+      return;
+    }
+
+    const container = scrollRef.current;
+    const activeLine = activeLineRef.current;
+    if (!container || !activeLine) {
+      return;
+    }
+
+    const top = activeLine.offsetTop - container.clientHeight / 2 + activeLine.clientHeight / 2;
+    container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }, [activeIndex, autoScroll]);
+
+  const stateLabel = syncedLyrics ? '.lrc synced' : plainLyrics ? '.txt not timed' : 'No lyrics';
+
+  return (
+    <section className="surface relative flex min-h-[320px] flex-1 flex-col overflow-hidden md:min-h-0">
+      {lines.length > 0 && (
+        <>
+          <div className="pointer-events-none absolute left-0 right-0 top-0 z-[1] h-24 bg-gradient-to-b from-[var(--card)] to-transparent" />
+          <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-[1] h-24 bg-gradient-to-t from-[var(--card)] to-transparent" />
+        </>
+      )}
+      <div className="absolute left-4 right-4 top-3 z-[2] flex items-center justify-between gap-3">
+        <span className={syncedLyrics ? 'chip live' : plainLyrics ? 'chip' : 'chip danger'}>
+          {syncedLyrics && <Check className="h-3 w-3" />}
+          {stateLabel}
+        </span>
+        <div className="flex flex-wrap justify-end gap-2">
+          {syncedLyrics && lines.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setAutoScroll((enabled) => !enabled)}
+              className={`chip ${autoScroll ? 'on' : ''}`}
+              aria-pressed={autoScroll}
+            >
+              <Layers className="h-3.5 w-3.5" />
+              Auto-scroll {autoScroll ? 'on' : 'off'}
+            </button>
+          )}
+          {plainLyrics && !syncedLyrics && (
+            <button type="button" onClick={onAlignLyrics} disabled={Boolean(running)} className="pill sm">
+              <PillIcon>
+                {running === 'Lyrics alignment' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListMusic className="h-3.5 w-3.5" />}
+              </PillIcon>
+              Sync
+            </button>
+          )}
+        </div>
+      </div>
+      {lines.length > 0 ? (
+        <div ref={scrollRef} className="h-full overflow-y-auto px-6 py-[20%]">
+          {lines.map((line, index) => {
+            const active = index === activeIndex;
+            const past = activeIndex >= 0 && index < activeIndex;
+            return (
+              <button
+                ref={active ? activeLineRef : undefined}
+                key={line.id}
+                type="button"
+                data-lyric-time={line.timestamp ?? undefined}
+                data-seek-target={line.timestamp !== null ? Math.max(0, line.timestamp - 0.35) : undefined}
+                onClick={() => {
+                  if (line.timestamp !== null) {
+                    onSeekLyric(line.timestamp);
+                  }
+                }}
+                className="display mx-auto block w-fit max-w-full px-4 py-1 text-center transition"
+                title={line.timestamp !== null ? `Seek to ${formatSeconds(line.timestamp)}` : undefined}
+                style={{
+                  fontSize: active ? 'clamp(22px,2vw,30px)' : 'clamp(17px,1.45vw,22px)',
+                  lineHeight: 1.14,
+                  color: active ? 'var(--ink)' : past ? 'var(--faint)' : 'var(--muted)',
+                  opacity: active ? 1 : past ? 0.68 : 0.52,
+                }}
+              >
+                {renderLyricWords(line.text)}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState
+          icon={<Type className="h-6 w-6" />}
+          title="No lyrics yet"
+          desc="Fetch lyrics from the provider, or write and time them in the editor."
+          ctas={[
+            {
+              label: running === 'Lyrics fetch' ? 'Fetching' : 'Fetch lyrics',
+              icon: running === 'Lyrics fetch' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />,
+              disabled: Boolean(running),
+              onClick: onFetchLyrics,
+            },
+            { label: 'Create in editor', icon: <Type className="h-3.5 w-3.5" />, onClick: onEditLyrics, variant: 'ghost' },
+          ]}
+        />
+      )}
+    </section>
+  );
+}
+
+function TransportCard({
+  song,
+  audioUrl,
+  stemSources,
+  seekCommand,
+  playbackCommand,
+  onTimeChange,
+  onPlayingChange,
+}: {
+  song: SongRow | null;
+  audioUrl: string | null;
+  stemSources: StemPlaybackSource[];
+  seekCommand: SeekCommand | null;
+  playbackCommand: PlaybackCommand | null;
+  onTimeChange: (time: number) => void;
+  onPlayingChange: (playing: boolean) => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const stemAudioRefs = useRef(new Map<string, HTMLAudioElement>());
+  const latestTimeRef = useRef(0);
+  const suppressStemTimeUpdatesUntilRef = useRef(0);
+  const lastStemMixChangeAtRef = useRef(0);
+  const [playing, setPlaying] = useState(false);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(song?.duration_sec ?? 0);
+  const [rate, setRate] = useState(1);
+  const [loopStart, setLoopStart] = useState<number | null>(null);
+  const [loopEnd, setLoopEnd] = useState<number | null>(null);
+  const bars = useMemo(() => makeBars(song?.id ?? 'studio', 120), [song?.id]);
+  const hasLoop = loopStart !== null || loopEnd !== null;
+  const hasStemPlayback = stemSources.length > 0;
+  const hasPlayableAudio = hasStemPlayback || Boolean(audioUrl);
+  const anySolo = stemSources.some((source) => source.solo);
+  const stemMixSignature = useMemo(
+    () => stemSources.map((source) => `${source.id}:${source.level}:${source.muted ? 1 : 0}:${source.solo ? 1 : 0}`).join('|'),
+    [stemSources]
+  );
+
+  const getActiveAudios = useCallback(() => {
+    if (hasStemPlayback) {
+      return stemSources.map((source) => stemAudioRefs.current.get(source.id)).filter((audio): audio is HTMLAudioElement => Boolean(audio));
+    }
+    return audioRef.current ? [audioRef.current] : [];
+  }, [hasStemPlayback, stemSources]);
+
+  const setAllAudioTimes = useCallback(
+    (next: number) => {
+      for (const audio of getActiveAudios()) {
+        audio.currentTime = next;
+      }
+    },
+    [getActiveAudios]
+  );
+
+  const pauseAll = useCallback(() => {
+    for (const audio of getActiveAudios()) {
+      audio.pause();
+    }
+    setPlaying(false);
+  }, [getActiveAudios]);
+
+  const playAll = useCallback(async () => {
+    const audios = getActiveAudios();
+    if (audios.length === 0) {
+      return;
+    }
+
+    for (const audio of audios) {
+      audio.currentTime = time;
+    }
+
+    try {
+      await Promise.all(audios.map((audio) => audio.play()));
+      setPlaying(true);
+    } catch {
+      setPlaying(false);
+    }
+  }, [getActiveAudios, time]);
+
+  const toggle = useCallback(async () => {
+    if (playing) {
+      pauseAll();
+      return;
+    }
+    await playAll();
+  }, [pauseAll, playAll, playing]);
+
+  const seekTo = useCallback(
+    (next: number) => {
+      const safeNext = Math.max(0, Math.min(duration || next, next));
+      latestTimeRef.current = safeNext;
+      setTime(safeNext);
+      setAllAudioTimes(safeNext);
+    },
+    [duration, setAllAudioTimes]
+  );
+
+  useEffect(() => {
+    onTimeChange(time);
+    latestTimeRef.current = time;
+  }, [onTimeChange, time]);
+
+  useEffect(() => {
+    onPlayingChange(playing);
+  }, [onPlayingChange, playing]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.playbackRate = rate;
+    }
+    for (const audioNode of stemAudioRefs.current.values()) {
+      audioNode.playbackRate = rate;
+    }
+  }, [rate, stemSources]);
+
+  useEffect(() => {
+    const now = performance.now();
+    lastStemMixChangeAtRef.current = now;
+    suppressStemTimeUpdatesUntilRef.current = now + 900;
+    for (const source of stemSources) {
+      const audio = stemAudioRefs.current.get(source.id);
+      if (!audio) {
+        continue;
+      }
+      const volume = getStemVolume(source, anySolo);
+      audio.volume = volume;
+      audio.dataset.effectiveVolume = String(volume);
+      if (Math.abs(audio.currentTime - latestTimeRef.current) > 0.35) {
+        audio.currentTime = latestTimeRef.current;
+      }
+    }
+  }, [anySolo, stemMixSignature, stemSources]);
+
+  useEffect(() => {
+    if (seekCommand) {
+      const timer = window.setTimeout(() => seekTo(seekCommand.time), 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, [seekCommand, seekTo]);
+
+  useEffect(() => {
+    if (playbackCommand?.action === 'toggle') {
+      const timer = window.setTimeout(() => {
+        void toggle();
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, [playbackCommand, toggle]);
+
+  function setLoopStartAtPlayhead() {
+    const nextStart = Math.min(time, Math.max(0, (duration || time) - 0.5));
+    setLoopStart(nextStart);
+    if (loopEnd !== null && loopEnd <= nextStart) {
+      setLoopEnd(null);
+    }
+  }
+
+  function setLoopEndAtPlayhead() {
+    if (loopStart === null) {
+      const nextStart = Math.max(0, time - 1);
+      setLoopStart(nextStart);
+      setLoopEnd(Math.max(time, nextStart + 0.5));
+      return;
+    }
+    setLoopEnd(Math.max(time, loopStart + 0.5));
+  }
+
+  function clearLoop() {
+    setLoopStart(null);
+    setLoopEnd(null);
+  }
+
+  const progress = duration > 0 ? time / duration : 0;
+  const loopRange =
+    loopStart !== null && loopEnd !== null && loopEnd > loopStart && duration > 0
+      ? (() => {
+          const left = Math.min(100, Math.max(0, (loopStart / duration) * 100));
+          const width = Math.min(100 - left, Math.max(0, ((loopEnd - loopStart) / duration) * 100));
+          return { left, width };
+        })()
+      : null;
+
+  return (
+    <section className="surface shrink-0 px-5 py-4">
+      {!hasStemPlayback && audioUrl && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          preload="metadata"
+          onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || song?.duration_sec || 0)}
+          onTimeUpdate={(event) => {
+            const next = event.currentTarget.currentTime;
+            if (loopStart !== null && loopEnd !== null && loopEnd > loopStart && next >= loopEnd) {
+              setAllAudioTimes(loopStart);
+              latestTimeRef.current = loopStart;
+              setTime(loopStart);
+              return;
+            }
+            latestTimeRef.current = next;
+            setTime(next);
+          }}
+          onEnded={() => pauseAll()}
+          className="hidden"
+        />
+      )}
+      {hasStemPlayback &&
+        stemSources.map((source, index) => (
+          <audio
+            key={source.id}
+            ref={(node) => {
+              if (node) {
+                stemAudioRefs.current.set(source.id, node);
+                node.playbackRate = rate;
+                const volume = getStemVolume(source, anySolo);
+                node.volume = volume;
+                node.dataset.effectiveVolume = String(volume);
+              } else {
+                stemAudioRefs.current.delete(source.id);
+              }
+            }}
+            src={source.url}
+            data-stem-id={source.id}
+            data-stem-kind={source.kind}
+            preload="metadata"
+            onLoadedMetadata={(event) => {
+              const nextDuration = event.currentTarget.duration || song?.duration_sec || 0;
+              setDuration((current) => Math.max(current || 0, nextDuration));
+            }}
+            onTimeUpdate={
+              index === 0
+                ? (event) => {
+                    if (performance.now() < suppressStemTimeUpdatesUntilRef.current) {
+                      return;
+                    }
+                    const next = event.currentTarget.currentTime;
+                    const previous = latestTimeRef.current;
+                    if (previous > 0 && next + 0.75 < previous && performance.now() - lastStemMixChangeAtRef.current < 2500) {
+                      event.currentTarget.currentTime = previous;
+                      return;
+                    }
+                    if (loopStart !== null && loopEnd !== null && loopEnd > loopStart && next >= loopEnd) {
+                      setAllAudioTimes(loopStart);
+                      latestTimeRef.current = loopStart;
+                      setTime(loopStart);
+                      return;
+                    }
+                    latestTimeRef.current = next;
+                    setTime(next);
+                  }
+                : undefined
+            }
+            onEnded={() => pauseAll()}
+            className="hidden"
+          />
+        ))}
+      <div className="flex items-center gap-5">
+        <button
+          type="button"
+          onClick={() => void toggle()}
+          disabled={!hasPlayableAudio}
+          className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
+          aria-label={playing ? 'Pause' : 'Play'}
+        >
+          {playing ? <Pause className="h-5 w-5" /> : <Play className="h-6 w-6" />}
+        </button>
+        <div className="relative flex h-16 flex-1 items-center gap-[2px] border-l border-r border-[var(--line-2)] px-3">
+          {loopRange && (
+            <div
+              className="pointer-events-none absolute bottom-2 top-2 rounded-[6px] bg-[var(--accent-soft)]"
+              style={{ left: `${loopRange.left}%`, width: `${loopRange.width}%` }}
+            />
+          )}
+          {bars.map((bar, index) => {
+            const played = index / bars.length <= progress;
+            return (
+              <div
+                key={index}
+                className="flex-1 rounded-full"
+                style={{
+                  height: `${bar}%`,
+                  background: played ? 'var(--ink)' : 'var(--hair)',
+                }}
+              />
+            );
+          })}
+          <input
+            type="range"
+            min={0}
+            max={duration || 1}
+            step={0.1}
+            value={time}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              seekTo(next);
+            }}
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            aria-label="Seek playback"
+          />
+          <div
+            className="pointer-events-none absolute bottom-[-4px] top-[-4px] w-0.5 bg-[var(--accent)]"
+            style={{ left: `${Math.min(100, Math.max(0, progress * 100))}%` }}
+          />
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="mono text-sm font-bold">{formatSeconds(time)}</span>
+          <span className="text-xs text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</span>
+          <span className="chip accent">Practice</span>
+          <span className={`chip ${hasStemPlayback ? 'live' : ''}`}>{hasStemPlayback ? 'Stems mix' : 'Original'}</span>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          <div className={`flex items-center gap-1 rounded-full px-2 py-1 ${hasLoop ? 'bg-[var(--accent-soft)]' : 'bg-[var(--paper-2)]'}`}>
+            <Repeat className="h-3.5 w-3.5 text-[var(--accent)]" />
+            <button
+              type="button"
+              onClick={setLoopStartAtPlayhead}
+              disabled={!hasPlayableAudio}
+              className={`chip ${loopStart !== null ? 'on' : ''}`}
+              title="Set loop start"
+            >
+              A {loopStart !== null ? formatSeconds(loopStart) : '--'}
+            </button>
+            <button
+              type="button"
+              onClick={setLoopEndAtPlayhead}
+              disabled={!hasPlayableAudio}
+              className={`chip ${loopEnd !== null ? 'on' : ''}`}
+              title="Set loop end"
+            >
+              B {loopEnd !== null ? formatSeconds(loopEnd) : '--'}
+            </button>
+            {hasLoop && (
+              <button type="button" onClick={clearLoop} className="grid h-7 w-7 place-items-center rounded-full text-[var(--muted)]" aria-label="Clear loop">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          {[0.5, 0.75, 1, 1.5, 1.75, 2].map((speed) => (
+            <button
+              key={speed}
+              type="button"
+              onClick={() => setRate(speed)}
+              className={`chip ${rate === speed ? 'on' : ''}`}
+            >
+              {speed}x
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function GuitarLearnerView({
+  currentTime,
+  musicXmlAsset,
+  tabAsset,
+  noteEventsAsset,
+  sourceAsset,
+  running,
+  onOpenAsset,
+  onRunMidi,
+  onRunMusicXml,
+}: {
+  currentTime: number;
+  musicXmlAsset: AssetRow | undefined;
+  tabAsset: AssetRow | undefined;
+  noteEventsAsset: AssetRow | undefined;
+  sourceAsset: AssetRow | undefined;
+  running: string | null;
+  onOpenAsset: (asset: AssetRow) => void;
+  onRunMidi: () => void;
+  onRunMusicXml: () => void;
+}) {
+  const [mode, setMode] = useState<GuitarMode>('chords');
+
+  return (
+    <div className="flex h-auto min-h-0 flex-col gap-4 md:h-full">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {guitarModes.map(([id, label, Icon]) => (
+          <button
+            key={id as GuitarMode}
+            type="button"
+            onClick={() => setMode(id as GuitarMode)}
+            className={`inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-bold ${
+              mode === id ? 'bg-[var(--ink)] text-[var(--paper)]' : 'bg-[var(--card)] text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line)]'
+            }`}
+          >
+            <Icon className="h-4 w-4" />
+            {label as string}
+          </button>
+        ))}
+        <div className="flex-1" />
+        <button type="button" onClick={onRunMidi} disabled={!sourceAsset || Boolean(running)} className="pill ghost sm">
+          <PillIcon>
+            {running === 'MIDI transcription' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileMusic className="h-3.5 w-3.5" />}
+          </PillIcon>
+          MIDI
+        </button>
+        <button type="button" onClick={onRunMusicXml} disabled={!noteEventsAsset || Boolean(running)} className="pill ghost sm">
+          <PillIcon>
+            {running === 'MusicXML conversion' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sheet className="h-3.5 w-3.5" />}
+          </PillIcon>
+          MusicXML
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {mode === 'chords' && <ChordPracticePanel currentTime={currentTime} />}
+        {mode === 'sheet' && (
+          <MusicXmlPreviewPanel
+            title="Sheet Music"
+            asset={musicXmlAsset}
+            fallback="No MusicXML score is available yet."
+            mode="sheet"
+            onOpenAsset={onOpenAsset}
+          />
+        )}
+        {mode === 'tab' && (
+          <MusicXmlPreviewPanel
+            title="Tablature"
+            asset={tabAsset ?? musicXmlAsset}
+            fallback="No tab artifact is available yet."
+            mode="tab"
+            estimatedFromScore={!tabAsset && Boolean(musicXmlAsset)}
+            onOpenAsset={onOpenAsset}
+          />
+      )}
+      </div>
+    </div>
+  );
+}
+
+function ChordPracticePanel({ currentTime }: { currentTime: number }) {
+  const chords = ['D', 'G', 'Bm', 'A', 'Em'];
+  const progression = ['D', 'G', 'Bm', 'A', 'Em', 'G', 'D', 'Em', 'A', 'G', 'D', 'Bm', 'A'];
+  const activeProgressionIndex = Math.max(0, Math.min(progression.length - 1, Math.floor(currentTime / 8) % progression.length));
+
+  return (
+    <div className="grid gap-5">
+      <div className="flex flex-wrap gap-2">
+        <span className="chip accent">Practice shapes</span>
+        <span className="chip">Fingerstyle</span>
+        <span className="chip">Loop-friendly</span>
+      </div>
+      <div className="flex flex-wrap gap-3">
+        {chords.map((chord, index) => (
+          <div
+            key={chord}
+            className="surface w-[122px] p-3 text-center"
+            style={index === 0 ? { background: 'var(--ink)', color: 'var(--paper)' } : undefined}
+          >
+            <div className="display mb-1.5 text-[22px]">{chord}</div>
+            <svg viewBox="0 0 88 104" className="mx-auto h-[104px] w-[88px]" aria-hidden="true">
+              <rect x="14" y="15" width="60" height="3" rx="1.5" fill="currentColor" />
+              {[0, 1, 2, 3].map((fret) => (
+                <line key={fret} x1="14" y1={30 + fret * 18} x2="74" y2={30 + fret * 18} stroke="currentColor" opacity="0.22" />
+              ))}
+              {[0, 1, 2, 3, 4, 5].map((string) => (
+                <line key={string} x1={14 + string * 12} y1="15" x2={14 + string * 12} y2="88" stroke="currentColor" opacity="0.22" />
+              ))}
+              {[0, 2, 4].map((dot, i) => (
+                <circle key={i} cx={26 + dot * 8} cy={44 + i * 16} r="6" fill={index === 0 ? 'var(--accent)' : 'var(--ink)'} />
+              ))}
+            </svg>
+          </div>
+        ))}
+      </div>
+      <div>
+        <div className="label mb-3">Progression</div>
+        <div className="surface flex flex-wrap gap-2 p-4">
+          {progression.map((chord, index) => {
+            const active = index === activeProgressionIndex;
+            return (
+              <span
+                key={`${chord}-${index}`}
+                className={`display grid h-11 min-w-14 place-items-center rounded-[10px] px-3 text-[17px] ${
+                  active ? 'bg-[var(--accent)] text-white shadow-[var(--shadow-card)]' : 'bg-[var(--card-2)] text-[var(--ink)]'
+                }`}
+              >
+                {chord}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LyricsEditorProductView({
+  lyricsDraft,
+  syncedLyrics,
+  plainLyrics,
+  currentTime,
+  playing,
+  running,
+  onLyricsDraftChange,
+  onSave,
+  onFetchLyrics,
+  onAlignLyrics,
+  onSeek,
+  onTogglePlayback,
+  canAlign,
+}: {
+  lyricsDraft: string;
+  syncedLyrics: LyricsRow | undefined;
+  plainLyrics: LyricsRow | undefined;
+  currentTime: number;
+  playing: boolean;
+  running: string | null;
+  onLyricsDraftChange: (value: string) => void;
+  onSave: (content: string) => void;
+  onFetchLyrics: () => void;
+  onAlignLyrics: () => void;
+  onSeek: (time: number) => void;
+  onTogglePlayback: () => void;
+  canAlign: boolean;
+}) {
+  const initialLines = useMemo(() => buildEditorLyricLines(syncedLyrics, plainLyrics, lyricsDraft), [lyricsDraft, plainLyrics, syncedLyrics]);
+  const [lines, setLines] = useState<EditorLyricLine[]>(() => initialLines);
+  const [cursor, setCursor] = useState(() => Math.max(0, initialLines.findIndex((line) => line.time === null)));
+  const [dirty, setDirty] = useState(false);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [showImport, setShowImport] = useState(false);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [offsetMs, setOffsetMs] = useState(0);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef(new Map<number, HTMLDivElement>());
+
+  const cursorIndex = Math.max(0, Math.min(lines.length - 1, cursor));
+  const activeIndex = useMemo(() => {
+    let index = -1;
+    for (let i = 0; i < lines.length; i += 1) {
+      const time = lines[i].time;
+      if (time !== null && currentTime + offsetMs / 1000 >= time) {
+        index = i;
+      }
+    }
+    return index;
+  }, [currentTime, lines, offsetMs]);
+
+  const issues = useMemo(() => {
+    const next: Array<{ index: number; message: string }> = [];
+    let previous = -Infinity;
+    lines.forEach((line, index) => {
+      if (!line.text.trim()) {
+        next.push({ index, message: `Line ${index + 1} has no text` });
+      }
+      if (line.time !== null) {
+        if (line.time < previous) {
+          next.push({ index, message: `Line ${index + 1} timestamp is earlier than the line above` });
+        }
+        previous = line.time;
+      }
+    });
+    const untimed = lines.filter((line) => line.time === null).length;
+    if (untimed > 0) {
+      next.push({ index: -1, message: `${untimed} line${untimed === 1 ? '' : 's'} still need a timestamp` });
+    }
+    return next;
+  }, [lines]);
+
+  const timedCount = lines.filter((line) => line.time !== null).length;
+  const percentTimed = lines.length > 0 ? Math.round((timedCount / lines.length) * 100) : 0;
+
+  const replaceLines = useCallback(
+    (next: EditorLyricLine[]) => {
+      setLines(next);
+      setDirty(true);
+      onLyricsDraftChange(editorLinesToPlain(next));
+    },
+    [onLyricsDraftChange]
+  );
+
+  const updateLine = useCallback(
+    (index: number, patch: Partial<EditorLyricLine>) => {
+      replaceLines(lines.map((line, currentIndex) => (currentIndex === index ? { ...line, ...patch } : line)));
+    },
+    [lines, replaceLines]
+  );
+
+  const addLine = useCallback(
+    (index: number) => {
+      const next = [...lines];
+      next.splice(index + 1, 0, { id: `new-${Date.now()}`, time: null, text: '' });
+      replaceLines(next);
+      setCursor(index + 1);
+    },
+    [lines, replaceLines]
+  );
+
+  const deleteLine = useCallback(
+    (index: number) => {
+      const next = lines.filter((_, currentIndex) => currentIndex !== index);
+      replaceLines(next.length > 0 ? next : [{ id: `new-${Date.now()}`, time: null, text: '' }]);
+      setCursor(Math.max(0, index - 1));
+    },
+    [lines, replaceLines]
+  );
+
+  const stampLine = useCallback(() => {
+    if (lines.length === 0) {
+      return;
+    }
+    const next = lines.map((line, index) => (index === cursorIndex ? { ...line, time: roundTime(currentTime) } : line));
+    replaceLines(next);
+    setCursor(Math.min(lines.length - 1, cursorIndex + 1));
+  }, [currentTime, cursorIndex, lines, replaceLines]);
+
+  const saveEditorDraft = useCallback(() => {
+    const content = editorLinesToPlain(lines);
+    onLyricsDraftChange(content);
+    onSave(content);
+    setSavedAt(new Date());
+    setDirty(false);
+  }, [lines, onLyricsDraftChange, onSave]);
+
+  useEffect(() => {
+    if (!autoScroll) {
+      return;
+    }
+    const target = playing && activeIndex >= 0 ? activeIndex : cursorIndex;
+    const row = rowRefs.current.get(target);
+    const list = listRef.current;
+    if (!row || !list) {
+      return;
+    }
+    const top = row.offsetTop - list.clientHeight / 2 + row.clientHeight / 2;
+    list.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }, [activeIndex, autoScroll, cursorIndex, playing]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        saveEditorDraft();
+        return;
+      }
+      if (typing) {
+        return;
+      }
+      if (event.code === 'Space') {
+        event.preventDefault();
+        onTogglePlayback();
+      } else if (event.key === 'Enter' || event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        stampLine();
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setCursor((current) => Math.min(lines.length - 1, current + 1));
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setCursor((current) => Math.max(0, current - 1));
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [lines.length, onTogglePlayback, saveEditorDraft, stampLine]);
+
+  return (
+    <div className="grid h-auto min-h-0 gap-4 md:h-full lg:grid-cols-[1fr_320px]">
+      {showImport && (
+        <ImportLyricsModal
+          initialText={editorLinesToLrc(lines, offsetMs)}
+          onClose={() => setShowImport(false)}
+          onImport={(nextLines) => {
+            replaceLines(nextLines);
+            setCursor(Math.max(0, nextLines.findIndex((line) => line.time === null)));
+          }}
+        />
+      )}
+      <section className="surface flex min-h-0 flex-col overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line-2)] p-5">
+          <div className="flex items-center gap-3">
+            <Type className="h-5 w-5 text-[var(--muted)]" />
+            <h2 className="font-bold">Sync editor</h2>
+            <span className="chip">{percentTimed}% timed</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAutoScroll((enabled) => !enabled)}
+              className={`iconbtn ${autoScroll ? 'bg-[var(--ink)] text-[var(--paper)]' : ''}`}
+              title="Auto-scroll"
+              aria-pressed={autoScroll}
+            >
+              <Layers className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={() => setShowImport(true)} className="pill ghost sm">
+              <PillIcon>
+                <Upload className="h-3.5 w-3.5" />
+              </PillIcon>
+              Import
+            </button>
+            <button type="button" onClick={saveEditorDraft} disabled={Boolean(running)} className="pill sm">
+              <PillIcon>
+                {running === 'Save lyrics' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              </PillIcon>
+              {dirty ? 'Save' : 'Saved'}
+              <span className="mono opacity-60">⌘S</span>
+            </button>
+          </div>
+        </div>
+
+        <div ref={listRef} className="min-h-[320px] flex-1 overflow-y-auto p-3 md:min-h-0">
+          {lines.length > 0 ? (
+            lines.map((line, index) => {
+              const selected = index === cursorIndex;
+              const active = index === activeIndex && playing;
+              const hasIssue = issues.some((issue) => issue.index === index);
+              return (
+                <div
+                  key={line.id}
+                  ref={(node) => {
+                    if (node) {
+                      rowRefs.current.set(index, node);
+                    } else {
+                      rowRefs.current.delete(index);
+                    }
+                  }}
+                  draggable
+                  onDragStart={() => setDragIndex(index)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => {
+                    if (dragIndex === null || dragIndex === index) {
+                      return;
+                    }
+                    const next = [...lines];
+                    const [moving] = next.splice(dragIndex, 1);
+                    next.splice(index, 0, moving);
+                    replaceLines(next);
+                    setDragIndex(null);
+                  }}
+                  onClick={() => setCursor(index)}
+                  className={`grid grid-cols-[22px_116px_1fr_auto] items-center gap-2 rounded-[10px] px-2 py-2 transition ${
+                    active ? 'bg-[var(--accent-soft)]' : selected ? 'shadow-[inset_0_0_0_1.5px_var(--accent)]' : ''
+                  } ${dragIndex === index ? 'opacity-45' : ''}`}
+                >
+                  <GripVertical className="h-4 w-4 cursor-grab text-[var(--hair)]" />
+                  <TimestampControl
+                    value={line.time}
+                    active={active}
+                    onSeek={() => {
+                      if (line.time !== null) {
+                        onSeek(line.time);
+                      }
+                    }}
+                    onChange={(time) => updateLine(index, { time })}
+                  />
+                  <input
+                    value={line.text}
+                    onFocus={() => setCursor(index)}
+                    onChange={(event) => updateLine(index, { text: event.target.value })}
+                    placeholder="Lyric line..."
+                    className="min-w-0 rounded-[8px] border-0 bg-transparent px-2 py-1 text-[15px] font-medium outline-none focus:bg-[var(--paper)]"
+                  />
+                  <div className="flex items-center gap-1">
+                    {hasIssue && <AlertCircle className="h-4 w-4 text-[var(--warn)]" />}
+                    <button type="button" onClick={() => addLine(index)} className="iconbtn h-7 w-7" title="Add line below">
+                      <span className="text-lg leading-none">+</span>
+                    </button>
+                    <button type="button" onClick={() => deleteLine(index)} className="iconbtn h-7 w-7" title="Delete line">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <EmptyState
+              icon={<Type className="h-6 w-6" />}
+              title="No lyrics yet"
+              desc="Fetch lyrics from the provider, or import plain text or .lrc content."
+              ctas={[
+                {
+                  label: running === 'Lyrics fetch' ? 'Fetching' : 'Fetch lyrics',
+                  icon: running === 'Lyrics fetch' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />,
+                  disabled: Boolean(running),
+                  onClick: onFetchLyrics,
+                },
+                { label: 'Import', icon: <Upload className="h-3.5 w-3.5" />, onClick: () => setShowImport(true), variant: 'ghost' },
+              ]}
+            />
+          )}
+          {lines.length > 0 && (
+            <button
+              type="button"
+              onClick={() => addLine(lines.length - 1)}
+              className="mt-1 flex w-full items-center gap-2 rounded-[10px] px-3 py-2 text-sm font-bold text-[var(--faint)]"
+            >
+              <span className="text-lg leading-none">+</span>
+              Add line
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 border-t border-[var(--line-2)] p-4">
+          <button
+            type="button"
+            onClick={onTogglePlayback}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)]"
+            aria-label={playing ? 'Pause editor playback' : 'Play editor playback'}
+          >
+            {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+          </button>
+          <span className="mono min-w-14 text-sm font-bold">{formatSeconds(currentTime)}</span>
+          <button type="button" onClick={stampLine} disabled={lines.length === 0} className="pill h-11 flex-1 justify-center bg-[var(--accent)] text-white">
+            <PillIcon>
+              <Flag className="h-3.5 w-3.5" />
+            </PillIcon>
+            Stamp line {lines.length > 0 ? cursorIndex + 1 : 0} & advance
+            <span className="mono opacity-70">↵ / K</span>
+          </button>
+        </div>
+      </section>
+
+      <aside className="grid h-fit gap-4">
+        <section className="surface p-5">
+          <div className="label mb-3">How to sync</div>
+          <div className="grid gap-3 text-sm">
+            <GuideRow icon={<Play className="h-4 w-4" />} text="Press Space to play" />
+            <GuideRow icon={<Flag className="h-4 w-4" />} text="Hit Enter on the beat each line starts" />
+            <GuideRow icon={<ChevronRight className="h-4 w-4" />} text="Fine-tune with the nudgers" />
+            <GuideRow icon={<GripVertical className="h-4 w-4" />} text="Drag to reorder lines" />
+          </div>
+        </section>
+        <section className="surface p-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="label">Validation</div>
+            {issues.length > 0 && <span className="chip accent">{issues.length}</span>}
+          </div>
+          {issues.length === 0 ? (
+            <span className="chip live">
+              <Check className="h-3 w-3" />
+              Clean
+            </span>
+          ) : (
+            <div className="grid gap-2">
+              {issues.slice(0, 5).map((issue) => (
+                <button
+                  key={`${issue.index}-${issue.message}`}
+                  type="button"
+                  onClick={() => issue.index >= 0 && setCursor(issue.index)}
+                  className="surface-flat flex gap-2 p-3 text-left text-sm text-[var(--warn)]"
+                >
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  {issue.message}
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+        <section className="surface p-5">
+          <div className="label mb-3">Offset & draft</div>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <span className="label">Lyric offset</span>
+            <div className="flex items-center gap-1 rounded-full bg-[var(--card-2)] p-1">
+              <button type="button" onClick={() => setOffsetMs((value) => value - 50)} className="iconbtn h-8 w-8" title="-50 ms">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="mono min-w-16 text-center text-sm font-bold">{offsetMs} ms</span>
+              <button type="button" onClick={() => setOffsetMs((value) => value + 50)} className="iconbtn h-8 w-8" title="+50 ms">
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-[var(--line-2)] pt-4">
+            <span className="text-sm text-[var(--muted)]">
+              {savedAt ? (
+                <>
+                  Draft saved <span className="mono">{savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </>
+              ) : (
+                'No draft saved yet'
+              )}
+            </span>
+            <button type="button" onClick={() => downloadEditorLrc(lines, offsetMs, 'lyrics.lrc')} className="pill ghost sm">
+              <PillIcon>
+                <DownloadCloud className="h-3.5 w-3.5" />
+              </PillIcon>
+              .lrc
+            </button>
+          </div>
+          <div className="mt-4 grid gap-2">
+            <button type="button" onClick={onFetchLyrics} disabled={Boolean(running)} className="pill ghost sm w-full">
+              <PillIcon>
+                {running === 'Lyrics fetch' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />}
+              </PillIcon>
+              Fetch lyrics
+            </button>
+            <button type="button" onClick={onAlignLyrics} disabled={!canAlign || Boolean(running)} className="pill sm w-full">
+              <PillIcon>
+                {running === 'Lyrics alignment' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListMusic className="h-3.5 w-3.5" />}
+              </PillIcon>
+              Auto-align
+            </button>
+          </div>
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function TimestampControl({
+  value,
+  active,
+  onSeek,
+  onChange,
+}: {
+  value: number | null;
+  active: boolean;
+  onSeek: () => void;
+  onChange: (time: number | null) => void;
+}) {
+  if (value === null) {
+    return <span className="mono min-w-[86px] text-center text-xs font-bold text-[var(--faint)]">--:--.--</span>;
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <button type="button" onClick={() => onChange(roundTime(value - 0.1))} className="iconbtn h-6 w-6" title="-100 ms">
+        <ChevronLeft className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={onSeek}
+        className={`mono min-w-[70px] rounded-[7px] px-1 py-0.5 text-center text-xs font-bold ${active ? 'bg-[var(--accent-soft)] text-[var(--accent-ink)]' : ''}`}
+        title="Seek here"
+      >
+        {formatTimestamp(value)}
+      </button>
+      <button type="button" onClick={() => onChange(roundTime(value + 0.1))} className="iconbtn h-6 w-6" title="+100 ms">
+        <ChevronRight className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function GuideRow({ icon, text }: { icon: ReactNode; text: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] bg-[var(--card-2)] text-[var(--muted)]">{icon}</span>
+      <span className="font-medium">{text}</span>
+    </div>
+  );
+}
+
+function ImportLyricsModal({
+  initialText,
+  onClose,
+  onImport,
+}: {
+  initialText: string;
+  onClose: () => void;
+  onImport: (lines: EditorLyricLine[]) => void;
+}) {
+  const [text, setText] = useState(initialText);
+
+  return (
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-[oklch(0.2_0.01_60_/_0.35)] p-6 backdrop-blur-sm" onClick={onClose}>
+      <section className="surface w-[min(620px,100%)] p-6 shadow-[var(--shadow-pop)]" onClick={(event) => event.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h3 className="display text-2xl">Import lyrics</h3>
+          <button type="button" onClick={onClose} className="iconbtn" aria-label="Close import">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mb-4 text-sm leading-6 text-[var(--muted)]">
+          Paste plain lyrics, one line each, or a timestamped .lrc file. Timecodes are detected automatically.
+        </p>
+        <textarea
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          className="h-56 w-full resize-y rounded-[12px] border-0 bg-[var(--paper)] p-4 font-mono text-sm leading-6 outline-none shadow-[inset_0_0_0_1.5px_var(--line)]"
+        />
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="pill ghost sm">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onImport(parseEditorLyricInput(text));
+              onClose();
+            }}
+            className="pill sm"
+          >
+            <PillIcon>
+              <Check className="h-3.5 w-3.5" />
+            </PillIcon>
+            Import
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AICoachDock({
+  context,
+  song,
+  syncedLyrics,
+  musicXmlAsset,
+  onClose,
+}: {
+  context: StudioTab;
+  song: SongRow | null;
+  syncedLyrics: LyricsRow | undefined;
+  musicXmlAsset: AssetRow | undefined;
+  onClose: () => void;
+}) {
+  const suggestions = {
+    karaoke: [
+      {
+        tag: 'Timing',
+        text: syncedLyrics ? 'Synced lyrics are ready. Review the chorus against the vocal stem before exporting.' : 'Fetch or write lyrics, then align them against the vocal stem.',
+        action: syncedLyrics ? 'Review timing' : 'Prepare lyrics',
+      },
+      { tag: 'Practice', text: 'Loop the hardest phrase and drop playback speed until it feels stable.', action: 'Loop slow' },
+    ],
+    guitar: [
+      {
+        tag: 'Notation',
+        text: musicXmlAsset ? 'Score output is ready for inspection in Sheet or Tab mode.' : 'Run MIDI and MusicXML to produce practice notation.',
+        action: musicXmlAsset ? 'Open score' : 'Build notation',
+      },
+      { tag: 'Technique', text: 'Start with chord shapes, then move to tab once the progression is under your fingers.', action: 'Show shapes' },
+    ],
+    lyrics: [
+      { tag: 'Sync', text: 'Save plain lyrics first, then use Karaoke alignment to generate timed lines.', action: 'Sync draft' },
+      { tag: 'Cleanup', text: 'Keep repeated chorus lines in full text for now so timing stays explicit.', action: 'Review repeats' },
+    ],
+  } satisfies Record<StudioTab, Array<{ tag: string; text: string; action: string }>>;
+
+  return (
+    <>
+      <button
+        type="button"
+        className="fixed inset-0 z-40 bg-[oklch(0.2_0.01_60_/_0.18)] backdrop-blur-[2px]"
+        aria-label="Close coach"
+        onClick={onClose}
+      />
+      <aside className="fixed bottom-4 right-4 top-4 z-50 flex w-[min(360px,calc(100vw-32px))] flex-col overflow-hidden rounded-[var(--radius)] bg-[var(--card)] shadow-[var(--shadow-pop)] sm:top-20 sm:w-[360px]">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--line-2)] p-5">
+        <div className="flex items-center gap-3">
+          <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[var(--ink)] text-[var(--paper)]">
+            <Bot className="h-4 w-4" />
+          </span>
+          <div>
+            <h2 className="font-bold">Coach</h2>
+            <div className="mt-0.5 flex items-center gap-1.5 text-xs font-semibold text-[var(--live)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--live)]" />
+              watching this session
+            </div>
+          </div>
+        </div>
+        <button type="button" onClick={onClose} className="iconbtn" aria-label="Close coach">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4">
+        {song && (
+          <div className="mb-4 flex items-center gap-3 rounded-[12px] bg-[var(--card-2)] p-3 shadow-[inset_0_0_0_1px_var(--line-2)]">
+            <CoverArt id={song.id} size={38} />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-bold">{song.title}</div>
+              <div className="truncate text-xs text-[var(--muted)]">{song.artist ?? 'Unknown artist'}</div>
+            </div>
+            <div className="ml-auto">
+              <StatusDot status={song.status} />
+            </div>
+          </div>
+        )}
+        <div className="label mb-3">Noticed just now</div>
+        <div className="grid gap-3">
+          {suggestions[context].map((suggestion) => (
+            <div key={suggestion.tag} className="surface-flat p-4">
+              <div className="chip accent mb-3">{suggestion.tag}</div>
+              <p className="text-sm leading-6">{suggestion.text}</p>
+              <button type="button" className="pill sm mt-4 w-full">
+                <PillIcon>
+                  <Sparkles className="h-3.5 w-3.5" />
+                </PillIcon>
+                {suggestion.action}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="border-t border-[var(--line-2)] p-4">
+        <div className="flex items-center gap-2 rounded-full bg-[var(--paper)] py-1 pl-4 pr-1 shadow-[inset_0_0_0_1.5px_var(--line)]">
+          <input
+            placeholder="Ask about timing, theory, technique"
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
+          />
+          <button type="button" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)]" aria-label="Send">
+            <Send className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+      </aside>
+    </>
+  );
+}
+
+function EmptyState({
+  icon,
+  title,
+  desc,
+  ctas,
+}: {
+  icon: ReactNode;
+  title: string;
+  desc: string;
+  ctas: Array<{ label: string; icon: ReactNode; onClick: () => void; disabled?: boolean; variant?: 'ghost' }>;
+}) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+      <span className="mb-2 grid h-14 w-14 place-items-center rounded-[14px] bg-[var(--card-2)] text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line-2)]">
+        {icon}
+      </span>
+      <h3 className="display text-2xl">{title}</h3>
+      <p className="max-w-xs text-sm leading-6 text-[var(--muted)]">{desc}</p>
+      <div className="mt-3 flex flex-wrap justify-center gap-2">
+        {ctas.map((cta) => (
+          <button key={cta.label} type="button" onClick={cta.onClick} disabled={cta.disabled} className={`pill sm ${cta.variant ?? ''}`}>
+            <PillIcon>{cta.icon}</PillIcon>
+            {cta.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function defaultStemMix(asset: AssetRow): StemMixState {
+  return {
+    level: defaultStemLevels[asset.kind] ?? 82,
+    muted: false,
+    solo: false,
+  };
+}
+
+function stemLabel(kind: string) {
+  return kind.replace('stem_', '').replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function renderLyricWords(text: string) {
+  return text.split(/(\s+)/).map((part, index) =>
+    part.trim() ? (
+      <span key={`${part}-${index}`} data-lyric-word="true">
+        {part}
+      </span>
+    ) : (
+      part
+    )
+  );
+}
+
+function getStemVolume(source: StemPlaybackSource, anySolo: boolean) {
+  if (source.muted || (anySolo && !source.solo)) {
+    return 0;
+  }
+  return Math.min(1, Math.max(0, source.level / 100));
+}
+
+function buildEditorLyricLines(
+  syncedLyrics: LyricsRow | undefined,
+  plainLyrics: LyricsRow | undefined,
+  lyricsDraft: string
+): EditorLyricLine[] {
+  const displayLines = deriveLyricLines(syncedLyrics, plainLyrics);
+  if (displayLines.length > 0) {
+    return displayLines.map((line, index) => ({
+      id: line.id || `line-${index}`,
+      time: line.timestamp,
+      text: line.text,
+    }));
+  }
+
+  return parseEditorLyricInput(lyricsDraft);
+}
+
+function parseEditorLyricInput(text: string): EditorLyricLine[] {
+  return text
+    .split(/\r?\n/)
+    .map((raw, index) => {
+      const line = raw.trim();
+      if (!line) {
+        return null;
+      }
+      const untimedMatch = line.match(/^\[--:--(?:[.:]--)?\]\s*(.*)$/);
+      if (untimedMatch) {
+        return { id: `plain-${index}`, time: null, text: untimedMatch[1].trim() };
+      }
+      const match = line.match(/^\[(\d{1,2}):(\d{2})(?:[.:](\d{1,2}))?\]\s*(.*)$/);
+      if (!match) {
+        return { id: `plain-${index}`, time: null, text: line };
+      }
+      const centiseconds = match[3] ? Number(`0.${match[3].padEnd(2, '0').slice(0, 2)}`) : 0;
+      const time = Number(match[1]) * 60 + Number(match[2]) + centiseconds;
+      return { id: `import-${index}`, time: roundTime(time), text: match[4].trim() };
+    })
+    .filter((line): line is EditorLyricLine => Boolean(line));
+}
+
+function editorLinesToPlain(lines: EditorLyricLine[]) {
+  return lines.map((line) => line.text).join('\n');
+}
+
+function editorLinesToLrc(lines: EditorLyricLine[], offsetMs: number) {
+  return lines
+    .map((line) => {
+      const shifted = line.time === null ? null : Math.max(0, line.time - offsetMs / 1000);
+      const timestamp = shifted === null ? '[--:--.--]' : `[${formatTimestamp(shifted)}]`;
+      return `${timestamp} ${line.text}`;
+    })
+    .join('\n');
+}
+
+function downloadEditorLrc(lines: EditorLyricLine[], offsetMs: number, filename: string) {
+  const blob = new Blob([editorLinesToLrc(lines, offsetMs)], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function roundTime(value: number) {
+  return Math.max(0, Math.round(value * 100) / 100);
+}
+
+function formatTimestamp(seconds: number) {
+  const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+  const minutes = Math.floor(safe / 60);
+  const wholeSeconds = Math.floor(safe % 60);
+  const centiseconds = Math.floor((safe % 1) * 100);
+  return `${minutes.toString().padStart(2, '0')}:${wholeSeconds.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`;
+}
+
+function deriveLyricLines(syncedLyrics: LyricsRow | undefined, plainLyrics: LyricsRow | undefined): LyricDisplayLine[] {
+  if (syncedLyrics?.lyrics_type === 'lrc' && syncedLyrics.content) {
+    return parseLrc(syncedLyrics.content).map((line, index) => ({
+      id: `lrc-${index}`,
+      timestamp: line.timestamp,
+      text: line.text,
+    }));
+  }
+
+  if (syncedLyrics?.lyrics_type === 'alignment_json' && syncedLyrics.content) {
+    const parsed = parseAlignmentLyrics(syncedLyrics.content);
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
+  if (plainLyrics?.content) {
+    return plainLyrics.content
+      .split(/\r?\n/)
+      .map((text) => text.trim())
+      .filter(Boolean)
+      .map((text, index) => ({ id: `plain-${index}`, timestamp: null, text }));
+  }
+
+  return [];
+}
+
+function parseAlignmentLyrics(content: string): LyricDisplayLine[] {
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    const candidate =
+      parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'lines' in parsed
+        ? (parsed as { lines?: unknown }).lines
+        : parsed;
+    if (!Array.isArray(candidate)) {
+      return [];
+    }
+    return candidate
+      .map((line, index) => {
+        if (!line || typeof line !== 'object') {
+          return null;
+        }
+        const objectLine = line as { text?: unknown; start?: unknown; time?: unknown; timestamp?: unknown };
+        const text = typeof objectLine.text === 'string' ? objectLine.text : '';
+        const rawTime = objectLine.start ?? objectLine.time ?? objectLine.timestamp;
+        const timestamp = typeof rawTime === 'number' ? rawTime : null;
+        return text ? { id: `aligned-${index}`, timestamp, text } : null;
+      })
+      .filter((line): line is LyricDisplayLine => Boolean(line));
+  } catch {
+    return [];
+  }
+}
+
+function buildSongFacts(song: SongRow | null): Array<[string, string]> {
+  const metadata =
+    song?.metadata && typeof song.metadata === 'object' && !Array.isArray(song.metadata)
+      ? (song.metadata as Record<string, unknown>)
+      : {};
+  const key = readMetadata(metadata, ['key', 'musical_key']) ?? '--';
+  const tempo = readMetadata(metadata, ['tempo', 'bpm', 'tempo_bpm']);
+  const tuning = readMetadata(metadata, ['tuning']) ?? 'Standard';
+  const capo = readMetadata(metadata, ['capo']) ?? 'None';
+
+  return [
+    ['Key', key],
+    ['Tempo', tempo ? `${tempo} BPM` : '-- BPM'],
+    ['Tuning', tuning],
+    ['Capo', capo],
+  ];
+}
+
+function readMetadata(metadata: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = metadata[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(Math.round(value));
+    }
+  }
+  return null;
+}
+
+function formatSeconds(seconds: number) {
+  const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+  const minutes = Math.floor(safe / 60);
+  const wholeSeconds = Math.floor(safe % 60);
+  return `${minutes}:${wholeSeconds.toString().padStart(2, '0')}`;
+}
+
+function makeBars(seed: string, count: number) {
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) % 9973;
+  }
+  return Array.from({ length: count }, (_, index) => {
+    const wave = Math.sin((index / count) * Math.PI);
+    const rand = Math.abs(Math.sin((hash + index * 37) * 0.18));
+    return Math.round(18 + (0.35 + wave * 0.65) * (24 + rand * 58));
+  });
 }

@@ -1,10 +1,11 @@
 'use client';
 
-import { CheckCircle2, ExternalLink, FileMusic, ListMusic, Music2, Scissors } from 'lucide-react';
+import { ExternalLink, FileMusic, ListMusic, Music2, Scissors } from 'lucide-react';
 
+import { ReadinessChips } from '@/components/werecode/WereCodePrimitives';
 import { formatTime, parseLrc } from '@/lib/music/lrc';
 import type { AssetRow, LyricsRow } from '@/types/werecode';
-import { assetLabel, formatBytes, formatDate, statusClass } from './studio-utils';
+import { assetLabel, formatBytes, formatDate } from './studio-utils';
 
 type StudioWorkflowPanelsProps = {
   assets: AssetRow[];
@@ -46,31 +47,24 @@ export function StudioWorkflowPanels({
 
   return (
     <div className="grid gap-5 lg:grid-cols-2">
-      <section className="surface p-4">
+      <section className="surface p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Music2 className="h-4 w-4 text-[var(--accent-strong)]" />
-            <h2 className="font-medium">Workflow State</h2>
+            <Music2 className="h-4 w-4 text-[var(--accent-ink)]" />
+            <h2 className="font-semibold">Workflow state</h2>
           </div>
-          {sourceAsset && <span className={`rounded-md border px-2 py-1 text-xs ${statusClass('ready')}`}>audio ready</span>}
+          {sourceAsset && <span className="chip live">audio ready</span>}
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {readiness.map((item) => (
-            <div key={item.label} className="flex h-11 items-center justify-between rounded-md border border-white/10 bg-black/20 px-3">
-              <span className="text-sm text-slate-200">{item.label}</span>
-              <CheckCircle2 className={`h-4 w-4 ${item.ready ? 'text-[var(--accent-strong)]' : 'text-slate-600'}`} />
-            </div>
-          ))}
-        </div>
+        <ReadinessChips items={readiness} />
       </section>
 
-      <section className="surface p-4">
+      <section className="surface p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Scissors className="h-4 w-4 text-[var(--accent-strong)]" />
-            <h2 className="font-medium">Stems</h2>
+            <Scissors className="h-4 w-4 text-[var(--accent-ink)]" />
+            <h2 className="font-semibold">Stems</h2>
           </div>
-          <span className="muted text-xs">{stemAssets.length} asset(s)</span>
+          <span className="chip">{stemAssets.length} asset(s)</span>
         </div>
         {stemAssets.length > 0 ? (
           <div className="grid gap-2">
@@ -83,20 +77,20 @@ export function StudioWorkflowPanels({
         )}
       </section>
 
-      <section className="surface p-4">
+      <section className="surface p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <ListMusic className="h-4 w-4 text-[var(--accent-strong)]" />
-            <h2 className="font-medium">Karaoke</h2>
+            <ListMusic className="h-4 w-4 text-[var(--accent-ink)]" />
+            <h2 className="font-semibold">Karaoke</h2>
           </div>
-          {syncedLyrics && <span className={`rounded-md border px-2 py-1 text-xs ${statusClass('ready')}`}>synced</span>}
+          {syncedLyrics && <span className="chip live">synced</span>}
         </div>
         {syncedLines.length > 0 ? (
-          <div className="max-h-56 overflow-auto rounded-md border border-white/10 bg-black/20">
+          <div className="max-h-56 overflow-auto rounded-[12px] bg-[var(--paper)] shadow-[inset_0_0_0_1px_var(--line-2)]">
             {syncedLines.map((line) => (
-              <div key={`${line.timestamp}-${line.text}`} className="grid grid-cols-[56px_1fr] gap-3 border-b border-white/5 px-3 py-2 text-sm">
-                <span className="font-mono text-xs text-slate-500">{formatTime(line.timestamp)}</span>
-                <span className="text-slate-200">{line.text}</span>
+              <div key={`${line.timestamp}-${line.text}`} className="grid grid-cols-[56px_1fr] gap-3 border-b border-[var(--line-2)] px-3 py-2 text-sm last:border-b-0">
+                <span className="mono text-xs text-[var(--faint)]">{formatTime(line.timestamp)}</span>
+                <span>{line.text}</span>
               </div>
             ))}
           </div>
@@ -109,17 +103,17 @@ export function StudioWorkflowPanels({
         )}
       </section>
 
-      <section className="surface p-4">
+      <section className="surface p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <FileMusic className="h-4 w-4 text-[var(--accent-strong)]" />
-            <h2 className="font-medium">MIDI And Score</h2>
+            <FileMusic className="h-4 w-4 text-[var(--accent-ink)]" />
+            <h2 className="font-semibold">MIDI and score</h2>
           </div>
           <button
             type="button"
             onClick={onRunMusicXml}
             disabled={!noteEventsAsset || Boolean(running)}
-            className="inline-flex h-8 items-center justify-center rounded-md border border-white/10 px-2 text-xs text-slate-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className="pill ghost sm"
           >
             MusicXML
           </button>
@@ -143,10 +137,10 @@ function AssetRowButton({ asset, onOpenAsset }: { asset: AssetRow; onOpenAsset: 
     <button
       type="button"
       onClick={() => onOpenAsset(asset)}
-      className="flex min-h-14 items-center justify-between gap-3 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-left hover:bg-white/10"
+      className="surface-flat flex min-h-14 items-center justify-between gap-3 px-3 py-2 text-left hover:bg-[var(--card-2)]"
     >
       <span>
-        <span className="block text-sm font-medium text-white">{assetLabel(asset.kind)}</span>
+        <span className="block text-sm font-semibold">{assetLabel(asset.kind)}</span>
         <span className="muted mt-1 block text-xs">
           {formatBytes(asset.byte_size)} - {formatDate(asset.created_at)}
         </span>
@@ -157,5 +151,5 @@ function AssetRowButton({ asset, onOpenAsset }: { asset: AssetRow; onOpenAsset: 
 }
 
 function EmptyPanelText({ text }: { text: string }) {
-  return <div className="rounded-md border border-white/10 bg-black/20 p-3 text-sm text-slate-400">{text}</div>;
+  return <div className="surface-flat p-3 text-sm text-[var(--muted)]">{text}</div>;
 }

@@ -1,10 +1,22 @@
 'use client';
 
-import { AlertCircle, CheckCircle2, Clock3, DownloadCloud, Music2, RefreshCw, Search, UploadCloud, Wand2 } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  DownloadCloud,
+  Grid3X3,
+  List,
+  Music2,
+  Plus,
+  Search,
+  UploadCloud,
+  X,
+} from 'lucide-react';
 import type { Route } from 'next';
 import Link from 'next/link';
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 
+import { CoverArt, PillIcon, ReadinessChips, StatusDot } from '@/components/werecode/WereCodePrimitives';
 import { getSupabaseBrowserClient } from '@/lib/supabase/browser';
 import type { JobRow, SongRow } from '@/types/werecode';
 import {
@@ -15,7 +27,6 @@ import {
   inferSourceType,
   readAudioDuration,
   safeFilename,
-  statusClass,
   titleFromFilename,
 } from './library-utils';
 
@@ -24,15 +35,21 @@ type WorkflowResult = {
   job?: JobRow;
 };
 
+type LibraryView = 'grid' | 'list';
+type IntakeMode = 'source' | 'upload' | null;
+
 export function LibraryClient() {
   const [songs, setSongs] = useState<SongRow[]>([]);
-  const [jobs, setJobs] = useState<JobRow[]>([]);
   const [sourceUrl, setSourceUrl] = useState('');
+  const [localYoutubeUrl, setLocalYoutubeUrl] = useState('');
   const [query, setQuery] = useState('');
+  const [view, setView] = useState<LibraryView>('grid');
+  const [intakeMode, setIntakeMode] = useState<IntakeMode>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState<'probe' | 'ingest' | null>(null);
+  const [localDownloading, setLocalDownloading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadTitle, setUploadTitle] = useState('');
@@ -52,17 +69,14 @@ export function LibraryClient() {
   }, [query, songs]);
 
   const songsNeedingAudio = useMemo(() => songs.filter((song) => !song.has_audio), [songs]);
+  const readyCount = useMemo(() => songs.filter((song) => song.status === 'ready').length, [songs]);
 
   async function loadLibrary() {
     setLoading(true);
     setError(null);
     try {
-      const [songsPayload, jobsPayload] = await Promise.all([
-        fetchJson<{ songs: SongRow[] }>('/api/songs?limit=100'),
-        fetchJson<{ jobs: JobRow[] }>('/api/jobs?limit=20'),
-      ]);
+      const songsPayload = await fetchJson<{ songs: SongRow[] }>('/api/songs?limit=100');
       setSongs(songsPayload.songs);
-      setJobs(jobsPayload.jobs);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load library');
     } finally {
@@ -99,7 +113,7 @@ export function LibraryClient() {
     setMessage(null);
 
     try {
-      const endpoint = mode === 'probe' ? '/api/songs/probe' : localYoutubeEnabled ? '/api/local/youtube-download' : '/api/songs/ingest';
+      const endpoint = mode === 'probe' ? '/api/songs/probe' : '/api/songs/ingest';
       const payload = await fetchJson<WorkflowResult>(endpoint, {
         method: 'POST',
         body: JSON.stringify({
@@ -118,10 +132,8 @@ export function LibraryClient() {
         payload.job?.status === 'failed'
           ? null
           : mode === 'probe'
-          ? 'Probe completed. Check the latest job row for metadata and diagnostics.'
-          : localYoutubeEnabled
-          ? `Downloaded locally${payload.song?.title ? `: ${payload.song.title}` : ''}`
-          : `Source registered${payload.song?.title ? `: ${payload.song.title}` : ''}. Upload audio to run studio workflows.`
+            ? 'Source checked. You can add it when you are ready.'
+            : `Song added${payload.song?.title ? `: ${payload.song.title}` : ''}. Upload source audio to unlock the studio.`
       );
 
       if (mode === 'ingest') {
@@ -136,23 +148,47 @@ export function LibraryClient() {
     }
   }
 
-  async function archiveSong(songId: string) {
-    setError(null);
-    setMessage(null);
-    try {
-      await fetchJson(`/api/songs/${songId}`, {
-        method: 'DELETE',
-      });
-      setMessage('Song archived');
-      await loadLibrary();
-    } catch (archiveError) {
-      setError(archiveError instanceof Error ? archiveError.message : 'Could not archive song');
-    }
-  }
-
   function handleSubmit(event: FormEvent<HTMLFormElement>, mode: 'probe' | 'ingest') {
     event.preventDefault();
     void submitSource(mode);
+  }
+
+  async function downloadLocalYoutube(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedUrl = localYoutubeUrl.trim();
+    if (!trimmedUrl) {
+      setError('Paste a YouTube or YouTube Music URL first');
+      return;
+    }
+
+    setLocalDownloading(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const payload = await fetchJson<WorkflowResult>('/api/local/youtube-download', {
+        method: 'POST',
+        body: JSON.stringify({
+          source_url: trimmedUrl,
+          source_type: inferSourceType(trimmedUrl),
+          format: 'm4a',
+          quality: 'high',
+        }),
+      });
+
+      if (payload.job?.status === 'failed') {
+        setError(payload.job.error_message ?? 'Local YouTube download failed');
+      } else {
+        setMessage(`Downloaded locally${payload.song?.title ? `: ${payload.song.title}` : ''}`);
+        setLocalYoutubeUrl('');
+      }
+
+      await loadLibrary();
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : 'Could not download from local YouTube backend');
+    } finally {
+      setLocalDownloading(false);
+    }
   }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -261,6 +297,7 @@ export function LibraryClient() {
       setUploadTitle('');
       setUploadArtist('');
       setUploadSongId('');
+      setIntakeMode(null);
       await loadLibrary();
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Could not upload audio');
@@ -270,95 +307,119 @@ export function LibraryClient() {
   }
 
   return (
-    <section className="grid gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="muted text-sm">Supabase library</p>
-          <h1 className="mt-2 text-3xl font-semibold text-white">Songs</h1>
+    <section className="wc-rise mx-auto max-w-[1180px] pb-16">
+      <header className="pb-7 pt-10">
+        <div className="label mb-4">
+          Your library - {songs.length} songs - {readyCount} ready
         </div>
-        <button
-          type="button"
-          onClick={() => void loadLibrary()}
-          disabled={loading}
-          className="inline-flex h-10 items-center gap-2 rounded-md border border-white/10 px-3 text-sm text-slate-100 hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
-      </div>
+        <h1 className="display max-w-[900px] text-[clamp(48px,7vw,92px)]">
+          Every song, <span className="text-[var(--faint)]">learnable.</span>
+        </h1>
+        <p className="mt-5 max-w-[440px] text-[17px] leading-7 text-[var(--muted)]">
+          Drop a track in and WereCode separates the stems, syncs the lyrics, and writes the tab so you can just play.
+        </p>
+        <div className="mt-6 flex flex-wrap gap-2">
+          <button type="button" onClick={() => setIntakeMode('source')} className="pill">
+            <PillIcon>
+              <Plus className="h-3.5 w-3.5" />
+            </PillIcon>
+            Add a song
+          </button>
+          <button type="button" onClick={() => setIntakeMode('upload')} className="pill ghost">
+            <PillIcon>
+              <UploadCloud className="h-3.5 w-3.5" />
+            </PillIcon>
+            Upload audio
+          </button>
+        </div>
+      </header>
 
-      {localYoutubeEnabled && (
-        <div className="surface p-4">
-          <form className="grid gap-3 lg:grid-cols-[1fr_auto_auto]" onSubmit={(event) => handleSubmit(event, 'ingest')}>
+      {intakeMode === 'source' && (
+        <section className="surface mb-5 p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <label htmlFor="source-url" className="muted mb-2 block text-xs font-medium uppercase">
-                Local YouTube Download
-              </label>
-              <input
-                id="source-url"
-                value={sourceUrl}
-                onChange={(event) => setSourceUrl(event.target.value)}
-                placeholder="https://www.youtube.com/watch?v=..."
-                className="h-11 w-full rounded-md border border-white/10 bg-black/20 px-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-[var(--accent)]"
-              />
+              <div className="label mb-2">Add a song</div>
+              <h2 className="font-semibold">Start from a source URL</h2>
             </div>
-            <button
-              type="button"
-              onClick={() => void submitSource('probe')}
-              disabled={Boolean(submitting)}
-              className="mt-auto inline-flex h-11 items-center justify-center gap-2 rounded-md border border-white/10 px-4 text-sm text-slate-100 hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
-            >
-              <Search className="h-4 w-4" />
+            <button type="button" onClick={() => setIntakeMode(null)} className="iconbtn" aria-label="Close add song">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <form className="grid gap-3 sm:grid-cols-[1fr_auto_auto]" onSubmit={(event) => handleSubmit(event, 'ingest')}>
+            <input
+              id="source-url"
+              value={sourceUrl}
+              onChange={(event) => setSourceUrl(event.target.value)}
+              placeholder="YouTube, YouTube Music, or signed audio URL"
+              className="wc-input h-11 px-4 text-sm"
+            />
+            <button type="button" onClick={() => void submitSource('probe')} disabled={Boolean(submitting)} className="pill ghost sm">
+              <PillIcon>
+                <Search className="h-3.5 w-3.5" />
+              </PillIcon>
               Probe
             </button>
-            <button
-              type="submit"
-              disabled={Boolean(submitting)}
-              className="mt-auto inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-slate-950 hover:bg-[var(--accent-strong)] disabled:cursor-wait disabled:opacity-60"
-            >
-              <DownloadCloud className="h-4 w-4" />
-              {submitting === 'ingest' ? 'Downloading' : 'Download'}
+            <button type="submit" disabled={Boolean(submitting)} className="pill sm">
+              <PillIcon>
+                <DownloadCloud className="h-3.5 w-3.5" />
+              </PillIcon>
+              {submitting === 'ingest' ? 'Adding' : 'Add'}
             </button>
           </form>
-        </div>
+        </section>
       )}
 
-      {message && (
-        <div className="flex items-start gap-2 rounded-md border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-100">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{message}</span>
-        </div>
-      )}
-      {error && (
-        <div className="flex items-start gap-2 rounded-md border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-100">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
-        </div>
+      {localYoutubeEnabled && (
+        <section className="surface mb-5 p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="label mb-2">Local dev only</div>
+              <h2 className="font-semibold">YouTube download</h2>
+            </div>
+            <span className="chip accent">backend required</span>
+          </div>
+          <form className="grid gap-3 sm:grid-cols-[1fr_auto]" onSubmit={downloadLocalYoutube}>
+            <input
+              value={localYoutubeUrl}
+              onChange={(event) => setLocalYoutubeUrl(event.target.value)}
+              placeholder="YouTube or YouTube Music URL"
+              className="wc-input h-11 px-4 text-sm"
+            />
+            <button type="submit" disabled={localDownloading} className="pill sm">
+              <PillIcon>
+                <DownloadCloud className="h-3.5 w-3.5" />
+              </PillIcon>
+              {localDownloading ? 'Downloading' : 'Download'}
+            </button>
+          </form>
+        </section>
       )}
 
-      <div className="surface p-4">
-        <form className="grid gap-3 lg:grid-cols-[1.2fr_1fr_0.8fr_0.8fr_auto]" onSubmit={uploadAudio}>
-          <div>
-            <label htmlFor="audio-upload" className="muted mb-2 block text-xs font-medium uppercase">
-              Audio Upload
-            </label>
+      {intakeMode === 'upload' && (
+        <section className="surface mb-5 p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="label mb-2">Upload audio</div>
+              <h2 className="font-semibold">Attach a playable source</h2>
+            </div>
+            <button type="button" onClick={() => setIntakeMode(null)} className="iconbtn" aria-label="Close upload audio">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_1fr_1fr_1fr_auto]" onSubmit={uploadAudio}>
             <input
               id="audio-upload"
               type="file"
               accept="audio/*"
               onChange={handleFileChange}
-              className="block h-11 w-full rounded-md border border-white/10 bg-black/20 text-sm text-slate-200 file:mr-3 file:h-full file:border-0 file:bg-white/10 file:px-3 file:text-sm file:text-white hover:file:bg-white/15"
+              className="h-11 w-full rounded-full bg-[var(--paper)] px-4 py-2 text-sm text-[var(--muted)] shadow-[inset_0_0_0_1.5px_var(--line)] file:mr-3 file:h-7 file:rounded-full file:border-0 file:bg-[var(--ink)] file:px-3 file:text-sm file:font-medium file:text-[var(--paper)]"
             />
-          </div>
-          <div>
-            <label htmlFor="upload-song" className="muted mb-2 block text-xs font-medium uppercase">
-              Attach To
-            </label>
             <select
               id="upload-song"
               value={uploadSongId}
               onChange={(event) => setUploadSongId(event.target.value)}
-              className="h-11 w-full rounded-md border border-white/10 bg-[#0d121b] px-3 text-sm text-white outline-none focus:border-[var(--accent)]"
+              className="wc-input h-11 px-4 text-sm"
+              aria-label="Attach audio to song"
             >
               <option value="">New song</option>
               {songsNeedingAudio.map((song) => (
@@ -367,170 +428,157 @@ export function LibraryClient() {
                 </option>
               ))}
             </select>
-          </div>
-          <div>
-            <label htmlFor="upload-title" className="muted mb-2 block text-xs font-medium uppercase">
-              Title
-            </label>
             <input
               id="upload-title"
               value={uploadTitle}
               onChange={(event) => setUploadTitle(event.target.value)}
               placeholder="Song title"
-              className="h-11 w-full rounded-md border border-white/10 bg-black/20 px-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-[var(--accent)]"
+              className="wc-input h-11 px-4 text-sm"
             />
-          </div>
-          <div>
-            <label htmlFor="upload-artist" className="muted mb-2 block text-xs font-medium uppercase">
-              Artist
-            </label>
             <input
               id="upload-artist"
               value={uploadArtist}
               onChange={(event) => setUploadArtist(event.target.value)}
-              placeholder="Optional"
-              className="h-11 w-full rounded-md border border-white/10 bg-black/20 px-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-[var(--accent)]"
+              placeholder="Artist"
+              className="wc-input h-11 px-4 text-sm"
             />
-          </div>
-          <button
-            type="submit"
-            disabled={uploading}
-            className="mt-auto inline-flex h-11 items-center justify-center gap-2 rounded-md border border-white/10 px-4 text-sm text-slate-100 hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
-          >
-            <UploadCloud className="h-4 w-4" />
-            {uploading ? 'Uploading' : 'Upload'}
-          </button>
-        </form>
-      </div>
+            <button type="submit" disabled={uploading} className="pill ghost sm md:w-fit">
+              <PillIcon>
+                <UploadCloud className="h-3.5 w-3.5" />
+              </PillIcon>
+              {uploading ? 'Uploading' : 'Upload'}
+            </button>
+          </form>
+        </section>
+      )}
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
-        <div className="surface overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 p-4">
-            <div className="flex items-center gap-2">
-              <Music2 className="h-4 w-4 text-[var(--accent-strong)]" />
-              <h2 className="font-medium">Library</h2>
-              <span className="muted text-sm">{filteredSongs.length}</span>
-            </div>
-            <div className="relative w-full sm:w-72">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Filter songs"
-                className="h-10 w-full rounded-md border border-white/10 bg-black/20 pl-9 pr-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-[var(--accent)]"
-              />
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="muted border-b border-white/10 text-xs uppercase">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Title</th>
-                  <th className="px-4 py-3 font-medium">Artist</th>
-                  <th className="px-4 py-3 font-medium">Duration</th>
-                  <th className="px-4 py-3 font-medium">State</th>
-                  <th className="px-4 py-3 font-medium">Assets</th>
-                  <th className="px-4 py-3 font-medium">Updated</th>
-                  <th className="px-4 py-3 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSongs.map((song) => {
-                  const issue = getSongIssue(song);
-
-                  return (
-                    <tr key={song.id} className="border-b border-white/5 hover:bg-white/[0.03]">
-                      <td className="px-4 py-3">
-                        <Link href={`/studio/${song.id}` as Route} className="font-medium text-white hover:text-[var(--accent-strong)]">
-                          {song.title}
-                        </Link>
-                        {song.source_url && <div className="muted mt-1 max-w-[280px] truncate text-xs">{song.source_url}</div>}
-                        {issue && <div className="mt-1 max-w-[360px] text-xs text-red-200">{issue}</div>}
-                      </td>
-                      <td className="px-4 py-3 text-slate-300">{song.artist ?? 'Unknown'}</td>
-                      <td className="px-4 py-3 font-mono text-slate-400">{formatDuration(song.duration_sec)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex rounded-md border px-2 py-1 text-xs ${statusClass(song.status)}`}>{song.status}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1">
-                          {[
-                            ['audio', song.has_audio],
-                            ['norm', song.has_normalized_audio],
-                            ['stems', song.has_stems],
-                            ['analysis', song.has_analysis],
-                            ['lyrics', song.has_plain_lyrics || song.has_synced_lyrics],
-                            ['midi', song.has_midi],
-                          ].map(([label, active]) => (
-                            <span
-                              key={label as string}
-                              className={`rounded border px-1.5 py-0.5 text-[11px] ${
-                                active ? 'border-[var(--accent)]/30 bg-[var(--accent)]/10 text-[var(--accent-strong)]' : 'border-white/10 text-slate-500'
-                              }`}
-                            >
-                              {label}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-400">{formatDate(song.updated_at)}</td>
-                      <td className="px-4 py-3">
-                        <button
-                          type="button"
-                          onClick={() => void archiveSong(song.id)}
-                          className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-200 hover:bg-white/10"
-                        >
-                          Archive
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {!loading && filteredSongs.length === 0 && (
-            <div className="grid place-items-center px-4 py-14 text-center">
-              <div>
-                <Music2 className="mx-auto h-10 w-10 text-slate-600" />
-                <h3 className="mt-3 font-medium text-slate-200">No songs yet</h3>
-                <p className="muted mt-1 text-sm">Ingest a source URL to create the first Supabase-backed song row.</p>
-              </div>
-            </div>
-          )}
+      {message && (
+        <div className="chip live mb-4 min-h-11 w-full justify-start rounded-[12px] px-4">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{message}</span>
         </div>
+      )}
+      {error && (
+        <div className="chip danger mb-4 min-h-11 w-full justify-start rounded-[12px] px-4">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
 
-        <aside className="surface h-fit overflow-hidden">
-          <div className="flex items-center gap-2 border-b border-white/10 p-4">
-            <Clock3 className="h-4 w-4 text-[var(--accent-strong)]" />
-            <h2 className="font-medium">Recent Jobs</h2>
-          </div>
-          <div className="divide-y divide-white/5">
-            {jobs.map((job) => (
-              <div key={job.id} className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2 text-sm font-medium text-white">
-                      <Wand2 className="h-4 w-4 text-slate-400" />
-                      {job.job_type}
-                    </div>
-                    <div className="muted mt-1 text-xs">{job.modal_endpoint ?? 'Next job'}</div>
-                  </div>
-                  <span className={`rounded-md border px-2 py-1 text-xs ${statusClass(job.status)}`}>{job.status}</span>
-                </div>
-                {job.error_message && <p className="mt-2 text-xs text-red-200">{job.error_message}</p>}
-                <div className="muted mt-2 flex justify-between text-xs">
-                  <span>{Math.round(job.progress)}%</span>
-                  <span>{formatDate(job.created_at)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-          {!loading && jobs.length === 0 && <div className="muted p-4 text-sm">No jobs recorded yet.</div>}
-        </aside>
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[260px] flex-1 sm:max-w-[380px]">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--faint)]" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search songs and artists"
+            className="wc-input h-[46px] pl-11 pr-4 text-sm"
+          />
+        </div>
+        <div className="flex-1" />
+        <div className="segment bg-[var(--card)] shadow-[inset_0_0_0_1.5px_var(--line)]">
+          <button type="button" onClick={() => setView('grid')} className={view === 'grid' ? 'on' : 'text-[var(--muted)]'}>
+            <Grid3X3 className="mr-2 h-4 w-4" />
+            Grid
+          </button>
+          <button type="button" onClick={() => setView('list')} className={view === 'list' ? 'on' : 'text-[var(--muted)]'}>
+            <List className="mr-2 h-4 w-4" />
+            List
+          </button>
+        </div>
       </div>
+
+      {view === 'grid' ? (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
+          {filteredSongs.map((song) => (
+            <SongCard key={song.id} song={song} />
+          ))}
+        </div>
+      ) : (
+        <div className="surface overflow-hidden">
+          {filteredSongs.map((song, index) => (
+            <SongListRow key={song.id} song={song} last={index === filteredSongs.length - 1} />
+          ))}
+        </div>
+      )}
+
+      {!loading && filteredSongs.length === 0 && (
+        <div className="surface grid min-h-72 place-items-center px-6 py-14 text-center">
+          <div>
+            <Music2 className="mx-auto h-11 w-11 text-[var(--faint)]" />
+            <h3 className="display mt-4 text-2xl">No songs yet</h3>
+            <p className="mt-2 max-w-sm text-sm leading-6 text-[var(--muted)]">
+              Add a source or upload audio to create the first song in your library.
+            </p>
+          </div>
+        </div>
+      )}
     </section>
   );
+}
+
+function SongCard({ song }: { song: SongRow }) {
+  const issue = getSongIssue(song);
+
+  return (
+    <Link
+      href={`/studio/${song.id}` as Route}
+      className="surface flex min-h-[206px] flex-col gap-4 p-[18px] text-left transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-pop)]"
+    >
+      <div className="flex items-center gap-3">
+        <CoverArt id={song.id} size={58} />
+        <div className="min-w-0">
+          <div className="truncate text-lg font-bold">{song.title}</div>
+          <div className="mt-1 truncate text-sm text-[var(--muted)]">{song.artist ?? 'Unknown artist'}</div>
+        </div>
+      </div>
+
+      <ReadinessChips items={songReadiness(song)} />
+
+      {issue && <p className="line-clamp-2 rounded-[10px] bg-[oklch(0.55_0.16_28_/_0.09)] p-3 text-xs leading-5 text-[var(--danger)]">{issue}</p>}
+
+      <div className="mt-auto flex items-center justify-between gap-3 pt-1">
+        <StatusDot status={song.status} />
+        <span className="mono text-xs text-[var(--faint)]">
+          {formatDuration(song.duration_sec)} - {formatDate(song.updated_at)}
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+function SongListRow({ song, last }: { song: SongRow; last: boolean }) {
+  const issue = getSongIssue(song);
+
+  return (
+    <Link
+      href={`/studio/${song.id}` as Route}
+      className={`grid items-center gap-4 px-5 py-4 text-left transition hover:bg-[var(--card-2)] md:grid-cols-[auto_1.4fr_1fr_auto_auto] ${
+        last ? '' : 'border-b border-[var(--line-2)]'
+      }`}
+    >
+      <CoverArt id={song.id} size={44} />
+      <div className="min-w-0">
+        <div className="truncate font-bold">{song.title}</div>
+        <div className="mt-1 truncate text-sm text-[var(--muted)]">{song.artist ?? 'Unknown artist'}</div>
+        {issue && <div className="mt-1 max-w-[460px] truncate text-xs text-[var(--danger)]">{issue}</div>}
+      </div>
+      <div className="hidden md:block">
+        <ReadinessChips items={songReadiness(song)} />
+      </div>
+      <StatusDot status={song.status} />
+      <span className="mono min-w-16 text-right text-xs text-[var(--faint)]">{formatDuration(song.duration_sec)}</span>
+    </Link>
+  );
+}
+
+function songReadiness(song: SongRow) {
+  return [
+    { label: 'Audio', ready: song.has_audio },
+    { label: 'Stems', ready: song.has_stems },
+    { label: 'Lyrics', ready: song.has_plain_lyrics || song.has_synced_lyrics },
+    { label: 'Karaoke', ready: song.has_synced_lyrics },
+    { label: 'MIDI', ready: song.has_midi },
+    { label: 'Analysis', ready: song.has_analysis },
+  ];
 }
