@@ -1,47 +1,84 @@
 'use client';
 
-import { Activity, AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Database, DownloadCloud, RefreshCw, Search, Wand2 } from 'lucide-react';
+import { Activity, AlertCircle, Check, CheckCircle2, ChevronDown, ChevronRight, Copy, Database, DownloadCloud, RefreshCw, Search, Wand2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { CoverArt, PillIcon, statusChipClass, StatusDot } from '@/components/werecode/WereCodePrimitives';
-import type { AssetRow, JobRow, SongRow } from '@/types/werecode';
+import { toJobSummary, useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
+import type { JobRow } from '@/types/werecode';
+import type { AssetSummary, JobSummary, SongSummary } from '@/types/werecode-client';
 import { assetLabel, fetchJson, formatBytes, formatDate, signDownload } from '@/features/studio/studio-utils';
 
 type PipelineTab = 'jobs' | 'assets';
 type FilterOption = { value: string; label: string; meta?: string };
 
 const NO_SONG_FILTER = '__no_song__';
+const emptyAssetSummaries: AssetSummary[] = [];
 
 export function PipelineClient() {
-  const [jobs, setJobs] = useState<JobRow[]>([]);
-  const [songs, setSongs] = useState<SongRow[]>([]);
-  const [assets, setAssets] = useState<AssetRow[]>([]);
-  const [selectedJob, setSelectedJob] = useState<JobRow | null>(null);
+  const jobs = useWereCodeDataCache((state) => state.jobs);
+  const jobsLoaded = useWereCodeDataCache((state) => state.jobsLoaded);
+  const songs = useWereCodeDataCache((state) => state.songs);
+  const songsLoaded = useWereCodeDataCache((state) => state.songsLoaded);
+  const assetsBySongId = useWereCodeDataCache((state) => state.assetsBySongId);
+  const jobDetailsById = useWereCodeDataCache((state) => state.jobDetailsById);
+  const setCachedJobs = useWereCodeDataCache((state) => state.setJobs);
+  const setCachedSongs = useWereCodeDataCache((state) => state.setSongs);
+  const setCachedJobDetail = useWereCodeDataCache((state) => state.setJobDetail);
+  const setCachedAssetsForSong = useWereCodeDataCache((state) => state.setAssetsForSong);
+  const [selectedJob, setSelectedJob] = useState<JobSummary | null>(null);
   const [selectedSongId, setSelectedSongId] = useState('');
-  const [selectedAsset, setSelectedAsset] = useState<AssetRow | null>(null);
+  const [selectedAsset, setSelectedAsset] = useState<AssetSummary | null>(null);
   const [tab, setTab] = useState<PipelineTab>('jobs');
   const [query, setQuery] = useState('');
   const [songFilters, setSongFilters] = useState<string[]>([]);
   const [jobTypeFilters, setJobTypeFilters] = useState<string[]>([]);
   const [endpointFilters, setEndpointFilters] = useState<string[]>([]);
   const [statusFilters, setStatusFilters] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!(jobsLoaded && songsLoaded));
   const [assetLoading, setAssetLoading] = useState(false);
+  const [jobDetailLoadingId, setJobDetailLoadingId] = useState<string | null>(null);
+  const [jobDetailError, setJobDetailError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const loadPipeline = useCallback(async () => {
+  const selectedAssetCache = selectedSongId ? assetsBySongId[selectedSongId] : undefined;
+  const assets = selectedAssetCache?.assets ?? emptyAssetSummaries;
+  const selectedJobDetail = selectedJob ? (jobDetailsById[selectedJob.id] ?? null) : null;
+  const selectedJobId = selectedJob?.id ?? null;
+
+  const loadPipeline = useCallback(async (options: { force?: boolean } = {}) => {
+    const cache = useWereCodeDataCache.getState();
+    if (!options.force && cache.jobsLoaded && cache.songsLoaded) {
+      setSelectedJob((current) => current ?? cache.jobs[0] ?? null);
+      setSelectedSongId(
+        (current) => current || cache.jobs.find((job) => job.song_id)?.song_id || cache.songs[0]?.id || ''
+      );
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
+      const shouldLoadJobs = options.force || !cache.jobsLoaded;
+      const shouldLoadSongs = options.force || !cache.songsLoaded;
       const [jobsPayload, songsPayload] = await Promise.all([
-        fetchJson<{ jobs: JobRow[] }>('/api/jobs?limit=100'),
-        fetchJson<{ songs: SongRow[] }>('/api/songs?limit=100'),
+        shouldLoadJobs
+          ? fetchJson<{ jobs: JobSummary[] }>('/api/jobs?limit=100')
+          : Promise.resolve({ jobs: cache.jobs }),
+        shouldLoadSongs
+          ? fetchJson<{ songs: SongSummary[] }>('/api/songs?limit=100')
+          : Promise.resolve({ songs: cache.songs }),
       ]);
 
-      setJobs(jobsPayload.jobs);
-      setSongs(songsPayload.songs);
+      if (shouldLoadJobs) {
+        setCachedJobs(jobsPayload.jobs);
+      }
+      if (shouldLoadSongs) {
+        setCachedSongs(songsPayload.songs);
+      }
       setSelectedJob((current) => jobsPayload.jobs.find((job) => job.id === current?.id) ?? jobsPayload.jobs[0] ?? null);
       setSelectedSongId((current) => current || jobsPayload.jobs.find((job) => job.song_id)?.song_id || songsPayload.songs[0]?.id || '');
     } catch (loadError) {
@@ -49,29 +86,63 @@ export function PipelineClient() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setCachedJobs, setCachedSongs]);
 
-  const loadAssets = useCallback(async (songId: string) => {
+  const loadAssets = useCallback(async (songId: string, options: { force?: boolean } = {}) => {
     if (!songId) {
-      setAssets([]);
       setSelectedAsset(null);
+      return;
+    }
+
+    const cached = useWereCodeDataCache.getState().assetsBySongId[songId];
+    if (!options.force && cached) {
+      setSelectedAsset((current) => cached.assets.find((asset) => asset.id === current?.id) ?? cached.assets[0] ?? null);
+      setAssetLoading(false);
       return;
     }
 
     setAssetLoading(true);
     setError(null);
     try {
-      const payload = await fetchJson<{ assets: AssetRow[] }>(`/api/songs/${songId}/assets`);
-      setAssets(payload.assets);
+      const payload = await fetchJson<{ assets: AssetSummary[] }>(`/api/songs/${songId}/assets?view=summary`);
+      setCachedAssetsForSong(songId, payload.assets);
       setSelectedAsset((current) => payload.assets.find((asset) => asset.id === current?.id) ?? payload.assets[0] ?? null);
     } catch (loadError) {
-      setAssets([]);
       setSelectedAsset(null);
       setError(loadError instanceof Error ? loadError.message : 'Could not load assets');
     } finally {
       setAssetLoading(false);
     }
-  }, []);
+  }, [setCachedAssetsForSong]);
+
+  const loadJobDetail = useCallback(async (jobId: string, options: { force?: boolean } = {}) => {
+    if (!options.force && useWereCodeDataCache.getState().jobDetailsById[jobId]) {
+      setJobDetailError(null);
+      return;
+    }
+
+    setJobDetailLoadingId(jobId);
+    setJobDetailError(null);
+    try {
+      const payload = await fetchJson<{ job: JobRow }>(`/api/jobs/${jobId}`);
+      setCachedJobDetail(payload.job);
+      setSelectedJob((current) => (current?.id === payload.job.id ? toJobSummary(payload.job) : current));
+    } catch (loadError) {
+      setJobDetailError(loadError instanceof Error ? loadError.message : 'Could not load job detail');
+    } finally {
+      setJobDetailLoadingId((current) => (current === jobId ? null : current));
+    }
+  }, [setCachedJobDetail]);
+
+  const refreshPipeline = useCallback(async () => {
+    await loadPipeline({ force: true });
+    if (selectedSongId) {
+      await loadAssets(selectedSongId, { force: true });
+    }
+    if (selectedJob) {
+      await loadJobDetail(selectedJob.id, { force: true });
+    }
+  }, [loadAssets, loadJobDetail, loadPipeline, selectedJob, selectedSongId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -88,6 +159,18 @@ export function PipelineClient() {
 
     return () => window.clearTimeout(timer);
   }, [loadAssets, selectedSongId]);
+
+  useEffect(() => {
+    if (!selectedJobId) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void loadJobDetail(selectedJobId);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadJobDetail, selectedJobId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -204,7 +287,7 @@ export function PipelineClient() {
     });
   }, [assets, endpointFilters, normalizedQuery, songById, songFilters]);
 
-  async function openAsset(asset: AssetRow) {
+  async function openAsset(asset: AssetSummary) {
     setError(null);
     setMessage(null);
     try {
@@ -262,7 +345,7 @@ export function PipelineClient() {
               className="wc-input h-10 pl-11 pr-4 text-sm"
             />
           </div>
-          <button type="button" onClick={() => void loadPipeline()} disabled={loading} className="pill ghost sm">
+          <button type="button" onClick={() => void refreshPipeline()} disabled={loading} className="pill ghost sm">
             <PillIcon>
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             </PillIcon>
@@ -359,7 +442,14 @@ export function PipelineClient() {
 
         <aside className="surface overflow-hidden">
           {tab === 'jobs' ? (
-            <JobDetail job={selectedJob} selectedSong={selectedSong} nowMs={nowMs} />
+            <JobDetail
+              job={selectedJob}
+              jobDetail={selectedJobDetail}
+              detailLoading={Boolean(selectedJob && jobDetailLoadingId === selectedJob.id)}
+              detailError={jobDetailError}
+              selectedSong={selectedSong}
+              nowMs={nowMs}
+            />
           ) : (
             <AssetDetail asset={selectedAsset} selectedSong={selectedSong} onOpenAsset={(asset) => void openAsset(asset)} />
           )}
@@ -446,12 +536,12 @@ function JobList({
   loading,
   onSelect,
 }: {
-  jobs: JobRow[];
-  songById: Map<string, SongRow>;
+  jobs: JobSummary[];
+  songById: Map<string, SongSummary>;
   nowMs: number;
-  selectedJob: JobRow | null;
+  selectedJob: JobSummary | null;
   loading: boolean;
-  onSelect: (job: JobRow) => void;
+  onSelect: (job: JobSummary) => void;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -506,10 +596,10 @@ function AssetList({
   loading,
   onSelect,
 }: {
-  assets: AssetRow[];
-  selectedAsset: AssetRow | null;
+  assets: AssetSummary[];
+  selectedAsset: AssetSummary | null;
   loading: boolean;
-  onSelect: (asset: AssetRow) => void;
+  onSelect: (asset: AssetSummary) => void;
 }) {
   return (
     <>
@@ -541,33 +631,55 @@ function AssetList({
   );
 }
 
-function JobDetail({ job, selectedSong, nowMs }: { job: JobRow | null; selectedSong: SongRow | null; nowMs: number }) {
+function JobDetail({
+  job,
+  jobDetail,
+  detailLoading,
+  detailError,
+  selectedSong,
+  nowMs,
+}: {
+  job: JobSummary | null;
+  jobDetail: JobRow | null;
+  detailLoading: boolean;
+  detailError: string | null;
+  selectedSong: SongSummary | null;
+  nowMs: number;
+}) {
+  const fullPayload = job ? buildJobCopyPayload(job, jobDetail, nowMs) : null;
+
   return (
     <div className="flex h-full min-h-0 flex-col p-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <div className="label mb-2">Job payload</div>
-          <h2 className="font-semibold">{job?.job_type ?? 'No job selected'}</h2>
-        </div>
-        {job && <span className={statusChipClass(job.status)}>{job.status}</span>}
-      </div>
-      {selectedSong && (
-        <div className="mb-4 flex items-center gap-3 rounded-[12px] bg-[var(--card-2)] p-3 shadow-[inset_0_0_0_1px_var(--line-2)]">
-          <CoverArt id={selectedSong.id} size={38} title={selectedSong.title} />
+      <div className="mb-4 border-b border-[var(--line-2)] pb-4">
+        <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">{selectedSong.title}</div>
-            <div className="truncate text-xs text-[var(--muted)]">{selectedSong.artist ?? 'Unknown artist'}</div>
+            <div className="label mb-2">Job payload</div>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h2 className="min-w-0 truncate text-xl font-semibold">{job?.job_type ?? 'No job selected'}</h2>
+              {job && <span className={`${statusChipClass(job.status)} shrink-0`}>{job.status}</span>}
+            </div>
+            {job && <div className="mono mt-1 truncate text-[11px] text-[var(--faint)]">{job.id}</div>}
           </div>
+          {fullPayload && <CopyJsonButton label="Copy full payload" value={fullPayload} />}
         </div>
-      )}
-      {job?.error_message && (
-        <div className="chip danger mb-4 min-h-10 w-full justify-start rounded-[12px] px-3">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{job.error_message}</span>
-        </div>
-      )}
+        {selectedSong && (
+          <div className="mt-3 flex min-w-0 items-center gap-2">
+            <CoverArt id={selectedSong.id} size={30} title={selectedSong.title} />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">{selectedSong.title}</div>
+              <div className="truncate text-xs text-[var(--muted)]">{selectedSong.artist ?? 'Unknown artist'}</div>
+            </div>
+          </div>
+        )}
+        {job?.error_message && (
+          <div className="mt-3 flex items-start gap-2 rounded-[10px] bg-[oklch(0.55_0.16_28_/_0.1)] px-3 py-2 text-sm font-semibold leading-5 text-[var(--danger)]">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{job.error_message}</span>
+          </div>
+        )}
+      </div>
       {job ? (
-        <JobPayloadExplorer job={job} nowMs={nowMs} />
+        <JobPayloadExplorer job={job} jobDetail={jobDetail} detailLoading={detailLoading} detailError={detailError} nowMs={nowMs} />
       ) : (
         <div className="mono min-h-0 flex-1 rounded-[12px] bg-[var(--paper)] p-4 text-xs leading-6 text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line-2)]">
           Select a job to inspect its payload.
@@ -577,8 +689,41 @@ function JobDetail({ job, selectedSong, nowMs }: { job: JobRow | null; selectedS
   );
 }
 
-function JobPayloadExplorer({ job, nowMs }: { job: JobRow; nowMs: number }) {
-  const metadata = {
+function JobPayloadExplorer({
+  job,
+  jobDetail,
+  detailLoading,
+  detailError,
+  nowMs,
+}: {
+  job: JobSummary;
+  jobDetail: JobRow | null;
+  detailLoading: boolean;
+  detailError: string | null;
+  nowMs: number;
+}) {
+  const metadata = buildJobMetadata(job, nowMs);
+
+  return (
+    <div className="mono min-h-0 flex-1 overflow-auto rounded-[12px] bg-[var(--paper)] p-3 text-xs leading-6 text-[var(--ink)] shadow-[inset_0_0_0_1px_var(--line-2)]">
+      <JsonSection key={`${job.id}-metadata`} title="metadata" value={metadata} defaultOpen />
+      {jobDetail ? (
+        <>
+          <JsonSection key={`${job.id}-request`} title="request_payload" value={jobDetail.request_payload} defaultOpen />
+          <JsonSection key={`${job.id}-response`} title="response_payload" value={jobDetail.response_payload} />
+          <JsonSection key={`${job.id}-diagnostics`} title="diagnostics" value={jobDetail.diagnostics} />
+        </>
+      ) : (
+        <div className="rounded-[10px] bg-[var(--card)] px-3 py-2 text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line-2)]">
+          {detailError ?? (detailLoading ? 'Loading payload...' : 'Payload not loaded.')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function buildJobMetadata(job: JobSummary, nowMs: number) {
+  return {
     id: job.id,
     song_id: job.song_id,
     version_id: job.version_id,
@@ -592,14 +737,60 @@ function JobPayloadExplorer({ job, nowMs }: { job: JobRow; nowMs: number }) {
     completed_at: job.completed_at,
     duration: formatJobDuration(job, nowMs),
   };
+}
+
+function buildJobCopyPayload(job: JobSummary, jobDetail: JobRow | null, nowMs: number) {
+  return {
+    metadata: buildJobMetadata(job, nowMs),
+    request_payload: jobDetail?.request_payload ?? null,
+    response_payload: jobDetail?.response_payload ?? null,
+    diagnostics: jobDetail?.diagnostics ?? null,
+  };
+}
+
+function CopyJsonButton({ label, value }: { label: string; value: unknown }) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+
+  async function copyValue() {
+    try {
+      await writeTextToClipboard(formatCopyPayload(value));
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+    window.setTimeout(() => setCopyState('idle'), 1600);
+  }
+
+  const copied = copyState === 'copied';
+  const failed = copyState === 'failed';
 
   return (
-    <div className="mono min-h-0 flex-1 overflow-auto rounded-[12px] bg-[var(--paper)] p-3 text-xs leading-6 text-[var(--ink)] shadow-[inset_0_0_0_1px_var(--line-2)]">
-      <JsonSection key={`${job.id}-metadata`} title="metadata" value={metadata} defaultOpen />
-      <JsonSection key={`${job.id}-request`} title="request_payload" value={job.request_payload} defaultOpen />
-      <JsonSection key={`${job.id}-response`} title="response_payload" value={job.response_payload} />
-      <JsonSection key={`${job.id}-diagnostics`} title="diagnostics" value={job.diagnostics} />
-    </div>
+    <span className="relative inline-flex shrink-0">
+      <button
+        type="button"
+        onClick={copyValue}
+        className={`iconbtn h-8 w-8 rounded-[10px] ${
+          copied
+            ? 'bg-[var(--accent-soft)] text-[var(--accent-ink)]'
+            : failed
+              ? 'bg-[oklch(0.55_0.16_28_/_0.1)] text-[var(--danger)]'
+              : 'bg-transparent'
+        }`}
+        aria-label={copied ? 'Copied' : failed ? 'Copy failed' : label}
+        title={copied ? 'Copied' : failed ? 'Copy failed' : label}
+      >
+        {copied ? <Check className="h-3.5 w-3.5" /> : failed ? <AlertCircle className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      </button>
+      {copyState !== 'idle' && (
+        <span
+          className={`pointer-events-none absolute right-0 top-[calc(100%+5px)] z-30 whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-bold shadow-[var(--shadow-pop)] ${
+            copied ? 'bg-[var(--ink)] text-[var(--paper)]' : 'bg-[var(--danger)] text-[var(--paper)]'
+          }`}
+        >
+          {copied ? 'Copied' : 'Copy failed'}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -608,16 +799,19 @@ function JsonSection({ title, value, defaultOpen = false }: { title: string; val
 
   return (
     <section className="mb-2 min-w-max rounded-[10px] bg-[var(--card)] shadow-[inset_0_0_0_1px_var(--line-2)] last:mb-0">
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left"
-        aria-expanded={open}
-      >
-        {open ? <ChevronDown className="h-3.5 w-3.5 text-[var(--muted)]" /> : <ChevronRight className="h-3.5 w-3.5 text-[var(--muted)]" />}
-        <span className="font-bold text-[var(--ink)]">{title}</span>
-        <span className="text-[var(--faint)]">{jsonSummary(value)}</span>
-      </button>
+      <div className="flex items-center justify-between gap-3 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          className="flex min-w-0 items-center gap-2 text-left"
+          aria-expanded={open}
+        >
+          {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />}
+          <span className="font-bold text-[var(--ink)]">{title}</span>
+          <span className="text-[var(--faint)]">{jsonSummary(value)}</span>
+        </button>
+        <CopyJsonButton label={`Copy ${title}`} value={value} />
+      </div>
       {open && (
         <div className="border-t border-[var(--line-2)] py-2">
           <JsonNode value={value} path={title} depth={0} defaultExpandedDepth={1} />
@@ -749,9 +943,9 @@ function AssetDetail({
   selectedSong,
   onOpenAsset,
 }: {
-  asset: AssetRow | null;
-  selectedSong: SongRow | null;
-  onOpenAsset: (asset: AssetRow) => void;
+  asset: AssetSummary | null;
+  selectedSong: SongSummary | null;
+  onOpenAsset: (asset: AssetSummary) => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col p-5">
@@ -817,11 +1011,11 @@ function textMatches(query: string, values: Array<string | null | undefined>) {
   return !query || values.some((value) => value?.toLowerCase().includes(query));
 }
 
-function formatJobStarted(job: JobRow) {
+function formatJobStarted(job: JobSummary) {
   return job.started_at ? formatDate(job.started_at) : '--';
 }
 
-function formatJobDuration(job: JobRow, nowMs: number) {
+function formatJobDuration(job: JobSummary, nowMs: number) {
   const startedMs = parseTimeMs(job.started_at);
   if (startedMs === null) {
     return '--';
@@ -894,6 +1088,49 @@ function jsonSummary(value: unknown) {
   return typeof value;
 }
 
+function formatCopyPayload(value: unknown) {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+async function writeTextToClipboard(text: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall through to the selection-based copy path for embedded browsers.
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    const copied = document.execCommand('copy');
+    if (!copied) {
+      throw new Error('Copy command failed');
+    }
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
 function uniqueSorted(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort((a, b) => formatJobType(a).localeCompare(formatJobType(b)));
 }
@@ -906,7 +1143,7 @@ function endpointFilterValue(endpoint: string | null) {
   return endpoint ?? 'next';
 }
 
-function songLabel(songById: Map<string, SongRow>, songId: string | null) {
+function songLabel(songById: Map<string, SongSummary>, songId: string | null) {
   if (!songId) {
     return 'No song';
   }

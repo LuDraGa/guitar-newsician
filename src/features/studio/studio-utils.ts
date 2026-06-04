@@ -1,4 +1,5 @@
 import type { AssetRow } from '@/types/werecode';
+import type { SignedAssetUrl } from '@/types/werecode-client';
 
 type ApiError = {
   error?: {
@@ -76,10 +77,33 @@ export function assetLabel(kind: string) {
   return kind.replaceAll('_', ' ');
 }
 
-export async function signDownload(asset: AssetRow) {
+export async function signDownload(asset: Pick<AssetRow, 'id' | 'song_id'>) {
+  if (!asset.song_id) {
+    throw new Error('Asset is not attached to a song');
+  }
+
   const payload = await fetchJson<{ signedUrl: string }>(
     `/api/songs/${asset.song_id}/assets/${asset.id}/signed-url?expiresIn=3600`
   );
 
   return payload.signedUrl;
+}
+
+export async function signDownloads(songId: string, assetIds: string[]) {
+  if (assetIds.length === 0) {
+    return [];
+  }
+
+  const payload = await fetchJson<{ signedUrls: SignedAssetUrl[] }>(
+    `/api/songs/${songId}/assets/sign-urls`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        assetIds,
+        expiresIn: 3600,
+      }),
+    }
+  );
+
+  return payload.signedUrls;
 }
