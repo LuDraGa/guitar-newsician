@@ -40,6 +40,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { CoverArt, PillIcon, StatusDot } from '@/components/werecode/WereCodePrimitives';
+import { useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
 import { parseLrc } from '@/lib/music/lrc';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
 import { MusicXmlPreviewPanel } from './MusicXmlPreviewPanel';
@@ -55,6 +56,10 @@ type WorkflowResult = {
   };
 };
 
+type SaveLyricsResult = {
+  song?: SongRow | null;
+};
+
 type StudioTab = 'karaoke' | 'guitar' | 'lyrics';
 type GuitarMode = 'chords' | 'sheet' | 'tab';
 type LyricDisplayLine = { id: string; timestamp: number | null; text: string };
@@ -64,7 +69,9 @@ type SeekCommand = { id: number; time: number };
 type PlaybackCommand = { id: number; action: 'toggle' };
 type EditorLyricLine = { id: string; time: number | null; text: string };
 type ChordEvent = { time: number; endTime: number | null; chord: string };
+type StemLevelPreviewDetail = { assetId: string; level: number };
 
+const stemLevelPreviewEvent = 'werecode:stem-level-preview';
 const stemKindSet = new Set(['stem_vocals', 'stem_drums', 'stem_bass', 'stem_other', 'stem_guitar', 'stem_piano']);
 const stemKindOrder = ['stem_vocals', 'stem_guitar', 'stem_bass', 'stem_drums', 'stem_piano', 'stem_other'];
 const defaultStemLevels: Record<string, number> = {
@@ -95,6 +102,9 @@ const guitarModes = [
 ] as const;
 
 export function StudioClient({ initialSongId }: { initialSongId?: string }) {
+  const upsertCachedSong = useWereCodeDataCache((state) => state.upsertSong);
+  const upsertCachedJob = useWereCodeDataCache((state) => state.upsertJob);
+  const upsertCachedAssetForSong = useWereCodeDataCache((state) => state.upsertAssetForSong);
   const [songId, setSongId] = useState(initialSongId ?? '');
   const [song, setSong] = useState<SongRow | null>(null);
   const [assets, setAssets] = useState<AssetRow[]>([]);
@@ -194,6 +204,10 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     },
     [stemAssets]
   );
+
+  const previewStemLevel = useCallback((assetId: string, level: number) => {
+    window.dispatchEvent(new CustomEvent<StemLevelPreviewDetail>(stemLevelPreviewEvent, { detail: { assetId, level } }));
+  }, []);
 
   const soloStem = useCallback(
     (assetId: string) => {
@@ -350,6 +364,17 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         }),
       });
       const jobStatus = result.job?.status;
+      if (result.song) {
+        upsertCachedSong(result.song);
+      }
+      if (result.job) {
+        upsertCachedJob(result.job);
+      }
+      for (const asset of result.assets ?? []) {
+        if (asset.song_id) {
+          upsertCachedAssetForSong(asset.song_id, asset);
+        }
+      }
       await loadStudio(song.id);
       if (jobStatus === 'failed') {
         setError(result.job?.error_message ?? `${name} failed`);
@@ -389,7 +414,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     setMessage(null);
 
     try {
-      await fetchJson('/api/lyrics/save', {
+      const result = await fetchJson<SaveLyricsResult>('/api/lyrics/save', {
         method: 'POST',
         body: JSON.stringify({
           song_id: song.id,
@@ -398,6 +423,9 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
           content: contentOverride ?? lyricsDraft,
         }),
       });
+      if (result.song) {
+        upsertCachedSong(result.song);
+      }
       setMessage('Lyrics saved');
       await loadStudio(song.id);
     } catch (saveError) {
@@ -496,6 +524,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   analysisResults={analysisResults}
                   running={running}
                   onUpdateStemMix={updateStemMix}
+                  onPreviewStemLevel={previewStemLevel}
                   onSoloStem={soloStem}
                   onOpenAsset={(asset) => void openAsset(asset)}
                   onRunStems={() => void workflowActions.stems()}
@@ -646,6 +675,7 @@ function KaraokeProductView({
   analysisResults,
   running,
   onUpdateStemMix,
+  onPreviewStemLevel,
   onSoloStem,
   onOpenAsset,
   onRunStems,
@@ -667,6 +697,7 @@ function KaraokeProductView({
   analysisResults: AnalysisResultRow[];
   running: string | null;
   onUpdateStemMix: (assetId: string, patch: Partial<StemMixState>) => void;
+  onPreviewStemLevel: (assetId: string, level: number) => void;
   onSoloStem: (assetId: string) => void;
   onOpenAsset: (asset: AssetRow) => void;
   onRunStems: () => void;
@@ -688,6 +719,7 @@ function KaraokeProductView({
             sourceAsset={sourceAsset}
             running={running}
             onUpdateStemMix={onUpdateStemMix}
+            onPreviewStemLevel={onPreviewStemLevel}
             onSoloStem={onSoloStem}
             onOpenAsset={onOpenAsset}
             onRunStems={onRunStems}
@@ -718,6 +750,7 @@ function StemsPanel({
   sourceAsset,
   running,
   onUpdateStemMix,
+  onPreviewStemLevel,
   onSoloStem,
   onOpenAsset,
   onRunStems,
@@ -729,6 +762,7 @@ function StemsPanel({
   sourceAsset: AssetRow | undefined;
   running: string | null;
   onUpdateStemMix: (assetId: string, patch: Partial<StemMixState>) => void;
+  onPreviewStemLevel: (assetId: string, level: number) => void;
   onSoloStem: (assetId: string) => void;
   onOpenAsset: (asset: AssetRow) => void;
   onRunStems: () => void;
@@ -775,10 +809,12 @@ function StemsPanel({
                 </button>
                 <div className="relative h-6">
                   <StemLevelControl
+                    assetId={asset.id}
                     label={stemLabel(asset.kind)}
                     level={level}
                     color={color}
                     silenced={silenced}
+                    onPreview={(nextLevel) => onPreviewStemLevel(asset.id, nextLevel)}
                     onChange={(nextLevel) => onUpdateStemMix(asset.id, { level: nextLevel })}
                   />
                 </div>
@@ -838,19 +874,62 @@ function StemsPanel({
 }
 
 function StemLevelControl({
+  assetId,
   label,
   level,
   color,
   silenced,
+  onPreview,
   onChange,
 }: {
+  assetId: string;
   label: string;
   level: number;
   color: string;
   silenced: boolean;
+  onPreview: (level: number) => void;
   onChange: (level: number) => void;
 }) {
   const trackRef = useRef<HTMLButtonElement | null>(null);
+  const draggingRef = useRef(false);
+  const draftLevelRef = useRef(level);
+  const [draftLevel, setDraftLevel] = useState(level);
+
+  useEffect(() => {
+    if (!draggingRef.current) {
+      draftLevelRef.current = level;
+      setDraftLevel(level);
+    }
+  }, [level]);
+
+  const previewLevel = useCallback(
+    (nextLevel: number) => {
+      const clamped = Math.min(100, Math.max(0, nextLevel));
+      draftLevelRef.current = clamped;
+      setDraftLevel(clamped);
+      onPreview(clamped);
+    },
+    [onPreview]
+  );
+
+  const commitLevel = useCallback(
+    (nextLevel: number) => {
+      const clamped = Math.min(100, Math.max(0, nextLevel));
+      draftLevelRef.current = clamped;
+      setDraftLevel(clamped);
+      onPreview(clamped);
+      onChange(clamped);
+    },
+    [onChange, onPreview]
+  );
+
+  const commitDraft = useCallback(() => {
+    if (!draggingRef.current) {
+      return;
+    }
+    draggingRef.current = false;
+    onChange(draftLevelRef.current);
+  }, [onChange]);
 
   const updateFromClientX = useCallback(
     (clientX: number) => {
@@ -860,9 +939,9 @@ function StemLevelControl({
       }
       const rect = track.getBoundingClientRect();
       const next = Math.round(((clientX - rect.left) / rect.width) * 100);
-      onChange(Math.min(100, Math.max(0, next)));
+      previewLevel(next);
     },
-    [onChange]
+    [previewLevel]
   );
 
   return (
@@ -873,9 +952,11 @@ function StemLevelControl({
       aria-label={`${label} level`}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuenow={level}
-      data-stem-level={level}
+      aria-valuenow={draftLevel}
+      data-stem-id={assetId}
+      data-stem-level={draftLevel}
       onPointerDown={(event) => {
+        draggingRef.current = true;
         event.currentTarget.setPointerCapture(event.pointerId);
         updateFromClientX(event.clientX);
       }}
@@ -884,30 +965,32 @@ function StemLevelControl({
           updateFromClientX(event.clientX);
         }
       }}
+      onPointerUp={commitDraft}
+      onPointerCancel={commitDraft}
       onKeyDown={(event) => {
         if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
           event.preventDefault();
-          onChange(Math.max(0, level - 5));
+          commitLevel(draftLevel - 5);
         } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
           event.preventDefault();
-          onChange(Math.min(100, level + 5));
+          commitLevel(draftLevel + 5);
         } else if (event.key === 'Home') {
           event.preventDefault();
-          onChange(0);
+          commitLevel(0);
         } else if (event.key === 'End') {
           event.preventDefault();
-          onChange(100);
+          commitLevel(100);
         }
       }}
       className="absolute inset-0 cursor-pointer rounded-full text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
     >
       <span className="absolute inset-y-[11px] left-0 right-0 overflow-hidden rounded-full bg-[var(--paper-2)]">
-        <span className="block h-full" style={{ width: `${silenced ? 0 : level}%`, background: color, opacity: 0.55 }} />
+        <span className="block h-full" style={{ width: `${silenced ? 0 : draftLevel}%`, background: color, opacity: 0.55 }} />
       </span>
       <span
         className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_2px_8px_oklch(0.3_0.02_55_/_0.18)]"
         style={{
-          left: `${level}%`,
+          left: `${draftLevel}%`,
           background: color,
           opacity: silenced ? 0.45 : 1,
         }}
@@ -1143,24 +1226,38 @@ function TransportCard({
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stemAudioRefs = useRef(new Map<string, HTMLAudioElement>());
+  const stemSourcesRef = useRef(stemSources);
+  const anySoloRef = useRef(false);
   const latestTimeRef = useRef(0);
-  const suppressStemTimeUpdatesUntilRef = useRef(0);
-  const lastStemMixChangeAtRef = useRef(0);
+  const lastFollowerSyncAtRef = useRef(0);
+  const handledSeekCommandIdRef = useRef<number | null>(null);
+  const handledPlaybackCommandIdRef = useRef<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(song?.duration_sec ?? 0);
   const [rate, setRate] = useState(1);
   const [loopStart, setLoopStart] = useState<number | null>(null);
   const [loopEnd, setLoopEnd] = useState<number | null>(null);
+  const [readyStemState, setReadyStemState] = useState<{ sourceSignature: string; ids: Set<string> }>(() => ({
+    sourceSignature: '',
+    ids: new Set(),
+  }));
   const bars = useMemo(() => makeBars(song?.id ?? 'studio', 120), [song?.id]);
   const hasLoop = loopStart !== null || loopEnd !== null;
   const hasStemPlayback = stemSources.length > 0;
-  const hasPlayableAudio = hasStemPlayback || Boolean(audioUrl);
   const anySolo = stemSources.some((source) => source.solo);
+  const stemSourceSignature = useMemo(() => stemSources.map((source) => `${source.id}:${source.url}`).join('|'), [stemSources]);
   const stemMixSignature = useMemo(
     () => stemSources.map((source) => `${source.id}:${source.level}:${source.muted ? 1 : 0}:${source.solo ? 1 : 0}`).join('|'),
     [stemSources]
   );
+  const readyStemCount =
+    readyStemState.sourceSignature === stemSourceSignature ? stemSources.filter((source) => readyStemState.ids.has(source.id)).length : 0;
+  const stemsReady = !hasStemPlayback || (readyStemCount === stemSources.length && stemSources.length > 0);
+  const preparingPlayback = hasStemPlayback && !stemsReady;
+  const hasPlayableAudio = hasStemPlayback ? stemsReady : Boolean(audioUrl);
+  const playbackModeLabel = preparingPlayback ? `Preparing stems ${readyStemCount}/${stemSources.length}` : hasStemPlayback ? 'Stems mix' : 'Original';
+  const playButtonLabel = preparingPlayback ? playbackModeLabel : playing ? 'Pause' : 'Play';
 
   const getActiveAudios = useCallback(() => {
     if (hasStemPlayback) {
@@ -1169,13 +1266,54 @@ function TransportCard({
     return audioRef.current ? [audioRef.current] : [];
   }, [hasStemPlayback, stemSources]);
 
+  const markStemReady = useCallback((assetId: string) => {
+    setReadyStemState((current) => {
+      const currentIds = current.sourceSignature === stemSourceSignature ? current.ids : new Set<string>();
+      if (current.sourceSignature === stemSourceSignature && currentIds.has(assetId)) {
+        return current;
+      }
+      const next = new Set(currentIds);
+      next.add(assetId);
+      return { sourceSignature: stemSourceSignature, ids: next };
+    });
+  }, [stemSourceSignature]);
+
   const setAllAudioTimes = useCallback(
     (next: number) => {
       for (const audio of getActiveAudios()) {
         audio.currentTime = next;
       }
+      lastFollowerSyncAtRef.current = performance.now();
     },
     [getActiveAudios]
+  );
+
+  const syncStemFollowers = useCallback(
+    (masterTime: number, force = false) => {
+      if (!hasStemPlayback || stemSources.length < 2) {
+        return;
+      }
+
+      const now = performance.now();
+      if (!force && now - lastFollowerSyncAtRef.current < 1000) {
+        return;
+      }
+
+      let synced = false;
+      for (const source of stemSources.slice(1)) {
+        const audio = stemAudioRefs.current.get(source.id);
+        if (!audio || audio.paused || Math.abs(audio.currentTime - masterTime) <= 0.45) {
+          continue;
+        }
+        audio.currentTime = masterTime;
+        synced = true;
+      }
+
+      if (synced || force) {
+        lastFollowerSyncAtRef.current = now;
+      }
+    },
+    [hasStemPlayback, stemSources]
   );
 
   const pauseAll = useCallback(() => {
@@ -1190,18 +1328,25 @@ function TransportCard({
     if (audios.length === 0) {
       return;
     }
+    if (hasStemPlayback && (!stemsReady || audios.length !== stemSources.length)) {
+      return;
+    }
 
     for (const audio of audios) {
       audio.currentTime = time;
     }
+    lastFollowerSyncAtRef.current = performance.now();
 
     try {
       await Promise.all(audios.map((audio) => audio.play()));
       setPlaying(true);
     } catch {
+      for (const audio of audios) {
+        audio.pause();
+      }
       setPlaying(false);
     }
-  }, [getActiveAudios, time]);
+  }, [getActiveAudios, hasStemPlayback, stemSources.length, stemsReady, time]);
 
   const toggle = useCallback(async () => {
     if (playing) {
@@ -1231,6 +1376,33 @@ function TransportCard({
   }, [onPlayingChange, playing]);
 
   useEffect(() => {
+    stemSourcesRef.current = stemSources;
+    anySoloRef.current = anySolo;
+  }, [anySolo, stemSources]);
+
+  useEffect(() => {
+    const handlePreview = (event: Event) => {
+      const detail = (event as CustomEvent<StemLevelPreviewDetail>).detail;
+      if (!detail || typeof detail.assetId !== 'string' || typeof detail.level !== 'number') {
+        return;
+      }
+
+      const source = stemSourcesRef.current.find((item) => item.id === detail.assetId);
+      const audio = stemAudioRefs.current.get(detail.assetId);
+      if (!source || !audio) {
+        return;
+      }
+
+      const volume = getStemVolume({ ...source, level: detail.level }, anySoloRef.current);
+      audio.volume = volume;
+      audio.dataset.effectiveVolume = String(volume);
+    };
+
+    window.addEventListener(stemLevelPreviewEvent, handlePreview);
+    return () => window.removeEventListener(stemLevelPreviewEvent, handlePreview);
+  }, []);
+
+  useEffect(() => {
     const audio = audioRef.current;
     if (audio) {
       audio.playbackRate = rate;
@@ -1241,9 +1413,6 @@ function TransportCard({
   }, [rate, stemSources]);
 
   useEffect(() => {
-    const now = performance.now();
-    lastStemMixChangeAtRef.current = now;
-    suppressStemTimeUpdatesUntilRef.current = now + 900;
     for (const source of stemSources) {
       const audio = stemAudioRefs.current.get(source.id);
       if (!audio) {
@@ -1252,26 +1421,31 @@ function TransportCard({
       const volume = getStemVolume(source, anySolo);
       audio.volume = volume;
       audio.dataset.effectiveVolume = String(volume);
-      if (Math.abs(audio.currentTime - latestTimeRef.current) > 0.35) {
-        audio.currentTime = latestTimeRef.current;
-      }
     }
   }, [anySolo, stemMixSignature, stemSources]);
 
   useEffect(() => {
-    if (seekCommand) {
-      const timer = window.setTimeout(() => seekTo(seekCommand.time), 0);
-      return () => window.clearTimeout(timer);
+    if (!seekCommand || handledSeekCommandIdRef.current === seekCommand.id) {
+      return;
     }
+
+    handledSeekCommandIdRef.current = seekCommand.id;
+    const timer = window.setTimeout(() => seekTo(seekCommand.time), 0);
+    return () => window.clearTimeout(timer);
   }, [seekCommand, seekTo]);
 
   useEffect(() => {
-    if (playbackCommand?.action === 'toggle') {
-      const timer = window.setTimeout(() => {
-        void toggle();
-      }, 0);
-      return () => window.clearTimeout(timer);
+    if (!playbackCommand || handledPlaybackCommandIdRef.current === playbackCommand.id) {
+      return;
     }
+
+    handledPlaybackCommandIdRef.current = playbackCommand.id;
+    const timer = window.setTimeout(() => {
+      if (playbackCommand.action === 'toggle') {
+        void toggle();
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [playbackCommand, toggle]);
 
   function setLoopStartAtPlayhead() {
@@ -1395,25 +1569,22 @@ function TransportCard({
             onLoadedMetadata={(event) => {
               const nextDuration = event.currentTarget.duration || song?.duration_sec || 0;
               setDuration((current) => Math.max(current || 0, nextDuration));
+              if (event.currentTarget.readyState >= 3) {
+                markStemReady(source.id);
+              }
             }}
+            onCanPlay={() => markStemReady(source.id)}
             onTimeUpdate={
               index === 0
                 ? (event) => {
-                    if (performance.now() < suppressStemTimeUpdatesUntilRef.current) {
-                      return;
-                    }
                     const next = event.currentTarget.currentTime;
-                    const previous = latestTimeRef.current;
-                    if (previous > 0 && next + 0.75 < previous && performance.now() - lastStemMixChangeAtRef.current < 2500) {
-                      event.currentTarget.currentTime = previous;
-                      return;
-                    }
                     if (loopStart !== null && loopEnd !== null && loopEnd > loopStart && next >= loopEnd) {
                       setAllAudioTimes(loopStart);
                       latestTimeRef.current = loopStart;
                       setTime(loopStart);
                       return;
                     }
+                    syncStemFollowers(next);
                     latestTimeRef.current = next;
                     setTime(next);
                   }
@@ -1430,9 +1601,9 @@ function TransportCard({
             onClick={() => void toggle()}
             disabled={!hasPlayableAudio}
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
-            aria-label={playing ? 'Pause' : 'Play'}
+            aria-label={playButtonLabel}
           >
-            {playing ? <Pause className="h-4 w-4" /> : <Play className="h-5 w-5" />}
+            {preparingPlayback ? <Loader2 className="h-4 w-4 animate-spin" /> : playing ? <Pause className="h-4 w-4" /> : <Play className="h-5 w-5" />}
           </button>
           <div className="hidden min-w-[88px] sm:block">
             <div className="mono text-sm font-bold">{formatSeconds(time)}</div>
@@ -1457,9 +1628,9 @@ function TransportCard({
               onClick={() => void toggle()}
               disabled={!hasPlayableAudio}
               className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
-              aria-label={playing ? 'Pause' : 'Play'}
+              aria-label={playButtonLabel}
             >
-              {playing ? <Pause className="h-5 w-5" /> : <Play className="h-6 w-6" />}
+              {preparingPlayback ? <Loader2 className="h-5 w-5 animate-spin" /> : playing ? <Pause className="h-5 w-5" /> : <Play className="h-6 w-6" />}
             </button>
             {renderWaveform('h-16', true)}
           </div>
@@ -1468,7 +1639,7 @@ function TransportCard({
               <span className="mono text-sm font-bold">{formatSeconds(time)}</span>
               <span className="text-xs text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</span>
               <span className="chip accent">Practice</span>
-              <span className={`chip ${hasStemPlayback ? 'live' : ''}`}>{hasStemPlayback ? 'Stems mix' : 'Original'}</span>
+              <span className={`chip ${hasStemPlayback && stemsReady ? 'live' : ''}`}>{playbackModeLabel}</span>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
               <div className={`flex items-center gap-1 rounded-full px-2 py-1 ${hasLoop ? 'bg-[var(--accent-soft)]' : 'bg-[var(--paper-2)]'}`}>

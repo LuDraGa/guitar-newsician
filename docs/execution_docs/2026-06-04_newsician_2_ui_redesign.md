@@ -160,6 +160,14 @@ Rework the WereCode app UI using the exported `newsician 2` design bundle as the
 **Result**: Karaoke lyric scrolling now starts naturally near the top and only follows once the active line leaves the focus band; the shared Studio transport can be minimized on every Studio tab and defaults to the compact seek/play state in Lyrics editor; the duplicate Sync editor playback strip was removed; `/studio` now stays an empty Studio stub instead of auto-loading the first library song; Library upload and Lyrics editor chevrons were re-centered.
 **Notes**: Chord analysis reliability and chord-shape correctness are tracked as a separate follow-up. That work should inspect the persisted analysis result contract, then replace the placeholder hardcoded chord diagram shapes with real chord-fingering data while keeping the existing product aesthetic.
 
+---
+
+### 2026-06-04
+
+**Action**: Stabilized stem playback controls in Karaoke.
+**Result**: Stem level drags now preview volume directly on the audio elements and commit React state only after the drag finishes. Mix changes no longer suppress transport time updates or repair stem `currentTime`; stem timing is changed only on play, seek, loop, or meaningful follower drift. The transport now exposes a preparing state until all signed stem audio elements are playable. Seek and playback commands are consumed once by ID, preventing a stale lyric-click seek from replaying when mixer state rebinds transport callbacks.
+**Notes**: This does not solve the heavier pipeline concern that six WAV stems are still streamed in parallel. If startup/buffering remains poor after this change, the next product fix is web-playback preview stems.
+
 ## Blockers
 
 - [x] Local default Node was `v18.20.3`, below the repo requirement.
@@ -201,6 +209,7 @@ Rework the WereCode app UI using the exported `newsician 2` design bundle as the
 - [x] Browser verification for Studio typography, mode tabs, track switcher, full-width shell, and coach dock
 - [x] Browser verification for Library upload-first CTA, grid/list delete controls, and delete confirmation dialog
 - [x] Browser verification for bare `/studio` empty state, Karaoke lyric top anchoring, Lyrics editor compact transport, and Library upload select chevron
+- [x] Static verification for stem mixer playback decoupling with `pnpm typecheck` and `pnpm lint`
 
 ## Results
 
