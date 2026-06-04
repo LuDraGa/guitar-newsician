@@ -4,7 +4,9 @@ import { routeErrorResponse } from '@/lib/http/route-error';
 import { assertUserStoragePath, parseStorageBucket } from '@/lib/supabase/storage';
 import { getWereCodeRequestContext, requireOwnedSong } from '@/server/werecode/context';
 import { createAssetSchema } from '@/server/werecode/schemas';
+import { assetSummarySelect } from '@/server/werecode/selects';
 import type { AssetRow } from '@/types/werecode';
+import type { AssetSummary } from '@/types/werecode-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,19 +16,21 @@ type RouteContext = {
   }>;
 };
 
-export async function GET(_request: NextRequest, context: RouteContext) {
+export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { songId } = await context.params;
+    const { searchParams } = new URL(request.url);
+    const summaryOnly = searchParams.get('view') === 'summary';
     const { user, supabase } = await getWereCodeRequestContext();
     await requireOwnedSong(supabase, user.id, songId);
 
     const { data, error } = await supabase
       .from('assets')
-      .select('*')
+      .select(summaryOnly ? assetSummarySelect : '*')
       .eq('song_id', songId)
       .eq('owner_id', user.id)
       .order('created_at', { ascending: false })
-      .returns<AssetRow[]>();
+      .returns<Array<AssetRow | AssetSummary>>();
 
     if (error) {
       throw error;

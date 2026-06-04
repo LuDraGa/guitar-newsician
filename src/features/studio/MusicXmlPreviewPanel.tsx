@@ -3,10 +3,14 @@
 import { AlertTriangle, ExternalLink, FileMusic, Guitar, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import {
+  getCachedSignedAssetUrl,
+  useWereCodeDataCache,
+} from '@/lib/client-cache/werecode-data-cache';
 import { parseMusicXmlPreview, type MusicXmlPreviewData } from '@/lib/music/musicxml';
-import type { AssetRow } from '@/types/werecode';
+import type { AssetSummary } from '@/types/werecode-client';
 import { EmptyPreview, MeasureNoteList, PreviewMetrics, SheetPreview, TabPreview } from './MusicXmlPreviewVisuals';
-import { assetLabel, formatDate, signDownload } from './studio-utils';
+import { assetLabel, formatDate, signDownloads } from './studio-utils';
 
 type PreviewMode = 'sheet' | 'tab';
 
@@ -18,11 +22,11 @@ type LoadState =
 
 type MusicXmlPreviewPanelProps = {
   title: string;
-  asset: AssetRow | undefined;
+  asset: AssetSummary | undefined;
   fallback: string;
   mode: PreviewMode;
   estimatedFromScore?: boolean;
-  onOpenAsset: (asset: AssetRow) => void;
+  onOpenAsset: (asset: AssetSummary) => void;
 };
 
 export function MusicXmlPreviewPanel({
@@ -33,17 +37,33 @@ export function MusicXmlPreviewPanel({
   estimatedFromScore = false,
   onOpenAsset,
 }: MusicXmlPreviewPanelProps) {
+  const cachedPreview = useWereCodeDataCache((state) => (asset ? state.musicXmlPreviewsByAssetId[asset.id]?.preview : null));
+  const setCachedMusicXmlPreview = useWereCodeDataCache((state) => state.setMusicXmlPreview);
+  const setCachedSignedAssetUrls = useWereCodeDataCache((state) => state.setSignedAssetUrls);
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' });
 
   useEffect(() => {
     let active = true;
 
-    async function loadMusicXml(currentAsset: AssetRow) {
+    async function loadMusicXml(currentAsset: AssetSummary) {
       setLoadState({ status: 'loading' });
 
       try {
-        const signedUrl = await signDownload(currentAsset);
-        const response = await fetch(signedUrl, { cache: 'no-store' });
+        if (!currentAsset.song_id) {
+          throw new Error('Asset is not attached to a song');
+        }
+
+        let signedUrl = getCachedSignedAssetUrl(currentAsset.id);
+        if (!signedUrl) {
+          const [signedAssetUrl] = await signDownloads(currentAsset.song_id, [currentAsset.id]);
+          if (!signedAssetUrl) {
+            throw new Error('Could not sign MusicXML asset');
+          }
+          setCachedSignedAssetUrls([signedAssetUrl]);
+          signedUrl = signedAssetUrl.signedUrl;
+        }
+
+        const response = await fetch(signedUrl, { cache: 'force-cache' });
         if (!response.ok) {
           throw new Error(`Could not fetch MusicXML asset: ${response.status}`);
         }
@@ -51,6 +71,7 @@ export function MusicXmlPreviewPanel({
         const text = await response.text();
         const preview = parseMusicXmlPreview(text);
         if (active) {
+          setCachedMusicXmlPreview(currentAsset.id, preview);
           setLoadState({ status: 'ready', preview });
         }
       } catch (error) {
@@ -64,17 +85,34 @@ export function MusicXmlPreviewPanel({
     }
 
     if (!asset) {
+      const timer = window.setTimeout(() => {
+        setLoadState({ status: 'idle' });
+      }, 0);
       return () => {
         active = false;
+        window.clearTimeout(timer);
       };
     }
 
-    void loadMusicXml(asset);
+    if (cachedPreview) {
+      const timer = window.setTimeout(() => {
+        setLoadState({ status: 'ready', preview: cachedPreview });
+      }, 0);
+      return () => {
+        active = false;
+        window.clearTimeout(timer);
+      };
+    }
+
+    const timer = window.setTimeout(() => {
+      void loadMusicXml(asset);
+    }, 0);
 
     return () => {
       active = false;
+      window.clearTimeout(timer);
     };
-  }, [asset]);
+  }, [asset, cachedPreview, setCachedMusicXmlPreview, setCachedSignedAssetUrls]);
 
   if (!asset) {
     return <EmptyPreview text={fallback} />;

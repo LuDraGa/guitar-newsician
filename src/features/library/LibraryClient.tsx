@@ -9,6 +9,7 @@ import {
   List,
   Loader2,
   Music2,
+  RefreshCw,
   Search,
   Trash2,
   UploadCloud,
@@ -16,11 +17,13 @@ import {
 } from 'lucide-react';
 import type { Route } from 'next';
 import Link from 'next/link';
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { CoverArt, PillIcon, ReadinessChips, StatusDot } from '@/components/werecode/WereCodePrimitives';
+import { toJobSummary, toSongSummary, useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
 import { getSupabaseBrowserClient } from '@/lib/supabase/browser';
 import type { JobRow, SongRow } from '@/types/werecode';
+import type { SongSummary } from '@/types/werecode-client';
 import {
   fetchJson,
   formatDate,
@@ -52,14 +55,19 @@ type UploadProgressState = {
 };
 
 export function LibraryClient() {
-  const [songs, setSongs] = useState<SongRow[]>([]);
+  const songs = useWereCodeDataCache((state) => state.songs);
+  const songsLoaded = useWereCodeDataCache((state) => state.songsLoaded);
+  const setCachedSongs = useWereCodeDataCache((state) => state.setSongs);
+  const upsertCachedSong = useWereCodeDataCache((state) => state.upsertSong);
+  const removeCachedSong = useWereCodeDataCache((state) => state.removeSong);
+  const upsertCachedJob = useWereCodeDataCache((state) => state.upsertJob);
   const [localYoutubeUrl, setLocalYoutubeUrl] = useState('');
   const [query, setQuery] = useState('');
   const [view, setView] = useState<LibraryView>('grid');
   const [intakeMode, setIntakeMode] = useState<IntakeMode>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!songsLoaded);
   const [localDownloading, setLocalDownloading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -68,7 +76,7 @@ export function LibraryClient() {
   const [uploadSongId, setUploadSongId] = useState('');
   const [uploadInputKey, setUploadInputKey] = useState(0);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<SongRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SongSummary | null>(null);
   const [deletingSongId, setDeletingSongId] = useState<string | null>(null);
   const localYoutubeEnabled = process.env.NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD === 'true';
 
@@ -89,18 +97,23 @@ export function LibraryClient() {
     ? filteredSongs.filter((song) => song.id !== uploadProgress.songId)
     : filteredSongs;
 
-  async function loadLibrary() {
+  const loadLibrary = useCallback(async (options: { force?: boolean } = {}) => {
+    if (!options.force && useWereCodeDataCache.getState().songsLoaded) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      const songsPayload = await fetchJson<{ songs: SongRow[] }>('/api/songs?limit=100');
-      setSongs(songsPayload.songs);
+      const songsPayload = await fetchJson<{ songs: SongSummary[] }>('/api/songs?limit=100');
+      setCachedSongs(songsPayload.songs);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load library');
     } finally {
       setLoading(false);
     }
-  }
+  }, [setCachedSongs]);
 
   useEffect(() => {
     const authError = new URLSearchParams(window.location.search).get('authError');
@@ -117,7 +130,7 @@ export function LibraryClient() {
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [loadLibrary]);
 
   async function downloadLocalYoutube(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -149,7 +162,12 @@ export function LibraryClient() {
         setLocalYoutubeUrl('');
       }
 
-      await loadLibrary();
+      if (payload.song) {
+        upsertCachedSong(toSongSummary(payload.song));
+      }
+      if (payload.job) {
+        upsertCachedJob(toJobSummary(payload.job));
+      }
     } catch (downloadError) {
       setError(
         downloadError instanceof Error ? downloadError.message : 'Could not download from local YouTube backend'
@@ -264,7 +282,7 @@ export function LibraryClient() {
       });
 
       updateUploadProgress(92, 'Finishing library item');
-      await fetchJson(`/api/songs/${songPayload.song.id}`, {
+      const updatedSongPayload = await fetchJson<{ song: SongRow }>(`/api/songs/${songPayload.song.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
           ...(uploadTitle.trim() ? { title: uploadTitle.trim() } : {}),
@@ -298,7 +316,7 @@ export function LibraryClient() {
       setUploadSongId('');
       setUploadInputKey((current) => current + 1);
       setIntakeMode(null);
-      await loadLibrary();
+      upsertCachedSong(toSongSummary(updatedSongPayload.song));
       window.setTimeout(() => {
         setUploadProgress((current) => (current?.id === uploadId ? null : current));
       }, 700);
@@ -320,7 +338,7 @@ export function LibraryClient() {
     }
   }
 
-  async function deleteSong(song: SongRow) {
+  async function deleteSong(song: SongSummary) {
     setDeletingSongId(song.id);
     setError(null);
     setMessage(null);
@@ -329,7 +347,7 @@ export function LibraryClient() {
       await fetchJson<{ song: SongRow }>(`/api/songs/${song.id}`, {
         method: 'DELETE',
       });
-      setSongs((current) => current.filter((item) => item.id !== song.id));
+      removeCachedSong(song.id);
       setDeleteTarget(null);
       setMessage(`Deleted ${song.title}`);
     } catch (deleteError) {
@@ -478,6 +496,12 @@ export function LibraryClient() {
             />
           </div>
           <div className="flex-1" />
+          <button type="button" onClick={() => void loadLibrary({ force: true })} disabled={loading} className="pill ghost sm">
+            <PillIcon>
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </PillIcon>
+            Refresh
+          </button>
           <div className="segment bg-[var(--card)] shadow-[inset_0_0_0_1.5px_var(--line)]">
             <button
               type="button"
@@ -544,7 +568,7 @@ export function LibraryClient() {
   );
 }
 
-function SongCard({ song, onRequestDelete }: { song: SongRow; onRequestDelete: (song: SongRow) => void }) {
+function SongCard({ song, onRequestDelete }: { song: SongSummary; onRequestDelete: (song: SongSummary) => void }) {
   const issue = getSongIssue(song);
 
   return (
@@ -591,9 +615,9 @@ function SongListRow({
   last,
   onRequestDelete,
 }: {
-  song: SongRow;
+  song: SongSummary;
   last: boolean;
-  onRequestDelete: (song: SongRow) => void;
+  onRequestDelete: (song: SongSummary) => void;
 }) {
   const issue = getSongIssue(song);
 
@@ -724,7 +748,7 @@ function DeleteSongDialog({
   onCancel,
   onConfirm,
 }: {
-  song: SongRow;
+  song: SongSummary;
   deleting: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -776,7 +800,7 @@ function createUploadId() {
   return `upload-${Date.now()}`;
 }
 
-function songReadiness(song: SongRow) {
+function songReadiness(song: SongSummary) {
   return [
     { label: 'Audio', ready: song.has_audio },
     { label: 'Stems', ready: song.has_stems },

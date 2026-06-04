@@ -24,6 +24,7 @@ import {
   Pause,
   Play,
   Repeat,
+  RefreshCw,
   Save,
   Scissors,
   Send,
@@ -40,16 +41,25 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { CoverArt, PillIcon, StatusDot } from '@/components/werecode/WereCodePrimitives';
-import { useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
+import {
+  getCachedSignedAssetUrl,
+  toAssetSummary,
+  toSongSummary,
+  toStudioDetail,
+  useWereCodeDataCache,
+} from '@/lib/client-cache/werecode-data-cache';
 import { parseLrc } from '@/lib/music/lrc';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
+import type { AssetSummary, SongSummary, StudioDetail } from '@/types/werecode-client';
 import { MusicXmlPreviewPanel } from './MusicXmlPreviewPanel';
-import { fetchJson, formatBytes, signDownload } from './studio-utils';
+import { fetchJson, formatBytes, signDownloads } from './studio-utils';
 
 type WorkflowResult = {
   job?: JobRow;
   assets?: AssetRow[];
   song?: SongRow;
+  analysisResults?: AnalysisResultRow[];
+  lyrics?: LyricsRow[] | LyricsRow | null;
   lyricsLookup?: {
     skipped_modal?: boolean;
     reason?: string;
@@ -58,16 +68,21 @@ type WorkflowResult = {
 
 type SaveLyricsResult = {
   song?: SongRow | null;
+  lyrics?: LyricsRow;
 };
 
 type StudioTab = 'karaoke' | 'guitar' | 'lyrics';
 type GuitarMode = 'chords' | 'sheet' | 'tab';
 type LyricDisplayLine = { id: string; timestamp: number | null; text: string };
 type StemMixState = { level: number; muted: boolean; solo: boolean };
-type StemPlaybackSource = { id: string; kind: AssetRow['kind']; url: string; level: number; muted: boolean; solo: boolean };
+type StemPlaybackSource = { id: string; kind: AssetSummary['kind']; url: string; level: number; muted: boolean; solo: boolean };
 type SeekCommand = { id: number; time: number };
 type PlaybackCommand = { id: number; action: 'toggle' };
 type EditorLyricLine = { id: string; time: number | null; text: string };
+type EditorLyricsSavePayload = {
+  plainContent: string;
+  lrcContent: string | null;
+};
 type ChordEvent = { time: number; endTime: number | null; chord: string };
 type StemLevelPreviewDetail = { assetId: string; level: number };
 
@@ -102,12 +117,17 @@ const guitarModes = [
 ] as const;
 
 export function StudioClient({ initialSongId }: { initialSongId?: string }) {
-  const upsertCachedSong = useWereCodeDataCache((state) => state.upsertSong);
   const upsertCachedJob = useWereCodeDataCache((state) => state.upsertJob);
   const upsertCachedAssetForSong = useWereCodeDataCache((state) => state.upsertAssetForSong);
+  const setCachedStudioDetail = useWereCodeDataCache((state) => state.setStudioDetail);
+  const patchCachedStudioSong = useWereCodeDataCache((state) => state.patchStudioSong);
+  const upsertCachedStudioAssets = useWereCodeDataCache((state) => state.upsertStudioAssets);
+  const setCachedStudioLyrics = useWereCodeDataCache((state) => state.setStudioLyrics);
+  const setCachedStudioAnalysisResults = useWereCodeDataCache((state) => state.setStudioAnalysisResults);
+  const setCachedSignedAssetUrls = useWereCodeDataCache((state) => state.setSignedAssetUrls);
   const [songId, setSongId] = useState(initialSongId ?? '');
-  const [song, setSong] = useState<SongRow | null>(null);
-  const [assets, setAssets] = useState<AssetRow[]>([]);
+  const [song, setSong] = useState<SongSummary | null>(null);
+  const [assets, setAssets] = useState<AssetSummary[]>([]);
   const [analysisResults, setAnalysisResults] = useState<AnalysisResultRow[]>([]);
   const [lyrics, setLyrics] = useState<LyricsRow[]>([]);
   const [lyricsDraft, setLyricsDraft] = useState('');
@@ -128,7 +148,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const [playbackCommand, setPlaybackCommand] = useState<PlaybackCommand | null>(null);
 
   const latestAssetsByKind = useMemo(() => {
-    const map = new Map<string, AssetRow>();
+    const map = new Map<string, AssetSummary>();
     for (const asset of assets) {
       if (!map.has(asset.kind)) {
         map.set(asset.kind, asset);
@@ -145,8 +165,8 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const noteEventsAsset = latestAssetsByKind.get('note_events');
   const musicXmlAsset = latestAssetsByKind.get('musicxml') ?? latestAssetsByKind.get('tab_musicxml');
   const tabAsset = latestAssetsByKind.get('tab_musicxml');
-  const plainLyrics = useMemo(() => lyrics.find((item) => item.lyrics_type === 'plain'), [lyrics]);
-  const syncedLyrics = useMemo(() => lyrics.find((item) => item.lyrics_type === 'lrc' || item.lyrics_type === 'alignment_json'), [lyrics]);
+  const plainLyrics = useMemo(() => findLatestPlainLyrics(lyrics), [lyrics]);
+  const syncedLyrics = useMemo(() => findActiveSyncedLyrics(lyrics, plainLyrics), [lyrics, plainLyrics]);
   const stemAssets = useMemo(
     () => assets.filter((asset) => stemKindSet.has(asset.kind)).sort((a, b) => stemKindOrder.indexOf(a.kind) - stemKindOrder.indexOf(b.kind)),
     [assets]
@@ -174,6 +194,16 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         .filter((source): source is StemPlaybackSource => Boolean(source)),
     [stemAssets, stemMix, stemUrls]
   );
+  const signablePlaybackAssets = useMemo(() => {
+    const unique = new Map<string, AssetSummary>();
+    const playbackAssets = stemAssets.length > 0 ? stemAssets : [sourceAsset];
+    for (const asset of playbackAssets) {
+      if (asset) {
+        unique.set(asset.id, asset);
+      }
+    }
+    return Array.from(unique.values());
+  }, [sourceAsset, stemAssets]);
 
   const requestTransportSeek = useCallback((time: number) => {
     const target = Math.max(0, time);
@@ -227,102 +257,121 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     [stemAssets]
   );
 
+  const applyStudioDetail = useCallback((detail: StudioDetail) => {
+    const nextDetail = toStudioDetail(detail);
+    setSong(nextDetail.song);
+    setAssets(nextDetail.assets);
+    setAnalysisResults(nextDetail.analysisResults);
+    setLyrics(nextDetail.lyrics);
+    setLyricsDraft(nextDetail.lyrics.find((item) => item.lyrics_type === 'plain')?.content ?? '');
+    setStemMix((current) => ensureStemMix(nextDetail.assets, current));
+  }, []);
+
   useEffect(() => {
-    if (stemAssets.length === 0) {
-      return;
+    if (!songId || signablePlaybackAssets.length === 0) {
+      const timer = window.setTimeout(() => {
+        setAudioUrl(null);
+        setStemUrls({});
+        setStemSignError(null);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
 
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      void Promise.all(
-        stemAssets.map(async (asset) => {
-          const url = await signDownload(asset);
-          return [asset.id, url] as const;
-        })
-      )
-        .then((entries) => {
-          if (!cancelled) {
-            setStemUrls(Object.fromEntries(entries));
-            setStemSignError(null);
+      async function resolveSignedUrls() {
+        const urlByAssetId = new Map<string, string>();
+        const missingAssetIds: string[] = [];
+
+        for (const asset of signablePlaybackAssets) {
+          const cached = getCachedSignedAssetUrl(asset.id);
+          if (cached) {
+            urlByAssetId.set(asset.id, cached);
+          } else {
+            missingAssetIds.push(asset.id);
           }
-        })
-        .catch((signError) => {
-          if (!cancelled) {
-            setStemUrls({});
-            setStemSignError(signError instanceof Error ? signError.message : 'Could not sign stem audio');
+        }
+
+        if (missingAssetIds.length > 0) {
+          const signedUrls = await signDownloads(songId, missingAssetIds);
+          if (cancelled) {
+            return;
           }
-        });
+          setCachedSignedAssetUrls(signedUrls);
+          for (const signedUrl of signedUrls) {
+            urlByAssetId.set(signedUrl.assetId, signedUrl.signedUrl);
+          }
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const nextStemUrls: Record<string, string> = {};
+        for (const asset of stemAssets) {
+          const url = urlByAssetId.get(asset.id);
+          if (url) {
+            nextStemUrls[asset.id] = url;
+          }
+        }
+
+        setAudioUrl(sourceAsset ? urlByAssetId.get(sourceAsset.id) ?? null : null);
+        setStemUrls(nextStemUrls);
+        setStemSignError(null);
+      }
+
+      void resolveSignedUrls().catch((signError) => {
+        if (!cancelled) {
+          setAudioUrl(null);
+          setStemUrls({});
+          setStemSignError(signError instanceof Error ? signError.message : 'Could not sign playback audio');
+        }
+      });
     }, 0);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [stemAssets]);
+  }, [setCachedSignedAssetUrls, signablePlaybackAssets, songId, sourceAsset, stemAssets]);
 
-  const loadStudio = useCallback(async (nextSongId: string) => {
-    setLoading(true);
+  const loadStudio = useCallback(async (nextSongId: string, options?: { force?: boolean }) => {
     setError(null);
+    const selectedSongId = nextSongId;
+    setSongId(selectedSongId);
+
+    if (!selectedSongId) {
+      setSong(null);
+      setAssets([]);
+      setAnalysisResults([]);
+      setLyrics([]);
+      setLyricsDraft('');
+      setAudioUrl(null);
+      setStemUrls({});
+      setStemMix({});
+      setStemSignError(null);
+      setLoading(false);
+      return;
+    }
+
+    const cachedStudio = options?.force ? null : useWereCodeDataCache.getState().studioBySongId[selectedSongId]?.detail;
+    if (cachedStudio) {
+      applyStudioDetail(cachedStudio);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
     try {
-      const selectedSongId = nextSongId;
-      setSongId(selectedSongId);
-
-      if (!selectedSongId) {
-        setSong(null);
-        setAssets([]);
-        setAnalysisResults([]);
-        setLyrics([]);
-        setLyricsDraft('');
-        setAudioUrl(null);
-        setStemUrls({});
-        setStemMix({});
-        setStemSignError(null);
-        return;
-      }
-
-      const [songPayload, assetsPayload, analysisPayload, lyricsPayload] = await Promise.all([
-        fetchJson<{ song: SongRow }>(`/api/songs/${selectedSongId}`),
-        fetchJson<{ assets: AssetRow[] }>(`/api/songs/${selectedSongId}/assets`),
-        fetchJson<{ analysisResults: AnalysisResultRow[] }>(`/api/songs/${selectedSongId}/analysis-results`),
-        fetchJson<{ lyrics: LyricsRow[] }>(`/api/songs/${selectedSongId}/lyrics`),
-      ]);
-
-      setSong(songPayload.song);
-      setAssets(assetsPayload.assets);
-      setAnalysisResults(analysisPayload.analysisResults);
-      setLyrics(lyricsPayload.lyrics);
-      setLyricsDraft(lyricsPayload.lyrics.find((item) => item.lyrics_type === 'plain')?.content ?? '');
-      const loadedStemAssets = assetsPayload.assets
-        .filter((asset) => stemKindSet.has(asset.kind))
-        .sort((a, b) => stemKindOrder.indexOf(a.kind) - stemKindOrder.indexOf(b.kind));
-      setStemMix((current) => {
-        const next: Record<string, StemMixState> = {};
-        for (const asset of loadedStemAssets) {
-          next[asset.id] = {
-            ...defaultStemMix(asset),
-            ...current[asset.id],
-          };
-        }
-        return next;
-      });
-
-      const playableAsset =
-        assetsPayload.assets.find((asset) => asset.kind === 'preview_audio') ??
-        assetsPayload.assets.find((asset) => asset.kind === 'normalized_audio') ??
-        assetsPayload.assets.find((asset) => asset.kind === 'source_audio');
-
-      if (playableAsset) {
-        const signed = await signDownload(playableAsset);
-        setAudioUrl(signed);
-      } else {
-        setAudioUrl(null);
-      }
+      const detail = await fetchJson<StudioDetail>(`/api/studio/${selectedSongId}`);
+      setCachedStudioDetail(selectedSongId, detail);
+      applyStudioDetail(detail);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load studio');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyStudioDetail, setCachedStudioDetail]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -364,18 +413,42 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         }),
       });
       const jobStatus = result.job?.status;
+      const nextSongId = song.id;
       if (result.song) {
-        upsertCachedSong(result.song);
+        const songSummary = toSongSummary(result.song);
+        setSong(songSummary);
+        patchCachedStudioSong(songSummary);
       }
       if (result.job) {
         upsertCachedJob(result.job);
       }
-      for (const asset of result.assets ?? []) {
-        if (asset.song_id) {
-          upsertCachedAssetForSong(asset.song_id, asset);
+      const assetSummaries = (result.assets ?? []).map(toAssetSummary);
+      if (assetSummaries.length > 0) {
+        const nextAssets = mergeById(assets, assetSummaries).sort(sortAssetsByCreatedAt);
+        setAssets(nextAssets);
+        upsertCachedStudioAssets(nextSongId, assetSummaries);
+        for (const asset of assetSummaries) {
+          if (asset.song_id) {
+            upsertCachedAssetForSong(asset.song_id, asset);
+          }
+        }
+        setStemMix((current) => ensureStemMix(nextAssets, current));
+      }
+      if (result.analysisResults?.length) {
+        const nextAnalysisResults = mergeById(analysisResults, result.analysisResults).sort(sortAnalysisResultsByCreatedAt);
+        setAnalysisResults(nextAnalysisResults);
+        setCachedStudioAnalysisResults(nextSongId, nextAnalysisResults);
+      }
+      const incomingLyrics = normalizeLyricsPayload(result.lyrics);
+      if (incomingLyrics.length > 0) {
+        const nextLyrics = mergeById(lyrics, incomingLyrics).sort(sortLyricsByUpdatedAt);
+        setLyrics(nextLyrics);
+        setCachedStudioLyrics(nextSongId, nextLyrics);
+        const nextPlainLyrics = nextLyrics.find((item) => item.lyrics_type === 'plain');
+        if (nextPlainLyrics) {
+          setLyricsDraft(nextPlainLyrics.content ?? '');
         }
       }
-      await loadStudio(song.id);
       if (jobStatus === 'failed') {
         setError(result.job?.error_message ?? `${name} failed`);
         setMessage(null);
@@ -393,17 +466,28 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     }
   }
 
-  async function openAsset(asset: AssetRow) {
+  async function openAsset(asset: AssetSummary) {
     setError(null);
     try {
-      const signed = await signDownload(asset);
+      if (!asset.song_id) {
+        throw new Error('Asset is not attached to a song');
+      }
+      let signed = getCachedSignedAssetUrl(asset.id);
+      if (!signed) {
+        const [signedAssetUrl] = await signDownloads(asset.song_id, [asset.id]);
+        if (!signedAssetUrl) {
+          throw new Error('Could not sign asset URL');
+        }
+        setCachedSignedAssetUrls([signedAssetUrl]);
+        signed = signedAssetUrl.signedUrl;
+      }
       window.open(signed, '_blank', 'noopener,noreferrer');
     } catch (assetError) {
       setError(assetError instanceof Error ? assetError.message : 'Could not sign asset URL');
     }
   }
 
-  async function savePlainLyrics(contentOverride?: string) {
+  async function savePlainLyrics(payload?: EditorLyricsSavePayload) {
     if (!song) {
       setError('Select a song first');
       return;
@@ -414,22 +498,55 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     setMessage(null);
 
     try {
-      const result = await fetchJson<SaveLyricsResult>('/api/lyrics/save', {
+      const savedRows: LyricsRow[] = [];
+      const plainContent = payload?.plainContent ?? lyricsDraft;
+      const plainResult = await fetchJson<SaveLyricsResult>('/api/lyrics/save', {
         method: 'POST',
         body: JSON.stringify({
           song_id: song.id,
           lyrics_type: 'plain',
           source: 'user',
-          content: contentOverride ?? lyricsDraft,
+          content: plainContent,
         }),
       });
-      if (result.song) {
-        upsertCachedSong(result.song);
+
+      if (plainResult.lyrics) {
+        savedRows.push(plainResult.lyrics);
+      }
+
+      const lrcContent = payload?.lrcContent;
+      const lrcResult = lrcContent
+        ? await fetchJson<SaveLyricsResult>('/api/lyrics/save', {
+            method: 'POST',
+            body: JSON.stringify({
+              song_id: song.id,
+              lyrics_type: 'lrc',
+              source: 'user:lyrics-editor',
+              content: lrcContent,
+            }),
+          })
+        : null;
+
+      if (lrcResult?.lyrics) {
+        savedRows.push(lrcResult.lyrics);
+      }
+
+      const updatedSong = lrcResult?.song ?? plainResult.song;
+      if (updatedSong) {
+        const songSummary = toSongSummary(updatedSong);
+        setSong(songSummary);
+        patchCachedStudioSong(songSummary);
+      }
+      if (savedRows.length > 0) {
+        const nextLyrics = mergeById(lyrics, savedRows).sort(sortLyricsByUpdatedAt);
+        setLyrics(nextLyrics);
+        setCachedStudioLyrics(song.id, nextLyrics);
+        setLyricsDraft(plainResult.lyrics?.content ?? plainContent);
       }
       setMessage('Lyrics saved');
-      await loadStudio(song.id);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save lyrics');
+      throw saveError;
     } finally {
       setRunning(null);
     }
@@ -496,6 +613,8 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
               song={song}
               songId={songId}
               facts={facts}
+              loading={loading}
+              onRefresh={() => void loadStudio(songId, { force: true })}
             />
 
             <StudioModeTabs activeTab={tab} onChange={changeTab} />
@@ -558,7 +677,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   playing={transportPlaying}
                   running={running}
                   onLyricsDraftChange={setLyricsDraft}
-                  onSave={(content) => void savePlainLyrics(content)}
+                  onSave={savePlainLyrics}
                   onFetchLyrics={() => void workflowActions.lyricsFetch()}
                   onAlignLyrics={() => void workflowActions.lyricsAlign()}
                   onSeek={(time) => requestTransportSeek(time - 0.35)}
@@ -601,10 +720,14 @@ function SongHeader({
   song,
   songId,
   facts,
+  loading,
+  onRefresh,
 }: {
-  song: SongRow | null;
+  song: SongSummary | null;
   songId: string;
   facts: Array<[string, string]>;
+  loading: boolean;
+  onRefresh: () => void;
 }) {
   return (
     <div className="mb-3 grid gap-3 lg:grid-cols-[minmax(300px,1fr)_auto] lg:items-center">
@@ -619,7 +742,17 @@ function SongHeader({
         </div>
       </div>
 
-      <div className="hidden flex-wrap justify-end gap-4 md:flex">
+      <div className="hidden flex-wrap items-center justify-end gap-4 md:flex">
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={!songId || loading}
+          className="iconbtn h-9 w-9"
+          aria-label="Refresh studio"
+          title="Refresh studio"
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+        </button>
         {facts.map(([label, value]) => (
           <div key={label} className="border-l border-[var(--line)] pl-4 text-right">
             <div className="label text-[9.5px]">{label}</div>
@@ -689,17 +822,17 @@ function KaraokeProductView({
   lyrics: LyricDisplayLine[];
   syncedLyrics: LyricsRow | undefined;
   plainLyrics: LyricsRow | undefined;
-  stemAssets: AssetRow[];
+  stemAssets: AssetSummary[];
   stemMix: Record<string, StemMixState>;
   stemUrls: Record<string, string>;
   stemSignError: string | null;
-  sourceAsset: AssetRow | undefined;
+  sourceAsset: AssetSummary | undefined;
   analysisResults: AnalysisResultRow[];
   running: string | null;
   onUpdateStemMix: (assetId: string, patch: Partial<StemMixState>) => void;
   onPreviewStemLevel: (assetId: string, level: number) => void;
   onSoloStem: (assetId: string) => void;
-  onOpenAsset: (asset: AssetRow) => void;
+  onOpenAsset: (asset: AssetSummary) => void;
   onRunStems: () => void;
   onRunAnalyze: () => void;
   onFetchLyrics: () => void;
@@ -755,20 +888,20 @@ function StemsPanel({
   onOpenAsset,
   onRunStems,
 }: {
-  stemAssets: AssetRow[];
+  stemAssets: AssetSummary[];
   stemMix: Record<string, StemMixState>;
   stemUrls: Record<string, string>;
   stemSignError: string | null;
-  sourceAsset: AssetRow | undefined;
+  sourceAsset: AssetSummary | undefined;
   running: string | null;
   onUpdateStemMix: (assetId: string, patch: Partial<StemMixState>) => void;
   onPreviewStemLevel: (assetId: string, level: number) => void;
   onSoloStem: (assetId: string) => void;
-  onOpenAsset: (asset: AssetRow) => void;
+  onOpenAsset: (asset: AssetSummary) => void;
   onRunStems: () => void;
 }) {
   const latestStems = useMemo(() => {
-    const byKind = new Map<string, AssetRow>();
+    const byKind = new Map<string, AssetSummary>();
     for (const asset of stemAssets) {
       if (!byKind.has(asset.kind)) {
         byKind.set(asset.kind, asset);
@@ -1115,7 +1248,13 @@ function LyricsPane({
     container.scrollTo({ top, behavior: 'smooth' });
   }, [activeIndex, autoScroll]);
 
-  const stateLabel = syncedLyrics ? '.lrc synced' : plainLyrics ? '.txt not timed' : 'No lyrics';
+  const stateLabel = syncedLyrics
+    ? syncedLyrics.lyrics_type === 'lrc'
+      ? '.lrc synced'
+      : 'alignment synced'
+    : plainLyrics
+      ? '.txt not timed'
+      : 'No lyrics';
 
   return (
     <section className="surface relative flex min-h-[320px] flex-col overflow-hidden lg:min-h-0">
@@ -1214,7 +1353,7 @@ function TransportCard({
   onTimeChange,
   onPlayingChange,
 }: {
-  song: SongRow | null;
+  song: SongSummary | null;
   audioUrl: string | null;
   stemSources: StemPlaybackSource[];
   seekCommand: SeekCommand | null;
@@ -1712,12 +1851,12 @@ function GuitarLearnerView({
   onRunMusicXml,
 }: {
   currentTime: number;
-  musicXmlAsset: AssetRow | undefined;
-  tabAsset: AssetRow | undefined;
-  noteEventsAsset: AssetRow | undefined;
-  sourceAsset: AssetRow | undefined;
+  musicXmlAsset: AssetSummary | undefined;
+  tabAsset: AssetSummary | undefined;
+  noteEventsAsset: AssetSummary | undefined;
+  sourceAsset: AssetSummary | undefined;
   running: string | null;
-  onOpenAsset: (asset: AssetRow) => void;
+  onOpenAsset: (asset: AssetSummary) => void;
   onRunMidi: () => void;
   onRunMusicXml: () => void;
 }) {
@@ -1862,7 +2001,7 @@ function LyricsEditorProductView({
   playing: boolean;
   running: string | null;
   onLyricsDraftChange: (value: string) => void;
-  onSave: (content: string) => void;
+  onSave: (payload: EditorLyricsSavePayload) => Promise<void>;
   onFetchLyrics: () => void;
   onAlignLyrics: () => void;
   onSeek: (time: number) => void;
@@ -1961,13 +2100,18 @@ function LyricsEditorProductView({
     setCursor(Math.min(lines.length - 1, cursorIndex + 1));
   }, [currentTime, cursorIndex, lines, replaceLines]);
 
-  const saveEditorDraft = useCallback(() => {
+  const saveEditorDraft = useCallback(async () => {
     const content = editorLinesToPlain(lines);
+    const lrcContent = lines.some((line) => line.time !== null) ? editorLinesToLrc(lines, offsetMs) : null;
     onLyricsDraftChange(content);
-    onSave(content);
-    setSavedAt(new Date());
-    setDirty(false);
-  }, [lines, onLyricsDraftChange, onSave]);
+    try {
+      await onSave({ plainContent: content, lrcContent });
+      setSavedAt(new Date());
+      setDirty(false);
+    } catch {
+      // The parent save handler owns the user-visible error message.
+    }
+  }, [lines, offsetMs, onLyricsDraftChange, onSave]);
 
   useEffect(() => {
     if (!autoScroll) {
@@ -1989,7 +2133,7 @@ function LyricsEditorProductView({
       const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
-        saveEditorDraft();
+        void saveEditorDraft();
         return;
       }
       if (typing) {
@@ -2049,7 +2193,7 @@ function LyricsEditorProductView({
               </PillIcon>
               Import
             </button>
-            <button type="button" onClick={saveEditorDraft} disabled={Boolean(running)} className="pill sm">
+            <button type="button" onClick={() => void saveEditorDraft()} disabled={Boolean(running)} className="pill sm">
               <PillIcon>
                 {running === 'Save lyrics' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
               </PillIcon>
@@ -2364,9 +2508,9 @@ function AICoachDock({
   onClose,
 }: {
   context: StudioTab;
-  song: SongRow | null;
+  song: SongSummary | null;
   syncedLyrics: LyricsRow | undefined;
-  musicXmlAsset: AssetRow | undefined;
+  musicXmlAsset: AssetSummary | undefined;
   onClose: () => void;
 }) {
   const suggestions = {
@@ -2488,7 +2632,49 @@ function EmptyState({
   );
 }
 
-function defaultStemMix(asset: AssetRow): StemMixState {
+function ensureStemMix(assets: AssetSummary[], current: Record<string, StemMixState>) {
+  const next: Record<string, StemMixState> = {};
+  for (const asset of assets.filter((item) => stemKindSet.has(item.kind))) {
+    next[asset.id] = {
+      ...defaultStemMix(asset),
+      ...current[asset.id],
+    };
+  }
+  return next;
+}
+
+function mergeById<T extends { id: string }>(current: T[], incoming: T[]) {
+  const nextById = new Map(current.map((item) => [item.id, item]));
+  for (const item of incoming) {
+    nextById.set(item.id, item);
+  }
+  return Array.from(nextById.values());
+}
+
+function normalizeLyricsPayload(value: WorkflowResult['lyrics']) {
+  if (!value) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
+function sortAssetsByCreatedAt(a: AssetSummary, b: AssetSummary) {
+  return compareIsoDesc(a.created_at, b.created_at);
+}
+
+function sortAnalysisResultsByCreatedAt(a: AnalysisResultRow, b: AnalysisResultRow) {
+  return compareIsoDesc(a.created_at, b.created_at);
+}
+
+function sortLyricsByUpdatedAt(a: LyricsRow, b: LyricsRow) {
+  return compareIsoDesc(a.updated_at, b.updated_at);
+}
+
+function compareIsoDesc(a: string, b: string) {
+  return new Date(b).getTime() - new Date(a).getTime();
+}
+
+function defaultStemMix(asset: AssetSummary): StemMixState {
   return {
     level: defaultStemLevels[asset.kind] ?? 82,
     muted: false,
@@ -2512,6 +2698,38 @@ function renderLyricWords(text: string) {
   );
 }
 
+function findLatestPlainLyrics(lyrics: LyricsRow[]) {
+  return lyrics
+    .filter((item) => item.lyrics_type === 'plain')
+    .sort(sortLyricsByUpdatedAt)[0];
+}
+
+function findActiveSyncedLyrics(lyrics: LyricsRow[], plainLyrics: LyricsRow | undefined) {
+  const plainUpdatedAt = getLyricsUpdatedAt(plainLyrics);
+  const candidates = lyrics
+    .filter((item) => item.lyrics_type === 'lrc' || item.lyrics_type === 'alignment_json')
+    .sort(sortLyricsByUpdatedAt);
+
+  for (const candidate of candidates) {
+    const candidateUpdatedAt = getLyricsUpdatedAt(candidate);
+    const isCurrent = plainUpdatedAt === null || candidateUpdatedAt === null || candidateUpdatedAt >= plainUpdatedAt;
+    if (isCurrent && parseSyncedLyricsRow(candidate).length > 0) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function getLyricsUpdatedAt(lyrics: LyricsRow | undefined) {
+  if (!lyrics) {
+    return null;
+  }
+
+  const value = new Date(lyrics.updated_at).getTime();
+  return Number.isFinite(value) ? value : null;
+}
+
 function getStemVolume(source: StemPlaybackSource, anySolo: boolean) {
   if (source.muted || (anySolo && !source.solo)) {
     return 0;
@@ -2524,6 +2742,13 @@ function buildEditorLyricLines(
   plainLyrics: LyricsRow | undefined,
   lyricsDraft: string
 ): EditorLyricLine[] {
+  if (syncedLyrics?.lyrics_type === 'lrc' && syncedLyrics.content) {
+    const lrcLines = parseEditorLyricInput(syncedLyrics.content);
+    if (lrcLines.length > 0) {
+      return lrcLines;
+    }
+  }
+
   const displayLines = deriveLyricLines(syncedLyrics, plainLyrics);
   if (displayLines.length > 0) {
     return displayLines.map((line, index) => ({
@@ -2548,12 +2773,12 @@ function parseEditorLyricInput(text: string): EditorLyricLine[] {
       if (untimedMatch) {
         return { id: `plain-${index}`, time: null, text: untimedMatch[1].trim() };
       }
-      const match = line.match(/^\[(\d{1,2}):(\d{2})(?:[.:](\d{1,2}))?\]\s*(.*)$/);
+      const match = line.match(/^\[(\d{1,2}):(\d{2})(?:[.:](\d+))?\]\s*(.*)$/);
       if (!match) {
         return { id: `plain-${index}`, time: null, text: line };
       }
-      const centiseconds = match[3] ? Number(`0.${match[3].padEnd(2, '0').slice(0, 2)}`) : 0;
-      const time = Number(match[1]) * 60 + Number(match[2]) + centiseconds;
+      const fractionalSeconds = match[3] ? Number(`0.${match[3]}`) : 0;
+      const time = Number(match[1]) * 60 + Number(match[2]) + fractionalSeconds;
       return { id: `import-${index}`, time: roundTime(time), text: match[4].trim() };
     })
     .filter((line): line is EditorLyricLine => Boolean(line));
@@ -2596,18 +2821,10 @@ function formatTimestamp(seconds: number) {
 }
 
 function deriveLyricLines(syncedLyrics: LyricsRow | undefined, plainLyrics: LyricsRow | undefined): LyricDisplayLine[] {
-  if (syncedLyrics?.lyrics_type === 'lrc' && syncedLyrics.content) {
-    return parseLrc(syncedLyrics.content).map((line, index) => ({
-      id: `lrc-${index}`,
-      timestamp: line.timestamp,
-      text: line.text,
-    }));
-  }
-
-  if (syncedLyrics?.lyrics_type === 'alignment_json' && syncedLyrics.content) {
-    const parsed = parseAlignmentLyrics(syncedLyrics.content);
-    if (parsed.length > 0) {
-      return parsed;
+  if (syncedLyrics) {
+    const syncedLines = parseSyncedLyricsRow(syncedLyrics);
+    if (syncedLines.length > 0) {
+      return syncedLines;
     }
   }
 
@@ -2617,6 +2834,22 @@ function deriveLyricLines(syncedLyrics: LyricsRow | undefined, plainLyrics: Lyri
       .map((text) => text.trim())
       .filter(Boolean)
       .map((text, index) => ({ id: `plain-${index}`, timestamp: null, text }));
+  }
+
+  return [];
+}
+
+function parseSyncedLyricsRow(syncedLyrics: LyricsRow): LyricDisplayLine[] {
+  if (syncedLyrics.lyrics_type === 'lrc' && syncedLyrics.content) {
+    return parseLrc(syncedLyrics.content).map((line, index) => ({
+      id: `lrc-${syncedLyrics.id}-${index}`,
+      timestamp: line.timestamp,
+      text: line.text,
+    }));
+  }
+
+  if (syncedLyrics.lyrics_type === 'alignment_json' && syncedLyrics.content) {
+    return parseAlignmentLyrics(syncedLyrics.content);
   }
 
   return [];
@@ -2765,7 +2998,7 @@ function activeChordIndex(events: ChordEvent[], currentTime: number) {
   return active;
 }
 
-function buildSongFacts(song: SongRow | null): Array<[string, string]> {
+function buildSongFacts(song: SongSummary | null): Array<[string, string]> {
   const metadata =
     song?.metadata && typeof song.metadata === 'object' && !Array.isArray(song.metadata)
       ? (song.metadata as Record<string, unknown>)

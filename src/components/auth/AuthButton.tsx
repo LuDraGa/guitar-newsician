@@ -3,6 +3,7 @@
 import { LogIn, LogOut, UserCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { clearWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
 import { getSupabaseBrowserClient } from '@/lib/supabase/browser';
 
 type PublicUser = {
@@ -69,6 +70,7 @@ export function AuthButton() {
     if (signOutError) {
       setError(signOutError.message);
     }
+    clearWereCodeDataCache();
     await loadSession();
     setBusy(false);
   }

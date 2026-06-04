@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { routeErrorResponse } from '@/lib/http/route-error';
 import { getWereCodeRequestContext } from '@/server/werecode/context';
 import { createSongSchema } from '@/server/werecode/schemas';
+import { songSummarySelect } from '@/server/werecode/selects';
+import type { SongSummary } from '@/types/werecode-client';
 import type { SongRow } from '@/types/werecode';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +19,7 @@ export async function GET(request: NextRequest) {
 
     let query = supabase
       .from('songs')
-      .select('*')
+      .select(songSummarySelect)
       .eq('owner_id', user.id)
       .order('updated_at', { ascending: false })
       .limit(limit);
@@ -28,7 +30,7 @@ export async function GET(request: NextRequest) {
       query = query.neq('status', 'archived');
     }
 
-    const { data, error } = await query.returns<SongRow[]>();
+    const { data, error } = await query.returns<SongSummary[]>();
 
     if (error) {
       throw error;

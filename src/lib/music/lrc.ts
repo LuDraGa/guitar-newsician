@@ -1,7 +1,7 @@
 import type { LyricLine } from '@/types/lyrics';
 
 export function parseLrcTimestamp(timestamp: string): number {
-  const match = timestamp.match(/\[(\d+):(\d+)\.(\d+)\]/);
+  const match = timestamp.match(/\[(\d+):(\d+)(?:[.:](\d+))?\]/);
 
   if (!match) {
     return 0;
@@ -9,9 +9,9 @@ export function parseLrcTimestamp(timestamp: string): number {
 
   const minutes = Number.parseInt(match[1], 10);
   const seconds = Number.parseInt(match[2], 10);
-  const centiseconds = Number.parseInt(match[3], 10);
+  const fractionalSeconds = match[3] ? Number(`0.${match[3]}`) : 0;
 
-  return minutes * 60 + seconds + centiseconds / 100;
+  return minutes * 60 + seconds + fractionalSeconds;
 }
 
 export function parseLrc(lrcContent: string): LyricLine[] {
@@ -26,13 +26,17 @@ export function parseLrc(lrcContent: string): LyricLine[] {
       continue;
     }
 
-    const match = line.match(/^(\[\d+:\d+\.\d+\])(.*)$/);
+    const leadingTimestampMatch = line.match(/^((?:\[\d+:\d+(?:[.:]\d+)?\])+)(.*)$/);
 
-    if (match) {
-      lyricLines.push({
-        timestamp: parseLrcTimestamp(match[1]),
-        text: match[2].trim(),
-      });
+    if (leadingTimestampMatch) {
+      const timestamps = leadingTimestampMatch[1].match(/\[\d+:\d+(?:[.:]\d+)?\]/g) ?? [];
+      const text = leadingTimestampMatch[2].trim();
+      for (const timestamp of timestamps) {
+        lyricLines.push({
+          timestamp: parseLrcTimestamp(timestamp),
+          text,
+        });
+      }
     }
   }
 

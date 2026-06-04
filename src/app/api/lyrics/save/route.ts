@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { routeErrorResponse } from '@/lib/http/route-error';
 import { getWereCodeRequestContext, requireOwnedSong } from '@/server/werecode/context';
+import type { SongRow } from '@/types/werecode';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,18 +47,22 @@ export async function POST(request: NextRequest) {
           ? { has_synced_lyrics: true }
           : {};
 
+    let updatedSong: SongRow | null = null;
     if (Object.keys(songPatch).length > 0) {
-      const { error: songError } = await supabase
+      const { data: song, error: songError } = await supabase
         .from('songs')
         .update(songPatch)
         .eq('id', body.song_id)
-        .eq('owner_id', user.id);
+        .eq('owner_id', user.id)
+        .select('*')
+        .maybeSingle<SongRow>();
       if (songError) {
         throw songError;
       }
+      updatedSong = song;
     }
 
-    return NextResponse.json({ lyrics: data });
+    return NextResponse.json({ lyrics: data, song: updatedSong });
   } catch (error) {
     return routeErrorResponse(error, 'Could not save lyrics');
   }

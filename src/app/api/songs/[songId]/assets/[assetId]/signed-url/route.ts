@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { RouteNotFoundError, routeErrorResponse } from '@/lib/http/route-error';
 import { parseStorageBucket, createSignedStorageDownloadUrl } from '@/lib/supabase/storage';
 import { getWereCodeRequestContext } from '@/server/werecode/context';
-import type { AssetRow } from '@/types/werecode';
+import { assetSigningSelect } from '@/server/werecode/selects';
+import type { AssetSigningInfo } from '@/types/werecode-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,11 +25,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const { data: asset, error } = await supabase
       .from('assets')
-      .select('*')
+      .select(assetSigningSelect)
       .eq('song_id', songId)
       .eq('id', assetId)
       .eq('owner_id', user.id)
-      .maybeSingle<AssetRow>();
+      .maybeSingle<AssetSigningInfo>();
 
     if (error) {
       throw error;

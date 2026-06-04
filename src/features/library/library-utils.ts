@@ -1,4 +1,4 @@
-import type { SongRow } from '@/types/werecode';
+import type { SongSummary } from '@/types/werecode-client';
 
 type ApiError = {
   error?: {
@@ -111,7 +111,7 @@ export function readAudioDuration(file: File) {
   });
 }
 
-export function getSongIssue(song: SongRow) {
+export function getSongIssue(song: SongSummary) {
   const metadata = song.metadata;
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     return null;

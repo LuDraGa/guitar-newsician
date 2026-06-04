@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { routeErrorResponse } from '@/lib/http/route-error';
 import { getWereCodeRequestContext, requireOwnedSong } from '@/server/werecode/context';
 import { createJobSchema } from '@/server/werecode/schemas';
+import { jobSummarySelect } from '@/server/werecode/selects';
 import type { JobRow } from '@/types/werecode';
+import type { JobSummary } from '@/types/werecode-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,11 +15,12 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(Number(searchParams.get('limit') ?? 50), 100);
     const songId = searchParams.get('songId');
     const status = searchParams.get('status');
+    const includePayloads = searchParams.get('includePayloads') === 'true';
     const { user, supabase } = await getWereCodeRequestContext();
 
     let query = supabase
       .from('jobs')
-      .select('*')
+      .select(includePayloads ? '*' : jobSummarySelect)
       .eq('owner_id', user.id)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -31,7 +34,7 @@ export async function GET(request: NextRequest) {
       query = query.eq('status', status);
     }
 
-    const { data, error } = await query.returns<JobRow[]>();
+    const { data, error } = await query.returns<Array<JobRow | JobSummary>>();
 
     if (error) {
       throw error;

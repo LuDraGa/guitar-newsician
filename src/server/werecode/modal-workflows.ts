@@ -12,7 +12,7 @@ import {
 } from '@/lib/supabase/storage';
 import { getWereCodeRequestContext, requireOwnedSong, type WereCodeSupabaseClient } from '@/server/werecode/context';
 import { lookupLyrics, type LyricsLookupResult } from '@/server/werecode/lyrics-lookup';
-import type { AssetKind, AssetRow, JobRow, JobType, Json, LyricsRow } from '@/types/werecode';
+import type { AssetKind, AssetRow, JobRow, JobType, Json, LyricsRow, SongRow } from '@/types/werecode';
 
 type SupabaseClient = WereCodeSupabaseClient;
 
@@ -54,6 +54,7 @@ type LyricsResolution = {
   lyrics: LyricsRow[];
   syncedLyrics: LyricsRow | null;
   plainLyrics: LyricsRow | null;
+  song: SongRow | null;
   lookup: LyricsLookupResult | null;
   responsePayload: Record<string, unknown>;
 };
@@ -234,6 +235,7 @@ export async function runLyricsAlignWorkflow(input: z.infer<typeof lyricsAlignWo
       const job = await completeJobWithSyncedLyrics(context.supabase, context.userId, context.job, lyricsResolution);
       return {
         job,
+        song: lyricsResolution.song,
         assets: [],
         modal: lyricsResolution.responsePayload,
         lyrics: lyricsResolution.syncedLyrics,
@@ -304,6 +306,7 @@ export async function runLyricsFetchWorkflow(input: z.infer<typeof lyricsFetchWo
 
   return {
     job,
+    song: lyricsResolution.song,
     lyrics: lyricsResolution.lyrics,
     lyricsLookup: lyricsResolution.responsePayload,
   };
@@ -365,6 +368,7 @@ async function resolveLyricsLocally(options: {
       lyrics: [existingSynced, existingPlain].filter((row): row is LyricsRow => Boolean(row)),
       syncedLyrics: existingSynced,
       plainLyrics: existingPlain,
+      song: null,
       lookup: null,
       responsePayload: {
         status: 'skipped',
@@ -388,12 +392,16 @@ async function resolveLyricsLocally(options: {
     durationSec: song.duration_sec,
     allowUnsynced: options.allowUnsynced,
   });
-  const persistedLyrics = lookup.attempted && lookup.response ? await persistLocalLookupLyrics(options.supabase, {
-    ownerId: options.ownerId,
-    songId: options.songId,
-    jobId: options.job.id,
-    lookup: lookup.response,
-  }) : [];
+  const persisted =
+    lookup.attempted && lookup.response
+      ? await persistLocalLookupLyrics(options.supabase, {
+          ownerId: options.ownerId,
+          songId: options.songId,
+          jobId: options.job.id,
+          lookup: lookup.response,
+        })
+      : { lyrics: [], song: null };
+  const persistedLyrics = persisted.lyrics;
   const syncedLyrics = persistedLyrics.find((row) => row.lyrics_type === 'lrc') ?? null;
   const plainLyrics = persistedLyrics.find((row) => row.lyrics_type === 'plain') ?? existingPlain;
   const lyrics = [...persistedLyrics];
@@ -405,6 +413,7 @@ async function resolveLyricsLocally(options: {
     lyrics,
     syncedLyrics,
     plainLyrics,
+    song: persisted.song,
     lookup,
     responsePayload: {
       status: syncedLyrics ? 'skipped' : persistedLyrics.length > 0 ? 'ready' : 'not_found',
@@ -509,9 +518,10 @@ async function runJobWithModal(options: {
         modal,
       })
     : [];
-  if (ready && assets.length > 0 && (options.songId ?? options.job.song_id)) {
-    await updateSongReadiness(options.supabase, options.job.owner_id, options.songId ?? options.job.song_id!, assets);
-  }
+  const song =
+    ready && assets.length > 0 && (options.songId ?? options.job.song_id)
+      ? await updateSongReadiness(options.supabase, options.job.owner_id, options.songId ?? options.job.song_id!, assets)
+      : null;
 
   const updatedJob = await updateJob(options.supabase, options.job.owner_id, options.job.id, {
     status: ready ? 'ready' : pending ? 'processing' : 'failed',
@@ -525,6 +535,7 @@ async function runJobWithModal(options: {
 
   return {
     job: updatedJob,
+    song,
     assets,
     modal,
   };
@@ -635,7 +646,7 @@ async function persistLocalLookupLyrics(
       sources_tried?: string[];
     };
   }
-) {
+): Promise<{ lyrics: LyricsRow[]; song: SongRow | null }> {
   const rows = [];
   const source = sourceForLocalLookup(options.lookup);
   const metadata = {
@@ -670,7 +681,7 @@ async function persistLocalLookupLyrics(
   }
 
   if (rows.length === 0) {
-    return [];
+    return { lyrics: [], song: null };
   }
 
   const { data, error } = await supabase
@@ -683,11 +694,16 @@ async function persistLocalLookupLyrics(
     throw error;
   }
 
-  await updateSongLyricsFlags(supabase, options.ownerId, options.songId, data ?? []);
-  return data ?? [];
+  const song = await updateSongLyricsFlags(supabase, options.ownerId, options.songId, data ?? []);
+  return { lyrics: data ?? [], song };
 }
 
-async function updateSongLyricsFlags(supabase: SupabaseClient, ownerId: string, songId: string, lyrics: LyricsRow[]) {
+async function updateSongLyricsFlags(
+  supabase: SupabaseClient,
+  ownerId: string,
+  songId: string,
+  lyrics: LyricsRow[]
+): Promise<SongRow | null> {
   const patch: Record<string, boolean> = {};
   if (lyrics.some((row) => row.lyrics_type === 'plain')) {
     patch.has_plain_lyrics = true;
@@ -697,13 +713,21 @@ async function updateSongLyricsFlags(supabase: SupabaseClient, ownerId: string, 
   }
 
   if (Object.keys(patch).length === 0) {
-    return;
+    return null;
   }
 
-  const { error } = await supabase.from('songs').update(patch).eq('id', songId).eq('owner_id', ownerId);
+  const { data, error } = await supabase
+    .from('songs')
+    .update(patch)
+    .eq('id', songId)
+    .eq('owner_id', ownerId)
+    .select('*')
+    .maybeSingle<SongRow>();
   if (error) {
     throw error;
   }
+
+  return data;
 }
 
 async function updateJob(supabase: SupabaseClient, ownerId: string, jobId: string, values: Record<string, unknown>) {
@@ -771,7 +795,12 @@ async function createAssetRows(
   return data ?? [];
 }
 
-async function updateSongReadiness(supabase: SupabaseClient, ownerId: string, songId: string, assets: AssetRow[]) {
+async function updateSongReadiness(
+  supabase: SupabaseClient,
+  ownerId: string,
+  songId: string,
+  assets: AssetRow[]
+): Promise<SongRow | null> {
   const patch: Record<string, boolean> = {};
   for (const asset of assets) {
     if (asset.kind === 'source_audio') {
@@ -798,13 +827,21 @@ async function updateSongReadiness(supabase: SupabaseClient, ownerId: string, so
   }
 
   if (Object.keys(patch).length === 0) {
-    return;
+    return null;
   }
 
-  const { error } = await supabase.from('songs').update(patch).eq('id', songId).eq('owner_id', ownerId);
+  const { data, error } = await supabase
+    .from('songs')
+    .update(patch)
+    .eq('id', songId)
+    .eq('owner_id', ownerId)
+    .select('*')
+    .maybeSingle<SongRow>();
   if (error) {
     throw error;
   }
+
+  return data;
 }
 
 async function persistAnalysisResults(
