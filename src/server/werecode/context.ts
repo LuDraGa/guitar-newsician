@@ -6,6 +6,7 @@ import { RouteNotFoundError } from '@/lib/http/route-error';
 import { requireCurrentUser } from '@/lib/supabase/auth';
 import { isWereCodeDevIdentityEnabled } from '@/lib/supabase/env';
 import { createSupabaseAdminClient, createSupabaseServerClient } from '@/lib/supabase/server';
+import { requireWereCodeMembership } from '@/server/werecode/membership';
 import type { SongRow } from '@/types/werecode';
 
 export type WereCodeSupabaseClient =
@@ -17,7 +18,12 @@ export async function getWereCodeRequestContext(): Promise<{
   supabase: WereCodeSupabaseClient;
 }> {
   const user = await requireCurrentUser();
-  const supabase = isWereCodeDevIdentityEnabled() ? createSupabaseAdminClient() : await createSupabaseServerClient();
+  const devIdentityEnabled = isWereCodeDevIdentityEnabled();
+  const supabase = devIdentityEnabled ? createSupabaseAdminClient() : await createSupabaseServerClient();
+
+  if (!devIdentityEnabled) {
+    await requireWereCodeMembership(supabase, user.id);
+  }
 
   return { user, supabase };
 }

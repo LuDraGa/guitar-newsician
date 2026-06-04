@@ -2,8 +2,8 @@
 -- Project: https://olquywzupxszttgiptco.supabase.co
 --
 -- Run this whole file in the Supabase SQL editor.
--- It creates an isolated `werecode` schema, owner-scoped RLS policies,
--- auth user profile mirroring, durable job tables, and private storage buckets.
+-- It creates an isolated `werecode` schema, app membership scoped RLS policies,
+-- durable job tables, and private storage buckets.
 
 begin;
 
@@ -30,6 +30,14 @@ create table if not exists werecode.profiles (
   metadata jsonb not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table if not exists werecode.memberships (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  status text not null default 'active'
+    check (status in ('active', 'disabled')),
+  joined_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now()
 );
 
 create table if not exists werecode.songs (
@@ -208,6 +216,7 @@ create table if not exists werecode.midi_edit_sessions (
 );
 
 create index if not exists profiles_email_idx on werecode.profiles(email);
+create index if not exists memberships_status_idx on werecode.memberships(status, joined_at desc);
 create index if not exists songs_owner_updated_idx on werecode.songs(owner_id, updated_at desc);
 create index if not exists songs_owner_status_idx on werecode.songs(owner_id, status, updated_at desc);
 create index if not exists versions_song_created_idx on werecode.song_versions(song_id, created_at desc);
@@ -249,91 +258,11 @@ create trigger set_midi_edit_sessions_updated_at
 before update on werecode.midi_edit_sessions
 for each row execute function werecode.set_updated_at();
 
-create or replace function werecode.handle_new_user()
-returns trigger
-language plpgsql
-security definer
-set search_path = werecode, public
-as $$
-begin
-  insert into werecode.profiles (
-    id,
-    email,
-    display_name,
-    avatar_url,
-    provider,
-    metadata
-  )
-  values (
-    new.id,
-    new.email,
-    coalesce(
-      new.raw_user_meta_data ->> 'full_name',
-      new.raw_user_meta_data ->> 'name',
-      split_part(coalesce(new.email, ''), '@', 1)
-    ),
-    coalesce(
-      new.raw_user_meta_data ->> 'avatar_url',
-      new.raw_user_meta_data ->> 'picture'
-    ),
-    coalesce(new.raw_app_meta_data ->> 'provider', 'email'),
-    jsonb_build_object(
-      'app_metadata', coalesce(new.raw_app_meta_data, '{}'::jsonb),
-      'user_metadata', coalesce(new.raw_user_meta_data, '{}'::jsonb)
-    )
-  )
-  on conflict (id) do update set
-    email = excluded.email,
-    display_name = excluded.display_name,
-    avatar_url = excluded.avatar_url,
-    provider = excluded.provider,
-    metadata = excluded.metadata,
-    updated_at = now();
-
-  return new;
-end;
-$$;
-
 drop trigger if exists on_auth_user_created_werecode on auth.users;
-create trigger on_auth_user_created_werecode
-after insert on auth.users
-for each row execute function werecode.handle_new_user();
-
-insert into werecode.profiles (
-  id,
-  email,
-  display_name,
-  avatar_url,
-  provider,
-  metadata
-)
-select
-  u.id,
-  u.email,
-  coalesce(
-    u.raw_user_meta_data ->> 'full_name',
-    u.raw_user_meta_data ->> 'name',
-    split_part(coalesce(u.email, ''), '@', 1)
-  ),
-  coalesce(
-    u.raw_user_meta_data ->> 'avatar_url',
-    u.raw_user_meta_data ->> 'picture'
-  ),
-  coalesce(u.raw_app_meta_data ->> 'provider', 'email'),
-  jsonb_build_object(
-    'app_metadata', coalesce(u.raw_app_meta_data, '{}'::jsonb),
-    'user_metadata', coalesce(u.raw_user_meta_data, '{}'::jsonb)
-  )
-from auth.users u
-on conflict (id) do update set
-  email = excluded.email,
-  display_name = excluded.display_name,
-  avatar_url = excluded.avatar_url,
-  provider = excluded.provider,
-  metadata = excluded.metadata,
-  updated_at = now();
+drop function if exists werecode.handle_new_user();
 
 alter table werecode.profiles enable row level security;
+alter table werecode.memberships enable row level security;
 alter table werecode.songs enable row level security;
 alter table werecode.song_versions enable row level security;
 alter table werecode.assets enable row level security;
@@ -390,33 +319,75 @@ as $$
     );
 $$;
 
+create or replace function werecode.is_member(p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = werecode, public
+as $$
+  select p_user_id is not null
+    and p_user_id = auth.uid()
+    and exists (
+      select 1
+      from werecode.memberships m
+      where m.user_id = p_user_id
+        and m.status = 'active'
+    );
+$$;
+
+drop policy if exists memberships_owner_select on werecode.memberships;
+create policy memberships_owner_select on werecode.memberships
+  for select to authenticated
+  using (
+    user_id = auth.uid()
+    and status = 'active'
+  );
+
 drop policy if exists profiles_owner_select on werecode.profiles;
 create policy profiles_owner_select on werecode.profiles
   for select to authenticated
-  using (id = auth.uid());
+  using (
+    id = auth.uid()
+    and werecode.is_member(auth.uid())
+  );
 
 drop policy if exists profiles_owner_update on werecode.profiles;
 create policy profiles_owner_update on werecode.profiles
   for update to authenticated
-  using (id = auth.uid())
-  with check (id = auth.uid());
+  using (
+    id = auth.uid()
+    and werecode.is_member(auth.uid())
+  )
+  with check (
+    id = auth.uid()
+    and werecode.is_member(auth.uid())
+  );
 
 drop policy if exists songs_owner_all on werecode.songs;
 create policy songs_owner_all on werecode.songs
   for all to authenticated
-  using (owner_id = auth.uid())
-  with check (owner_id = auth.uid());
+  using (
+    owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
+  )
+  with check (
+    owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
+  );
 
 drop policy if exists song_versions_owner_all on werecode.song_versions;
 create policy song_versions_owner_all on werecode.song_versions
   for all to authenticated
   using (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_version(parent_version_id)
   )
   with check (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_version(parent_version_id)
   );
@@ -426,12 +397,14 @@ create policy assets_owner_all on werecode.assets
   for all to authenticated
   using (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_version(version_id)
     and werecode.current_user_owns_asset(source_asset_id)
   )
   with check (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_version(version_id)
     and werecode.current_user_owns_asset(source_asset_id)
@@ -442,11 +415,13 @@ create policy jobs_owner_all on werecode.jobs
   for all to authenticated
   using (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_version(version_id)
   )
   with check (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_version(version_id)
   );
@@ -456,11 +431,13 @@ create policy analysis_results_owner_all on werecode.analysis_results
   for all to authenticated
   using (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_asset(asset_id)
   )
   with check (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_asset(asset_id)
   );
@@ -470,11 +447,13 @@ create policy lyrics_owner_all on werecode.lyrics
   for all to authenticated
   using (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_asset(asset_id)
   )
   with check (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_asset(asset_id)
   );
@@ -484,12 +463,14 @@ create policy midi_edit_sessions_owner_all on werecode.midi_edit_sessions
   for all to authenticated
   using (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_asset(source_midi_asset_id)
     and werecode.current_user_owns_asset(output_midi_asset_id)
   )
   with check (
     owner_id = auth.uid()
+    and werecode.is_member(auth.uid())
     and werecode.current_user_owns_song(song_id)
     and werecode.current_user_owns_asset(source_midi_asset_id)
     and werecode.current_user_owns_asset(output_midi_asset_id)
@@ -516,6 +497,7 @@ create policy werecode_sources_owner_select on storage.objects
   using (
     bucket_id = 'werecode-sources'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 drop policy if exists werecode_sources_owner_insert on storage.objects;
@@ -524,6 +506,7 @@ create policy werecode_sources_owner_insert on storage.objects
   with check (
     bucket_id = 'werecode-sources'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 drop policy if exists werecode_sources_owner_update on storage.objects;
@@ -532,10 +515,12 @@ create policy werecode_sources_owner_update on storage.objects
   using (
     bucket_id = 'werecode-sources'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   )
   with check (
     bucket_id = 'werecode-sources'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 drop policy if exists werecode_sources_owner_delete on storage.objects;
@@ -544,6 +529,7 @@ create policy werecode_sources_owner_delete on storage.objects
   using (
     bucket_id = 'werecode-sources'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 drop policy if exists werecode_artifacts_owner_select on storage.objects;
@@ -552,6 +538,7 @@ create policy werecode_artifacts_owner_select on storage.objects
   using (
     bucket_id = 'werecode-artifacts'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 drop policy if exists werecode_artifacts_owner_insert on storage.objects;
@@ -560,6 +547,7 @@ create policy werecode_artifacts_owner_insert on storage.objects
   with check (
     bucket_id = 'werecode-artifacts'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 drop policy if exists werecode_artifacts_owner_update on storage.objects;
@@ -568,10 +556,12 @@ create policy werecode_artifacts_owner_update on storage.objects
   using (
     bucket_id = 'werecode-artifacts'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   )
   with check (
     bucket_id = 'werecode-artifacts'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 drop policy if exists werecode_artifacts_owner_delete on storage.objects;
@@ -580,6 +570,7 @@ create policy werecode_artifacts_owner_delete on storage.objects
   using (
     bucket_id = 'werecode-artifacts'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 drop policy if exists werecode_previews_owner_select on storage.objects;
@@ -588,6 +579,7 @@ create policy werecode_previews_owner_select on storage.objects
   using (
     bucket_id = 'werecode-previews'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 drop policy if exists werecode_previews_owner_insert on storage.objects;
@@ -596,6 +588,7 @@ create policy werecode_previews_owner_insert on storage.objects
   with check (
     bucket_id = 'werecode-previews'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 drop policy if exists werecode_previews_owner_update on storage.objects;
@@ -604,10 +597,12 @@ create policy werecode_previews_owner_update on storage.objects
   using (
     bucket_id = 'werecode-previews'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   )
   with check (
     bucket_id = 'werecode-previews'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 drop policy if exists werecode_previews_owner_delete on storage.objects;
@@ -616,6 +611,7 @@ create policy werecode_previews_owner_delete on storage.objects
   using (
     bucket_id = 'werecode-previews'
     and auth.uid()::text = split_part(name, '/', 1)
+    and werecode.is_member(auth.uid())
   );
 
 commit;

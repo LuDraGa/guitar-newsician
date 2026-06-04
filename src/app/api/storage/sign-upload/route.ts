@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ZodError, z } from 'zod';
 
 import { jsonError } from '@/lib/http/responses';
-import { AuthRequiredError, requireCurrentUser } from '@/lib/supabase/auth';
+import { AuthRequiredError } from '@/lib/supabase/auth';
 import {
   StorageInputError,
   StorageOperationError,
@@ -10,6 +10,7 @@ import {
   buildUserStoragePath,
   createSignedStorageUploadUrl,
 } from '@/lib/supabase/storage';
+import { getWereCodeRequestContext } from '@/server/werecode/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +29,7 @@ const requestSchema = z
 export async function POST(request: NextRequest) {
   try {
     const body = requestSchema.parse(await request.json().catch(() => null));
-    const user = await requireCurrentUser();
+    const { user } = await getWereCodeRequestContext();
     const objectPath = buildUserStoragePath(user.id, body.pathParts ?? [body.objectPath!]);
     const data = await createSignedStorageUploadUrl({
       bucket: body.bucket,

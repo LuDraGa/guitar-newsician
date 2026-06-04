@@ -11,8 +11,8 @@ import {
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export class AuthRequiredError extends Error {
-  readonly code = 'auth_required';
-  readonly status = 401;
+  readonly code: string = 'auth_required';
+  readonly status: number = 401;
 
   constructor(message = 'Authentication required') {
     super(message);

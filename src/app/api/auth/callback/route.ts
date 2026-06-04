@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { provisionWereCodeUser } from "@/server/werecode/membership";
 
 export const dynamic = "force-dynamic";
 
@@ -24,11 +25,17 @@ export async function GET(request: NextRequest) {
 
   try {
     const supabase = await createSupabaseServerClient();
-    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
 
     if (exchangeError) {
       throw exchangeError;
     }
+
+    if (!data.user) {
+      throw new Error("Could not resolve Supabase user after Google sign in");
+    }
+
+    await provisionWereCodeUser(data.user);
   } catch (exchangeError) {
     const redirectUrl = new URL("/library", requestUrl.origin);
     redirectUrl.searchParams.set(
