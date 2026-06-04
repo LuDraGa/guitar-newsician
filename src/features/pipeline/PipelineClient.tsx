@@ -1,6 +1,6 @@
 'use client';
 
-import { Activity, AlertCircle, CheckCircle2, Database, DownloadCloud, RefreshCw, Search, Wand2 } from 'lucide-react';
+import { Activity, AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Database, DownloadCloud, RefreshCw, Search, Wand2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { CoverArt, PillIcon, statusChipClass, StatusDot } from '@/components/werecode/WereCodePrimitives';
@@ -29,6 +29,7 @@ export function PipelineClient() {
   const [assetLoading, setAssetLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const loadPipeline = useCallback(async () => {
     setLoading(true);
@@ -87,6 +88,11 @@ export function PipelineClient() {
 
     return () => window.clearTimeout(timer);
   }, [loadAssets, selectedSongId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const selectedSong = useMemo(() => songs.find((song) => song.id === selectedSongId) ?? null, [selectedSongId, songs]);
   const songById = useMemo(() => new Map(songs.map((song) => [song.id, song])), [songs]);
@@ -331,6 +337,7 @@ export function PipelineClient() {
             <JobList
               jobs={filteredJobs}
               songById={songById}
+              nowMs={nowMs}
               selectedJob={selectedJob}
               loading={loading}
               onSelect={(job) => {
@@ -352,7 +359,7 @@ export function PipelineClient() {
 
         <aside className="surface overflow-hidden">
           {tab === 'jobs' ? (
-            <JobDetail job={selectedJob} selectedSong={selectedSong} />
+            <JobDetail job={selectedJob} selectedSong={selectedSong} nowMs={nowMs} />
           ) : (
             <AssetDetail asset={selectedAsset} selectedSong={selectedSong} onOpenAsset={(asset) => void openAsset(asset)} />
           )}
@@ -434,23 +441,27 @@ function MultiSelectFilter({
 function JobList({
   jobs,
   songById,
+  nowMs,
   selectedJob,
   loading,
   onSelect,
 }: {
   jobs: JobRow[];
   songById: Map<string, SongRow>;
+  nowMs: number;
   selectedJob: JobRow | null;
   loading: boolean;
   onSelect: (job: JobRow) => void;
 }) {
   return (
-    <>
-      <div className="label grid grid-cols-[1.4fr_1fr_1fr_auto] gap-3 border-b border-[var(--line-2)] px-5 py-3 text-[10px]">
+    <div className="overflow-x-auto">
+      <div className="min-w-[660px]">
+      <div className="label grid grid-cols-[minmax(180px,1.35fr)_minmax(100px,0.8fr)_minmax(100px,0.8fr)_minmax(112px,0.8fr)_80px] gap-3 border-b border-[var(--line-2)] px-5 py-3 text-[10px]">
         <span>Job</span>
         <span>Endpoint</span>
         <span>Status</span>
-        <span>Time</span>
+        <span>Started</span>
+        <span>Duration</span>
       </div>
       <div>
         {jobs.map((job) => (
@@ -458,7 +469,7 @@ function JobList({
             key={job.id}
             type="button"
             onClick={() => onSelect(job)}
-            className="grid w-full grid-cols-[1.4fr_1fr_1fr_auto] items-center gap-3 border-b border-[var(--line-2)] px-5 py-4 text-left last:border-b-0 hover:bg-[var(--card-2)]"
+            className="grid w-full grid-cols-[minmax(180px,1.35fr)_minmax(100px,0.8fr)_minmax(100px,0.8fr)_minmax(112px,0.8fr)_80px] items-center gap-3 border-b border-[var(--line-2)] px-5 py-4 text-left last:border-b-0 hover:bg-[var(--card-2)]"
             style={selectedJob?.id === job.id ? { boxShadow: 'inset 3px 0 0 var(--accent)', background: 'var(--card-2)' } : undefined}
           >
             <span className="min-w-0">
@@ -476,12 +487,16 @@ function JobList({
                 </span>
               )}
             </span>
-            <span className="mono text-[11px] text-[var(--faint)]">{formatDate(job.created_at)}</span>
+            <span className="mono truncate text-[11px] text-[var(--faint)]" title={job.started_at ?? undefined}>
+              {formatJobStarted(job)}
+            </span>
+            <span className="mono text-[11px] font-bold text-[var(--muted)]">{formatJobDuration(job, nowMs)}</span>
           </button>
         ))}
       </div>
       {!loading && jobs.length === 0 && <div className="p-5 text-sm text-[var(--muted)]">No jobs match this filter.</div>}
-    </>
+      </div>
+    </div>
   );
 }
 
@@ -526,25 +541,7 @@ function AssetList({
   );
 }
 
-function JobDetail({ job, selectedSong }: { job: JobRow | null; selectedSong: SongRow | null }) {
-  const payload = job
-    ? {
-        id: job.id,
-        song_id: job.song_id,
-        type: job.job_type,
-        status: job.status,
-        progress: job.progress,
-        endpoint: job.modal_endpoint,
-        message: job.message,
-        error: job.error_message,
-        started_at: job.started_at,
-        completed_at: job.completed_at,
-        request_payload: job.request_payload,
-        response_payload: job.response_payload,
-        diagnostics: job.diagnostics,
-      }
-    : null;
-
+function JobDetail({ job, selectedSong, nowMs }: { job: JobRow | null; selectedSong: SongRow | null; nowMs: number }) {
   return (
     <div className="flex h-full min-h-0 flex-col p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -569,11 +566,182 @@ function JobDetail({ job, selectedSong }: { job: JobRow | null; selectedSong: So
           <span>{job.error_message}</span>
         </div>
       )}
-      <pre className="mono min-h-0 flex-1 overflow-auto rounded-[12px] bg-[var(--paper)] p-4 text-xs leading-6 text-[var(--ink)] shadow-[inset_0_0_0_1px_var(--line-2)]">
-        {payload ? JSON.stringify(payload, null, 2) : 'Select a job to inspect its payload.'}
-      </pre>
+      {job ? (
+        <JobPayloadExplorer job={job} nowMs={nowMs} />
+      ) : (
+        <div className="mono min-h-0 flex-1 rounded-[12px] bg-[var(--paper)] p-4 text-xs leading-6 text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line-2)]">
+          Select a job to inspect its payload.
+        </div>
+      )}
     </div>
   );
+}
+
+function JobPayloadExplorer({ job, nowMs }: { job: JobRow; nowMs: number }) {
+  const metadata = {
+    id: job.id,
+    song_id: job.song_id,
+    version_id: job.version_id,
+    type: job.job_type,
+    status: job.status,
+    progress: job.progress,
+    endpoint: job.modal_endpoint ?? 'next',
+    message: job.message,
+    error: job.error_message,
+    started_at: job.started_at,
+    completed_at: job.completed_at,
+    duration: formatJobDuration(job, nowMs),
+  };
+
+  return (
+    <div className="mono min-h-0 flex-1 overflow-auto rounded-[12px] bg-[var(--paper)] p-3 text-xs leading-6 text-[var(--ink)] shadow-[inset_0_0_0_1px_var(--line-2)]">
+      <JsonSection key={`${job.id}-metadata`} title="metadata" value={metadata} defaultOpen />
+      <JsonSection key={`${job.id}-request`} title="request_payload" value={job.request_payload} defaultOpen />
+      <JsonSection key={`${job.id}-response`} title="response_payload" value={job.response_payload} />
+      <JsonSection key={`${job.id}-diagnostics`} title="diagnostics" value={job.diagnostics} />
+    </div>
+  );
+}
+
+function JsonSection({ title, value, defaultOpen = false }: { title: string; value: unknown; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <section className="mb-2 min-w-max rounded-[10px] bg-[var(--card)] shadow-[inset_0_0_0_1px_var(--line-2)] last:mb-0">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        aria-expanded={open}
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5 text-[var(--muted)]" /> : <ChevronRight className="h-3.5 w-3.5 text-[var(--muted)]" />}
+        <span className="font-bold text-[var(--ink)]">{title}</span>
+        <span className="text-[var(--faint)]">{jsonSummary(value)}</span>
+      </button>
+      {open && (
+        <div className="border-t border-[var(--line-2)] py-2">
+          <JsonNode value={value} path={title} depth={0} defaultExpandedDepth={1} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function JsonNode({
+  name,
+  nameKind,
+  value,
+  path,
+  depth,
+  defaultExpandedDepth,
+}: {
+  name?: string;
+  nameKind?: 'property' | 'index';
+  value: unknown;
+  path: string;
+  depth: number;
+  defaultExpandedDepth: number;
+}) {
+  const entries = getJsonEntries(value);
+  const expandable = entries !== null;
+  const [open, setOpen] = useState(depth < defaultExpandedDepth);
+  const indent = `${depth * 16}px`;
+
+  if (!expandable) {
+    return (
+      <div className="flex min-w-max whitespace-nowrap px-3" style={{ paddingLeft: indent }}>
+        <span className="inline-block w-5" />
+        <JsonName name={name} kind={nameKind} />
+        <JsonPrimitive value={value} />
+      </div>
+    );
+  }
+
+  const isArray = Array.isArray(value);
+  const openToken = isArray ? '[' : '{';
+  const closeToken = isArray ? ']' : '}';
+  const empty = entries.length === 0;
+
+  return (
+    <>
+      <div className="flex min-w-max whitespace-nowrap px-3" style={{ paddingLeft: indent }}>
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          disabled={empty}
+          className="mr-1 grid h-6 w-4 place-items-center text-[var(--muted)] disabled:opacity-25"
+          aria-label={`${open ? 'Collapse' : 'Expand'} ${name ?? path}`}
+          aria-expanded={open}
+        >
+          {open && !empty ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        </button>
+        <JsonName name={name} kind={nameKind} />
+        <span className="text-[var(--muted)]">{openToken}</span>
+        {!open && (
+          <>
+            <span className="px-1 text-[var(--faint)]">{jsonSummary(value)}</span>
+            <span className="text-[var(--muted)]">{closeToken}</span>
+          </>
+        )}
+        {open && empty && <span className="text-[var(--muted)]">{closeToken}</span>}
+      </div>
+      {open &&
+        !empty &&
+        entries.map(([key, childValue]) => (
+          <JsonNode
+            key={`${path}.${key}`}
+            name={key}
+            nameKind={isArray ? 'index' : 'property'}
+            value={childValue}
+            path={`${path}.${key}`}
+            depth={depth + 1}
+            defaultExpandedDepth={defaultExpandedDepth}
+          />
+        ))}
+      {open && !empty && (
+        <div className="min-w-max whitespace-nowrap px-3 text-[var(--muted)]" style={{ paddingLeft: indent }}>
+          <span className="inline-block w-5" />
+          {closeToken}
+        </div>
+      )}
+    </>
+  );
+}
+
+function JsonName({ name, kind }: { name?: string; kind?: 'property' | 'index' }) {
+  if (!name) {
+    return null;
+  }
+
+  return (
+    <span className={kind === 'index' ? 'mr-1 text-[var(--faint)]' : 'mr-1 text-[var(--accent-ink)]'}>
+      {kind === 'index' ? name : JSON.stringify(name)}:
+    </span>
+  );
+}
+
+function JsonPrimitive({ value }: { value: unknown }) {
+  if (value === null) {
+    return <span className="text-[var(--faint)]">null</span>;
+  }
+
+  if (typeof value === 'string') {
+    return <span className="text-[var(--live)]">{JSON.stringify(value)}</span>;
+  }
+
+  if (typeof value === 'number') {
+    return <span className="text-[var(--accent-ink)]">{String(value)}</span>;
+  }
+
+  if (typeof value === 'boolean') {
+    return <span className="text-[var(--warn)]">{String(value)}</span>;
+  }
+
+  if (typeof value === 'undefined') {
+    return <span className="text-[var(--faint)]">undefined</span>;
+  }
+
+  return <span className="text-[var(--muted)]">{JSON.stringify(value)}</span>;
 }
 
 function AssetDetail({
@@ -647,6 +815,83 @@ function selectionMatches(selected: string[], value: string) {
 
 function textMatches(query: string, values: Array<string | null | undefined>) {
   return !query || values.some((value) => value?.toLowerCase().includes(query));
+}
+
+function formatJobStarted(job: JobRow) {
+  return job.started_at ? formatDate(job.started_at) : '--';
+}
+
+function formatJobDuration(job: JobRow, nowMs: number) {
+  const startedMs = parseTimeMs(job.started_at);
+  if (startedMs === null) {
+    return '--';
+  }
+
+  const completedMs = parseTimeMs(job.completed_at);
+  const updatedMs = parseTimeMs(job.updated_at);
+  const endedMs = completedMs ?? (job.status === 'processing' ? nowMs : updatedMs);
+
+  if (endedMs === null) {
+    return '--';
+  }
+
+  return formatDurationMs(Math.max(0, endedMs - startedMs));
+}
+
+function parseTimeMs(value: string | null) {
+  if (!value) {
+    return null;
+  }
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function formatDurationMs(ms: number) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  if (totalSeconds < 1) {
+    return '<1s';
+  }
+
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
+  }
+  return `${seconds}s`;
+}
+
+function getJsonEntries(value: unknown): Array<[string, unknown]> | null {
+  if (Array.isArray(value)) {
+    return value.map((item, index) => [String(index), item]);
+  }
+
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>);
+  }
+
+  return null;
+}
+
+function jsonSummary(value: unknown) {
+  if (Array.isArray(value)) {
+    return `${value.length} item${value.length === 1 ? '' : 's'}`;
+  }
+
+  if (value !== null && typeof value === 'object') {
+    const count = Object.keys(value as Record<string, unknown>).length;
+    return `${count} key${count === 1 ? '' : 's'}`;
+  }
+
+  if (value === null) {
+    return 'null';
+  }
+
+  return typeof value;
 }
 
 function uniqueSorted(values: string[]) {
