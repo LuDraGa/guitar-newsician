@@ -171,11 +171,12 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     () => assets.filter((asset) => stemKindSet.has(asset.kind)).sort((a, b) => stemKindOrder.indexOf(a.kind) - stemKindOrder.indexOf(b.kind)),
     [assets]
   );
+  const playableStemAssets = useMemo(() => dedupeLatestStemAssets(stemAssets), [stemAssets]);
   const lyricLines = useMemo(() => deriveLyricLines(syncedLyrics, plainLyrics), [plainLyrics, syncedLyrics]);
   const facts = useMemo(() => buildSongFacts(song), [song]);
   const stemPlaybackSources = useMemo(
     () =>
-      stemAssets
+      playableStemAssets
         .map((asset) => {
           const url = stemUrls[asset.id];
           if (!url) {
@@ -192,18 +193,18 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
           };
         })
         .filter((source): source is StemPlaybackSource => Boolean(source)),
-    [stemAssets, stemMix, stemUrls]
+    [playableStemAssets, stemMix, stemUrls]
   );
   const signablePlaybackAssets = useMemo(() => {
     const unique = new Map<string, AssetSummary>();
-    const playbackAssets = stemAssets.length > 0 ? stemAssets : [sourceAsset];
+    const playbackAssets = playableStemAssets.length > 0 ? playableStemAssets : [sourceAsset];
     for (const asset of playbackAssets) {
       if (asset) {
         unique.set(asset.id, asset);
       }
     }
     return Array.from(unique.values());
-  }, [sourceAsset, stemAssets]);
+  }, [playableStemAssets, sourceAsset]);
 
   const requestTransportSeek = useCallback((time: number) => {
     const target = Math.max(0, time);
@@ -308,7 +309,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         }
 
         const nextStemUrls: Record<string, string> = {};
-        for (const asset of stemAssets) {
+        for (const asset of playableStemAssets) {
           const url = urlByAssetId.get(asset.id);
           if (url) {
             nextStemUrls[asset.id] = url;
@@ -333,7 +334,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [setCachedSignedAssetUrls, signablePlaybackAssets, songId, sourceAsset, stemAssets]);
+  }, [playableStemAssets, setCachedSignedAssetUrls, signablePlaybackAssets, songId, sourceAsset]);
 
   const loadStudio = useCallback(async (nextSongId: string, options?: { force?: boolean }) => {
     setError(null);
@@ -635,7 +636,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   lyrics={lyricLines}
                   syncedLyrics={syncedLyrics}
                   plainLyrics={plainLyrics}
-                  stemAssets={stemAssets}
+                  stemAssets={playableStemAssets}
                   stemMix={stemMix}
                   stemUrls={stemUrls}
                   stemSignError={stemSignError}
@@ -900,15 +901,6 @@ function StemsPanel({
   onOpenAsset: (asset: AssetSummary) => void;
   onRunStems: () => void;
 }) {
-  const latestStems = useMemo(() => {
-    const byKind = new Map<string, AssetSummary>();
-    for (const asset of stemAssets) {
-      if (!byKind.has(asset.kind)) {
-        byKind.set(asset.kind, asset);
-      }
-    }
-    return Array.from(byKind.values()).sort((a, b) => stemKindOrder.indexOf(a.kind) - stemKindOrder.indexOf(b.kind));
-  }, [stemAssets]);
   const anySolo = Object.values(stemMix).some((state) => state.solo);
 
   return (
@@ -918,13 +910,13 @@ function StemsPanel({
           <Layers className="h-4 w-4 text-[var(--muted)]" />
           <h2 className="font-bold">Stems</h2>
         </div>
-        {latestStems.length > 0 && <span className="chip">{Object.keys(stemUrls).length === latestStems.length ? 'live mix' : 'signing'}</span>}
+        {stemAssets.length > 0 && <span className="chip">{Object.keys(stemUrls).length === stemAssets.length ? 'live mix' : 'signing'}</span>}
       </div>
       {stemSignError && <div className="chip danger mb-2 w-fit">{stemSignError}</div>}
 
-      {latestStems.length > 0 ? (
+      {stemAssets.length > 0 ? (
         <div className="grid flex-1 content-center gap-1.5">
-          {latestStems.map((asset) => {
+          {stemAssets.map((asset) => {
             const state = stemMix[asset.id] ?? defaultStemMix(asset);
             const isMuted = state.muted;
             const isSolo = state.solo;
@@ -2641,6 +2633,22 @@ function ensureStemMix(assets: AssetSummary[], current: Record<string, StemMixSt
     };
   }
   return next;
+}
+
+function dedupeLatestStemAssets(stemAssets: AssetSummary[]) {
+  const byKind = new Map<string, AssetSummary>();
+  for (const asset of stemAssets) {
+    const current = byKind.get(asset.kind);
+    if (!current || assetCreatedAtMs(asset) > assetCreatedAtMs(current)) {
+      byKind.set(asset.kind, asset);
+    }
+  }
+  return Array.from(byKind.values()).sort((a, b) => stemKindOrder.indexOf(a.kind) - stemKindOrder.indexOf(b.kind));
+}
+
+function assetCreatedAtMs(asset: AssetSummary) {
+  const value = new Date(asset.created_at).getTime();
+  return Number.isFinite(value) ? value : 0;
 }
 
 function mergeById<T extends { id: string }>(current: T[], incoming: T[]) {
