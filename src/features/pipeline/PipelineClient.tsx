@@ -705,7 +705,7 @@ function JobPayloadExplorer({
   const metadata = buildJobMetadata(job, nowMs);
 
   return (
-    <div className="mono min-h-0 flex-1 overflow-auto rounded-[12px] bg-[var(--paper)] p-3 text-xs leading-6 text-[var(--ink)] shadow-[inset_0_0_0_1px_var(--line-2)]">
+    <div className="mono flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5 text-xs leading-6 text-[var(--ink)]">
       <JsonSection key={`${job.id}-metadata`} title="metadata" value={metadata} defaultOpen />
       {jobDetail ? (
         <>
@@ -714,8 +714,8 @@ function JobPayloadExplorer({
           <JsonSection key={`${job.id}-diagnostics`} title="diagnostics" value={jobDetail.diagnostics} />
         </>
       ) : (
-        <div className="rounded-[10px] bg-[var(--card)] px-3 py-2 text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line-2)]">
-          {detailError ?? (detailLoading ? 'Loading payload...' : 'Payload not loaded.')}
+        <div className="rounded-[12px] bg-[var(--paper)] px-3 py-2.5 text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line-2)]">
+          {detailError ?? (detailLoading ? 'Loading payload…' : 'Payload not loaded.')}
         </div>
       )}
     </div>
@@ -798,22 +798,22 @@ function JsonSection({ title, value, defaultOpen = false }: { title: string; val
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <section className="mb-2 min-w-max rounded-[10px] bg-[var(--card)] shadow-[inset_0_0_0_1px_var(--line-2)] last:mb-0">
-      <div className="flex items-center justify-between gap-3 px-3 py-2">
+    <section className="overflow-hidden rounded-[12px] bg-[var(--paper)] shadow-[inset_0_0_0_1px_var(--line-2)]">
+      <div className="flex items-center justify-between gap-2 px-2">
         <button
           type="button"
           onClick={() => setOpen((current) => !current)}
-          className="flex min-w-0 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-[10px] px-1.5 py-2.5 text-left transition-colors hover:bg-[var(--card-2)]"
           aria-expanded={open}
         >
           {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />}
-          <span className="font-bold text-[var(--ink)]">{title}</span>
-          <span className="text-[var(--faint)]">{jsonSummary(value)}</span>
+          <span className="truncate font-bold text-[var(--ink)]">{title}</span>
+          <span className="shrink-0 text-[var(--faint)]">{jsonSummary(value)}</span>
         </button>
         <CopyJsonButton label={`Copy ${title}`} value={value} />
       </div>
       {open && (
-        <div className="border-t border-[var(--line-2)] py-2">
+        <div className="overflow-x-auto border-t border-[var(--line-2)] py-2">
           <JsonNode value={value} path={title} depth={0} defaultExpandedDepth={1} />
         </div>
       )}
@@ -843,10 +843,12 @@ function JsonNode({
 
   if (!expandable) {
     return (
-      <div className="flex min-w-max whitespace-nowrap px-3" style={{ paddingLeft: indent }}>
-        <span className="inline-block w-5" />
+      <div className="flex px-3" style={{ paddingLeft: indent }}>
+        <span className="inline-block w-5 shrink-0" />
         <JsonName name={name} kind={nameKind} />
-        <JsonPrimitive value={value} />
+        <span className="min-w-0 flex-1">
+          <JsonPrimitive value={value} />
+        </span>
       </div>
     );
   }
@@ -908,8 +910,61 @@ function JsonName({ name, kind }: { name?: string; kind?: 'property' | 'index' }
   }
 
   return (
-    <span className={kind === 'index' ? 'mr-1 text-[var(--faint)]' : 'mr-1 text-[var(--accent-ink)]'}>
+    <span className={`mr-1 shrink-0 ${kind === 'index' ? 'text-[var(--faint)]' : 'text-[var(--accent-ink)]'}`}>
       {kind === 'index' ? name : JSON.stringify(name)}:
+    </span>
+  );
+}
+
+const STRING_PREVIEW = 140;
+const STRING_STEP = 100;
+
+function JsonString({ value }: { value: string }) {
+  const [limit, setLimit] = useState(STRING_PREVIEW);
+  const length = value.length;
+  const isLong = length > STRING_PREVIEW;
+  const effectiveLimit = isLong ? Math.min(limit, length) : length;
+  const truncated = isLong && effectiveLimit < length;
+  const shown = value.slice(0, effectiveLimit);
+  const remaining = length - effectiveLimit;
+
+  return (
+    <span className="block min-w-0">
+      <span className="whitespace-pre-wrap break-words text-[var(--live)]">
+        {`"${shown}${truncated ? '…' : ''}"`}
+      </span>
+      {isLong && (
+        <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] leading-tight">
+          {truncated && (
+            <button
+              type="button"
+              onClick={() => setLimit((current) => Math.min(length, Math.max(current, effectiveLimit) + STRING_STEP))}
+              className="rounded-full bg-[var(--card-2)] px-2 py-0.5 font-bold text-[var(--accent-ink)] shadow-[inset_0_0_0_1px_var(--line-2)] transition-colors hover:bg-[var(--accent-soft)]"
+            >
+              +{Math.min(STRING_STEP, remaining)} more
+            </button>
+          )}
+          {truncated && (
+            <button
+              type="button"
+              onClick={() => setLimit(length)}
+              className="rounded-full px-2 py-0.5 font-bold text-[var(--muted)] transition-colors hover:text-[var(--ink)]"
+            >
+              Show all
+            </button>
+          )}
+          {!truncated && (
+            <button
+              type="button"
+              onClick={() => setLimit(STRING_PREVIEW)}
+              className="rounded-full px-2 py-0.5 font-bold text-[var(--muted)] transition-colors hover:text-[var(--ink)]"
+            >
+              Less
+            </button>
+          )}
+          <span className="text-[var(--faint)]">{length.toLocaleString()} chars</span>
+        </span>
+      )}
     </span>
   );
 }
@@ -920,7 +975,7 @@ function JsonPrimitive({ value }: { value: unknown }) {
   }
 
   if (typeof value === 'string') {
-    return <span className="text-[var(--live)]">{JSON.stringify(value)}</span>;
+    return <JsonString value={value} />;
   }
 
   if (typeof value === 'number') {
