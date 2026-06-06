@@ -53,12 +53,7 @@ import {
   getStemSeparationDurationLimitWarning,
 } from '@/lib/audio/stem-separation-limits';
 import { parseLrc } from '@/lib/music/lrc';
-import {
-  ANALYZE_FULL_ANALYZERS,
-  PIPELINE_VERSIONS,
-  computeStageStatuses,
-  type PipelineStage,
-} from '@/server/werecode/pipeline-versions';
+import { ANALYZE_FULL_ANALYZERS, computeStageStatuses } from '@/server/werecode/pipeline-versions';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
 import type { AssetSummary, SongSummary, StudioDetail } from '@/types/werecode-client';
 import { MusicXmlPreviewPanel } from './MusicXmlPreviewPanel';
@@ -187,6 +182,10 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const stageStatuses = useMemo(
     () => computeStageStatuses(assets.map((asset) => ({ kind: asset.kind, pipeline_version: asset.pipeline_version ?? null }))),
     [assets]
+  );
+  const staleStages = useMemo(
+    () => new Set(stageStatuses.filter((status) => status.isStale).map((status) => status.stage)),
+    [stageStatuses]
   );
   const lyricLines = useMemo(() => deriveLyricLines(syncedLyrics, plainLyrics), [plainLyrics, syncedLyrics]);
   const sectionSegments = useMemo(() => deriveSectionSegments(analysisResults), [analysisResults]);
@@ -621,14 +620,6 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
       }),
   };
 
-  // Force re-run a stage with the latest pipeline model (used by the staleness banner).
-  const stageRerunners: Record<PipelineStage, () => void> = {
-    separate: () => void workflowActions.stems({ force: true }),
-    analyze: () => void workflowActions.analyze({ force: true }),
-    midi_transcribe: () => void workflowActions.midi({ force: true }),
-    lyrics_align: () => void workflowActions.lyricsAlign({ force: true }),
-  };
-
   return (
     <section className="flex h-full min-h-0 w-full flex-col overflow-visible pb-0 md:overflow-hidden">
       {!song && !loading ? (
@@ -658,7 +649,20 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
               onRefresh={() => void loadStudio(songId, { force: true })}
             />
 
-            <StudioModeTabs activeTab={tab} onChange={changeTab} />
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+              <StudioModeTabs activeTab={tab} onChange={changeTab} />
+              {sourceAsset && (
+                <AnalysisControl
+                  depth={analyzeDepth}
+                  onDepthChange={setAnalyzeDepth}
+                  hasAnalysis={analysisResults.length > 0}
+                  stale={staleStages.has('analyze')}
+                  running={running}
+                  onRun={() => void workflowActions.analyze()}
+                  onRerun={() => void workflowActions.analyze({ force: true })}
+                />
+              )}
+            </div>
 
             <div className="mb-3 min-h-[26px]">
               {(message || error) && (
@@ -668,72 +672,6 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                 </span>
               )}
             </div>
-
-            {sourceAsset && (
-              <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-[var(--line)] px-3 py-2 text-[13px]">
-                <div className="inline-flex items-center gap-2">
-                  <span className="text-[var(--muted)]">Analysis</span>
-                  <div className="inline-flex items-center gap-1" role="group" aria-label="Analysis depth">
-                    {(['quick', 'full'] as const).map((depth) => {
-                      const active = analyzeDepth === depth;
-                      return (
-                        <button
-                          key={depth}
-                          type="button"
-                          aria-pressed={active}
-                          onClick={() => setAnalyzeDepth(depth)}
-                          className={`inline-flex h-7 items-center rounded-full px-3 text-[12px] font-bold capitalize transition ${
-                            active
-                              ? 'shadow-none'
-                              : 'bg-transparent text-[var(--muted)] shadow-[inset_0_0_0_1.5px_var(--line)] hover:text-[var(--ink)]'
-                          }`}
-                          style={active ? { background: 'var(--ink)', color: 'var(--paper)' } : undefined}
-                          title={
-                            depth === 'quick'
-                              ? 'Quick: tempo, key, basics (fast)'
-                              : 'Full: adds chords + structure (slower)'
-                          }
-                        >
-                          {depth}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {stageStatuses.length > 0 && (
-                  <div className="inline-flex flex-wrap items-center gap-2 border-l border-[var(--line)] pl-3">
-                    <span className="inline-flex items-center gap-1.5 font-semibold text-[var(--muted)]">
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      Re-run
-                    </span>
-                    {stageStatuses.map(({ stage, isStale }) => (
-                      <button
-                        key={stage}
-                        type="button"
-                        onClick={stageRerunners[stage]}
-                        disabled={Boolean(running)}
-                        className="pill"
-                        title={
-                          (isStale
-                            ? `Newer model available — re-run ${PIPELINE_VERSIONS[stage].label} (latest ${PIPELINE_VERSIONS[stage].version})`
-                            : `Re-run ${PIPELINE_VERSIONS[stage].label} with the latest model (${PIPELINE_VERSIONS[stage].version})`) +
-                          (stage === 'analyze'
-                            ? analyzeDepth === 'full'
-                              ? ' — full set incl. chords + structure'
-                              : ' — quick set: tempo, key, basics'
-                            : '')
-                        }
-                      >
-                        {PIPELINE_VERSIONS[stage].label}
-                        {stage === 'analyze' && <span className="ml-1 opacity-70">({analyzeDepth})</span>}
-                        {isStale && <span className="ml-1.5 opacity-70">· new model</span>}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
 
             <div className="min-h-0 flex-1">
               {tab === 'karaoke' && (
@@ -760,6 +698,10 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   onAlignLyrics={() => void workflowActions.lyricsAlign()}
                   onEditLyrics={() => changeTab('lyrics')}
                   onSeekLyric={(time) => requestTransportSeek(time - 0.35)}
+                  stemsStale={staleStages.has('separate')}
+                  onRerunStems={() => void workflowActions.stems({ force: true })}
+                  lyricsStale={staleStages.has('lyrics_align')}
+                  onRerunLyrics={() => void workflowActions.lyricsAlign({ force: true })}
                 />
               )}
               {tab === 'guitar' && (
@@ -773,6 +715,8 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   onOpenAsset={(asset) => void openAsset(asset)}
                   onRunMidi={() => void workflowActions.midi()}
                   onRunMusicXml={() => void workflowActions.musicXml()}
+                  midiStale={staleStages.has('midi_transcribe')}
+                  onRerunMidi={() => void workflowActions.midi({ force: true })}
                 />
               )}
               {tab === 'lyrics' && (
@@ -791,6 +735,8 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   onSeek={(time) => requestTransportSeek(time - 0.35)}
                   onTogglePlayback={requestPlaybackToggle}
                   canAlign={Boolean(vocalAsset ?? sourceAsset)}
+                  lyricsStale={staleStages.has('lyrics_align')}
+                  onRerunLyrics={() => void workflowActions.lyricsAlign({ force: true })}
                 />
               )}
             </div>
@@ -877,7 +823,7 @@ function SongHeader({
 
 function StudioModeTabs({ activeTab, onChange }: { activeTab: StudioTab; onChange: (tab: StudioTab) => void }) {
   return (
-    <div className="mb-3 flex">
+    <div className="flex min-w-0">
       <div className="flex max-w-full flex-wrap items-center gap-2" role="tablist" aria-label="Studio mode">
         {studioTabs.map(([id, label, Icon]) => {
           const active = activeTab === id;
@@ -906,6 +852,106 @@ function StudioModeTabs({ activeTab, onChange }: { activeTab: StudioTab; onChang
   );
 }
 
+// Quiet-by-default stage run/re-run button. Flips to an accent "new model"
+// treatment (soft fill + pulse dot) only when the current output is stale.
+function PipelineActionButton({
+  label,
+  idleIcon,
+  busy,
+  stale,
+  disabled,
+  onClick,
+  title,
+}: {
+  label: string;
+  idleIcon: ReactNode;
+  busy: boolean;
+  stale: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="pill ghost sm"
+      style={stale && !busy ? { background: 'var(--accent-soft)', boxShadow: 'none', color: 'var(--accent-ink)' } : undefined}
+    >
+      <PillIcon>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : idleIcon}</PillIcon>
+      {label}
+      {stale && !busy && <span className="pulse h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} aria-hidden />}
+    </button>
+  );
+}
+
+// Studio-level Analysis control: depth segment + a single run/re-run action.
+// Lives on the mode-tabs row because analysis feeds the transport, chords, and facts.
+function AnalysisControl({
+  depth,
+  onDepthChange,
+  hasAnalysis,
+  stale,
+  running,
+  onRun,
+  onRerun,
+}: {
+  depth: AnalyzeDepth;
+  onDepthChange: (depth: AnalyzeDepth) => void;
+  hasAnalysis: boolean;
+  stale: boolean;
+  running: string | null;
+  onRun: () => void;
+  onRerun: () => void;
+}) {
+  const busy = running === 'Analysis';
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="label">Analysis</span>
+      <div
+        className="segment"
+        role="group"
+        aria-label="Analysis depth"
+        style={{ background: 'var(--card)', boxShadow: 'inset 0 0 0 1.5px var(--line)', padding: 4 }}
+      >
+        {(['quick', 'full'] as const).map((value) => {
+          const active = depth === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onDepthChange(value)}
+              className={`capitalize ${active ? 'on' : ''}`}
+              style={active ? { background: 'var(--ink)', color: 'var(--paper)', height: 30 } : { color: 'var(--muted)', height: 30 }}
+              title={value === 'quick' ? 'Quick: tempo, key, basics (fast)' : 'Full: adds chords + structure (slower)'}
+            >
+              {value}
+            </button>
+          );
+        })}
+      </div>
+      <PipelineActionButton
+        label={busy ? 'Analyzing' : hasAnalysis ? 'Re-run' : 'Analyze'}
+        idleIcon={hasAnalysis ? <RefreshCw className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+        busy={busy}
+        stale={stale && hasAnalysis}
+        disabled={Boolean(running)}
+        onClick={hasAnalysis ? onRerun : onRun}
+        title={
+          hasAnalysis
+            ? stale
+              ? `Newer analysis model available — re-run (${depth})`
+              : `Re-run analysis (${depth})`
+            : `Run ${depth} analysis`
+        }
+      />
+    </div>
+  );
+}
+
 function KaraokeProductView({
   currentTime,
   lyrics,
@@ -929,6 +975,10 @@ function KaraokeProductView({
   onAlignLyrics,
   onEditLyrics,
   onSeekLyric,
+  stemsStale,
+  onRerunStems,
+  lyricsStale,
+  onRerunLyrics,
 }: {
   currentTime: number;
   lyrics: LyricDisplayLine[];
@@ -952,6 +1002,10 @@ function KaraokeProductView({
   onAlignLyrics: () => void;
   onEditLyrics: () => void;
   onSeekLyric: (time: number) => void;
+  stemsStale: boolean;
+  onRerunStems: () => void;
+  lyricsStale: boolean;
+  onRerunLyrics: () => void;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
@@ -970,6 +1024,8 @@ function KaraokeProductView({
             onSoloStem={onSoloStem}
             onOpenAsset={onOpenAsset}
             onRunStems={onRunStems}
+            stale={stemsStale}
+            onRerun={onRerunStems}
           />
           <CurrentChordPanel currentTime={currentTime} analysisResults={analysisResults} running={running} onRunAnalyze={onRunAnalyze} />
         </div>
@@ -983,6 +1039,8 @@ function KaraokeProductView({
           onAlignLyrics={onAlignLyrics}
           onEditLyrics={onEditLyrics}
           onSeekLyric={onSeekLyric}
+          lyricsStale={lyricsStale}
+          onRerunLyrics={onRerunLyrics}
         />
       </div>
     </div>
@@ -1002,6 +1060,8 @@ function StemsPanel({
   onSoloStem,
   onOpenAsset,
   onRunStems,
+  stale,
+  onRerun,
 }: {
   stemAssets: AssetSummary[];
   stemMix: Record<string, StemMixState>;
@@ -1015,6 +1075,8 @@ function StemsPanel({
   onSoloStem: (assetId: string) => void;
   onOpenAsset: (asset: AssetSummary) => void;
   onRunStems: () => void;
+  stale: boolean;
+  onRerun: () => void;
 }) {
   const anySolo = Object.values(stemMix).some((state) => state.solo);
 
@@ -1025,7 +1087,20 @@ function StemsPanel({
           <Layers className="h-4 w-4 text-[var(--muted)]" />
           <h2 className="font-bold">Stems</h2>
         </div>
-        {stemAssets.length > 0 && <span className="chip">{Object.keys(stemUrls).length === stemAssets.length ? 'live mix' : 'signing'}</span>}
+        {stemAssets.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="chip">{Object.keys(stemUrls).length === stemAssets.length ? 'live mix' : 'signing'}</span>
+            <PipelineActionButton
+              label="Re-run"
+              idleIcon={<RefreshCw className="h-3.5 w-3.5" />}
+              busy={running === 'Stem separation'}
+              stale={stale}
+              disabled={!sourceAsset || Boolean(running) || Boolean(stemSeparationWarning)}
+              onClick={onRerun}
+              title={stale ? 'Newer stem model available — re-separate' : 'Re-separate stems with the latest model'}
+            />
+          </div>
+        )}
       </div>
       {stemSignError && <div className="chip danger mb-2 w-fit">{stemSignError}</div>}
       {stemSeparationWarning && <div className="chip danger mb-2 w-fit">{stemSeparationWarning}</div>}
@@ -1298,6 +1373,8 @@ function LyricsPane({
   onAlignLyrics,
   onEditLyrics,
   onSeekLyric,
+  lyricsStale,
+  onRerunLyrics,
 }: {
   currentTime: number;
   lines: LyricDisplayLine[];
@@ -1308,6 +1385,8 @@ function LyricsPane({
   onAlignLyrics: () => void;
   onEditLyrics: () => void;
   onSeekLyric: (time: number) => void;
+  lyricsStale: boolean;
+  onRerunLyrics: () => void;
 }) {
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1388,6 +1467,17 @@ function LyricsPane({
               <Layers className="h-3.5 w-3.5" />
               Auto-scroll {autoScroll ? 'on' : 'off'}
             </button>
+          )}
+          {syncedLyrics && (
+            <PipelineActionButton
+              label="Re-sync"
+              idleIcon={<ListMusic className="h-3.5 w-3.5" />}
+              busy={running === 'Lyrics alignment'}
+              stale={lyricsStale}
+              disabled={Boolean(running)}
+              onClick={onRerunLyrics}
+              title={lyricsStale ? 'Newer alignment model available — re-sync' : 'Re-sync lyrics with the latest model'}
+            />
           )}
           {plainLyrics && !syncedLyrics && (
             <button type="button" onClick={onAlignLyrics} disabled={Boolean(running)} className="pill sm">
@@ -1988,6 +2078,8 @@ function GuitarLearnerView({
   onOpenAsset,
   onRunMidi,
   onRunMusicXml,
+  midiStale,
+  onRerunMidi,
 }: {
   currentTime: number;
   musicXmlAsset: AssetSummary | undefined;
@@ -1998,6 +2090,8 @@ function GuitarLearnerView({
   onOpenAsset: (asset: AssetSummary) => void;
   onRunMidi: () => void;
   onRunMusicXml: () => void;
+  midiStale: boolean;
+  onRerunMidi: () => void;
 }) {
   const [mode, setMode] = useState<GuitarMode>('chords');
 
@@ -2021,12 +2115,21 @@ function GuitarLearnerView({
           </button>
         ))}
         <div className="flex-1" />
-        <button type="button" onClick={onRunMidi} disabled={!sourceAsset || Boolean(running)} className="pill ghost sm">
-          <PillIcon>
-            {running === 'MIDI transcription' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileMusic className="h-3.5 w-3.5" />}
-          </PillIcon>
-          MIDI
-        </button>
+        <PipelineActionButton
+          label={noteEventsAsset ? 'Re-run MIDI' : 'MIDI'}
+          idleIcon={<FileMusic className="h-3.5 w-3.5" />}
+          busy={running === 'MIDI transcription'}
+          stale={midiStale}
+          disabled={!sourceAsset || Boolean(running)}
+          onClick={noteEventsAsset ? onRerunMidi : onRunMidi}
+          title={
+            noteEventsAsset
+              ? midiStale
+                ? 'Newer MIDI model available — re-transcribe'
+                : 'Re-transcribe MIDI with the latest model'
+              : 'Transcribe MIDI from this track'
+          }
+        />
         <button type="button" onClick={onRunMusicXml} disabled={!noteEventsAsset || Boolean(running)} className="pill ghost sm">
           <PillIcon>
             {running === 'MusicXML conversion' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sheet className="h-3.5 w-3.5" />}
@@ -2132,6 +2235,8 @@ function LyricsEditorProductView({
   onSeek,
   onTogglePlayback,
   canAlign,
+  lyricsStale,
+  onRerunLyrics,
 }: {
   lyricsDraft: string;
   syncedLyrics: LyricsRow | undefined;
@@ -2146,6 +2251,8 @@ function LyricsEditorProductView({
   onSeek: (time: number) => void;
   onTogglePlayback: () => void;
   canAlign: boolean;
+  lyricsStale: boolean;
+  onRerunLyrics: () => void;
 }) {
   const initialLines = useMemo(() => buildEditorLyricLines(syncedLyrics, plainLyrics, lyricsDraft), [lyricsDraft, plainLyrics, syncedLyrics]);
   const [lines, setLines] = useState<EditorLyricLine[]>(() => initialLines);
@@ -2520,11 +2627,26 @@ function LyricsEditorProductView({
               </PillIcon>
               Fetch lyrics
             </button>
-            <button type="button" onClick={onAlignLyrics} disabled={!canAlign || Boolean(running)} className="pill sm w-full">
+            <button
+              type="button"
+              onClick={syncedLyrics ? onRerunLyrics : onAlignLyrics}
+              disabled={!canAlign || Boolean(running)}
+              className="pill sm w-full"
+              title={
+                syncedLyrics
+                  ? lyricsStale
+                    ? 'Newer alignment model available — re-align'
+                    : 'Re-align lyrics with the latest model'
+                  : 'Auto-align lyrics to the audio'
+              }
+            >
               <PillIcon>
                 {running === 'Lyrics alignment' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListMusic className="h-3.5 w-3.5" />}
               </PillIcon>
-              Auto-align
+              {syncedLyrics ? 'Re-align' : 'Auto-align'}
+              {lyricsStale && syncedLyrics && running !== 'Lyrics alignment' && (
+                <span className="pulse h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} aria-hidden />
+              )}
             </button>
           </div>
         </section>
