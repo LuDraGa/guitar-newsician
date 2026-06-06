@@ -307,6 +307,7 @@ export function toAssetSummary(asset: AssetSummary | AssetRow): AssetSummary {
     duration_sec: asset.duration_sec,
     modal_model: asset.modal_model,
     modal_endpoint: asset.modal_endpoint,
+    pipeline_version: asset.pipeline_version ?? null,
     created_at: asset.created_at,
   };
 }

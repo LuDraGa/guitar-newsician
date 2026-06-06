@@ -42,3 +42,4 @@ test_mps.py
 supabase/.temp/
 
 newsician 2/
+.claude/

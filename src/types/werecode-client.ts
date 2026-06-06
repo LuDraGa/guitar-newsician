@@ -51,6 +51,7 @@ export type AssetSummary = Pick<
   | 'duration_sec'
   | 'modal_model'
   | 'modal_endpoint'
+  | 'pipeline_version'
   | 'created_at'
 >;
 

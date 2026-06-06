@@ -19,6 +19,7 @@ import {
 } from '@/lib/supabase/storage';
 import { getWereCodeRequestContext, requireOwnedSong, type WereCodeSupabaseClient } from '@/server/werecode/context';
 import { lookupLyrics, type LyricsLookupResult } from '@/server/werecode/lyrics-lookup';
+import { PIPELINE_VERSIONS, STAGE_ASSET_KINDS, type PipelineStage } from '@/server/werecode/pipeline-versions';
 import type { AssetKind, AssetRow, JobRow, JobType, Json, LyricsRow, SongRow } from '@/types/werecode';
 
 type SupabaseClient = WereCodeSupabaseClient;
@@ -85,6 +86,7 @@ export const analyzeWorkflowSchema = sourceAssetInputSchema.extend({
   preset: z.enum(['quick', 'full', 'production', 'chord', 'structure']).optional(),
   transpose_to: z.string().trim().min(1).optional(),
   is_stem: z.boolean().optional(),
+  force: z.boolean().optional(),
 });
 
 export const separateWorkflowSchema = sourceAssetInputSchema.extend({
@@ -95,6 +97,7 @@ export const separateWorkflowSchema = sourceAssetInputSchema.extend({
   model: z.enum(['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'mdx_extra']).default('htdemucs_6s'),
   shifts: z.number().int().min(0).max(20).default(2),
   output_format: z.enum(['flac', 'wav']).default(DEFAULT_STEM_SEPARATION_ARTIFACT_FORMAT),
+  force: z.boolean().optional(),
 });
 
 export const lyricsAlignWorkflowSchema = sourceAssetInputSchema.extend({
@@ -102,6 +105,7 @@ export const lyricsAlignWorkflowSchema = sourceAssetInputSchema.extend({
   known_lyrics: z.string().optional(),
   language: z.string().trim().min(1).optional(),
   force_modal_alignment: z.boolean().default(false),
+  force: z.boolean().optional(),
 });
 
 export const lyricsFetchWorkflowSchema = z.object({
@@ -114,6 +118,7 @@ export const midiTranscribeWorkflowSchema = sourceAssetInputSchema.extend({
   stem_name: z.string().trim().min(1).optional(),
   params: z.record(z.string(), z.unknown()).optional(),
   force_retranscribe: z.boolean().optional(),
+  force: z.boolean().optional(),
 });
 
 export async function runStoredJob(jobId: string) {
@@ -154,6 +159,12 @@ export async function runStoredJob(jobId: string) {
 
 export async function runAnalyzeWorkflow(input: z.infer<typeof analyzeWorkflowSchema>, existingJob?: JobRow) {
   const context = await workflowContext('analyze', '/analyze/music', input, existingJob);
+
+  const fresh = await maybeSkipIfFresh(context, input.song_id, 'analyze', input.force, existingJob);
+  if (fresh) {
+    return { ...fresh, analysisResults: [] };
+  }
+
   const outputSpecs = [
     jsonOutput(context.userId, input.song_id, context.job.id, 'analysis', 'analysis_json', 'analysis.json'),
   ];
@@ -175,6 +186,7 @@ export async function runAnalyzeWorkflow(input: z.infer<typeof analyzeWorkflowSc
     },
     outputSpecs,
     songId: input.song_id,
+    pipelineStage: 'analyze',
   });
   const analysisResults =
     result.job.status === 'ready'
@@ -189,6 +201,12 @@ export async function runAnalyzeWorkflow(input: z.infer<typeof analyzeWorkflowSc
 
 export async function runSeparateWorkflow(input: z.infer<typeof separateWorkflowSchema>, existingJob?: JobRow) {
   const context = await workflowContext('separate', '/separate', input, existingJob);
+
+  const fresh = await maybeSkipIfFresh(context, input.song_id, 'separate', input.force, existingJob);
+  if (fresh) {
+    return fresh;
+  }
+
   const song = await requireOwnedSong(context.supabase, context.userId, input.song_id);
   const inputAsset = await resolveInputAssetDuration(context.supabase, input, context.userId, input.song_id);
   const durationSec = inputAsset?.duration_sec ?? song.duration_sec;
@@ -231,6 +249,7 @@ export async function runSeparateWorkflow(input: z.infer<typeof separateWorkflow
     },
     outputSpecs,
     songId: input.song_id,
+    pipelineStage: 'separate',
   });
 }
 
@@ -309,9 +328,17 @@ async function skipSeparateForDurationGuard(
 
 export async function runLyricsAlignWorkflow(input: z.infer<typeof lyricsAlignWorkflowSchema>, existingJob?: JobRow) {
   const context = await workflowContext('lyrics_align', '/lyrics/align', input, existingJob);
+
+  const fresh = await maybeSkipIfFresh(context, input.song_id, 'lyrics_align', input.force, existingJob);
+  if (fresh) {
+    return { ...fresh, lyrics: null };
+  }
+
   let knownLyrics = input.known_lyrics;
 
-  if (!input.force_modal_alignment) {
+  // A deliberate re-run (force) goes straight to Modal alignment with the new model,
+  // skipping the local LRCLIB short-circuit.
+  if (!input.force_modal_alignment && !input.force) {
     const lyricsResolution = await resolveLyricsLocally({
       supabase: context.supabase,
       ownerId: context.userId,
@@ -361,6 +388,7 @@ export async function runLyricsAlignWorkflow(input: z.infer<typeof lyricsAlignWo
     },
     outputSpecs,
     songId: input.song_id,
+    pipelineStage: 'lyrics_align',
   });
   const lyrics =
     result.job.status === 'ready'
@@ -413,6 +441,13 @@ export async function runMidiTranscribeWorkflow(
   existingJob?: JobRow
 ) {
   const context = await workflowContext('midi_transcribe', '/midi/transcribe', input, existingJob);
+
+  const forceMidi = input.force || input.force_retranscribe;
+  const fresh = await maybeSkipIfFresh(context, input.song_id, 'midi_transcribe', forceMidi, existingJob);
+  if (fresh) {
+    return fresh;
+  }
+
   const outputSpecs: OutputSpec[] = [
     {
       key: 'midi',
@@ -440,6 +475,7 @@ export async function runMidiTranscribeWorkflow(
     },
     outputSpecs,
     songId: input.song_id,
+    pipelineStage: 'midi_transcribe',
   });
 }
 
@@ -586,6 +622,93 @@ async function workflowContext(
   return { userId: user.id, supabase, job };
 }
 
+type WorkflowJobContext = { supabase: SupabaseClient; userId: string; job: JobRow };
+
+/**
+ * Skip-if-fresh guard for re-runnable stages. Returns an existing-output result
+ * when the song already has a current output for `stage` stamped with the latest
+ * pipeline version — unless the caller forces a re-run or this is a stored-job
+ * replay (`existingJob`), both of which always run. Returns null when work is needed.
+ */
+async function maybeSkipIfFresh(
+  context: WorkflowJobContext,
+  songId: string,
+  stage: PipelineStage,
+  force: boolean | undefined,
+  existingJob: JobRow | undefined
+) {
+  if (force || existingJob) {
+    return null;
+  }
+
+  const current = await findCurrentStageAssets(context.supabase, context.userId, songId, STAGE_ASSET_KINDS[stage]);
+  const target = PIPELINE_VERSIONS[stage].version;
+  if (current.length === 0 || !current.some((asset) => asset.pipeline_version === target)) {
+    return null;
+  }
+
+  const job = await updateJob(context.supabase, context.userId, context.job.id, {
+    status: 'ready',
+    progress: 100,
+    message: `${PIPELINE_VERSIONS[stage].label} already up to date (${target})`,
+    response_payload: {
+      status: 'skipped',
+      reason: 'already_current',
+      pipeline_version: target,
+    } as Json,
+    diagnostics: [],
+    completed_at: new Date().toISOString(),
+  });
+
+  return {
+    job,
+    song: null as SongRow | null,
+    assets: current,
+    modal: { status: 'skipped' } as ModalResponse,
+  };
+}
+
+async function findCurrentStageAssets(
+  supabase: SupabaseClient,
+  ownerId: string,
+  songId: string,
+  kinds: AssetKind[]
+): Promise<AssetRow[]> {
+  const { data, error } = await supabase
+    .from('assets')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .eq('song_id', songId)
+    .eq('is_current', true)
+    .in('kind', kinds)
+    .returns<AssetRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ?? [];
+}
+
+async function supersedePriorStageAssets(
+  supabase: SupabaseClient,
+  ownerId: string,
+  songId: string,
+  kinds: AssetKind[]
+) {
+  const { error } = await supabase
+    .from('assets')
+    .update({ is_current: false })
+    .eq('owner_id', ownerId)
+    .eq('song_id', songId)
+    .eq('is_current', true)
+    .in('kind', kinds);
+
+  if (error) {
+    throw error;
+  }
+}
+
 async function runJobWithModal(options: {
   supabase: SupabaseClient;
   job: JobRow;
@@ -593,6 +716,7 @@ async function runJobWithModal(options: {
   payload: Record<string, unknown>;
   outputSpecs?: OutputSpec[];
   songId?: string;
+  pipelineStage?: PipelineStage;
 }) {
   await updateJob(options.supabase, options.job.owner_id, options.job.id, {
     status: 'processing',
@@ -625,14 +749,27 @@ async function runJobWithModal(options: {
   if (failed && options.outputSpecs?.length) {
     await cleanupOutputSpecs(options.supabase, options.outputSpecs);
   }
+  const targetSongId = options.songId ?? options.job.song_id;
+  // Replace-in-place: a successful re-run supersedes the prior current outputs for
+  // this stage (soft-archive via is_current=false) before the new ones are inserted
+  // as current. Keeps exactly one current set per (song, stage) and avoids duplicates.
+  if (ready && options.outputSpecs?.length && options.pipelineStage && targetSongId) {
+    await supersedePriorStageAssets(
+      options.supabase,
+      options.job.owner_id,
+      targetSongId,
+      STAGE_ASSET_KINDS[options.pipelineStage]
+    );
+  }
   const assets =
     ready && options.outputSpecs?.length
       ? await createAssetRows(options.supabase, {
           ownerId: options.job.owner_id,
-          songId: options.songId ?? options.job.song_id,
+          songId: targetSongId,
           job: options.job,
           outputSpecs: options.outputSpecs,
           modal,
+          pipelineVersion: options.pipelineStage ? PIPELINE_VERSIONS[options.pipelineStage].version : null,
         })
       : [];
   const song =
@@ -876,6 +1013,7 @@ async function createAssetRows(
     job: JobRow;
     outputSpecs: OutputSpec[];
     modal: ModalResponse;
+    pipelineVersion?: string | null;
   }
 ) {
   const rows = options.outputSpecs
@@ -900,6 +1038,8 @@ async function createAssetRows(
         duration_sec: artifact?.duration_sec ?? null,
         modal_model: artifact?.model ?? null,
         modal_endpoint: options.job.modal_endpoint,
+        pipeline_version: options.pipelineVersion ?? null,
+        is_current: true,
         metadata: {
           job_id: options.job.id,
           modal_artifact: artifact ?? null,
@@ -992,11 +1132,24 @@ async function persistAnalysisResults(
         elapsed_sec: typeof payload.elapsed_sec === 'number' ? payload.elapsed_sec : null,
         error: typeof payload.error === 'string' ? payload.error : null,
         data: value ?? {},
+        is_current: true,
       };
     });
 
   if (rows.length === 0) {
     return [];
+  }
+
+  // Replace-in-place: soft-archive prior analyzer rows for this song before
+  // inserting the fresh set as current (mirrors asset supersede).
+  const { error: supersedeError } = await supabase
+    .from('analysis_results')
+    .update({ is_current: false })
+    .eq('owner_id', ownerId)
+    .eq('song_id', songId)
+    .eq('is_current', true);
+  if (supersedeError) {
+    throw supersedeError;
   }
 
   const { data, error } = await supabase.from('analysis_results').insert(rows).select('*');

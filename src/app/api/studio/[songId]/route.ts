@@ -40,6 +40,7 @@ export async function GET(_request: Request, context: RouteContext) {
         .select(assetSummarySelect)
         .eq('song_id', songId)
         .eq('owner_id', user.id)
+        .eq('is_current', true)
         .order('created_at', { ascending: false })
         .returns<AssetSummary[]>(),
       supabase
@@ -47,6 +48,7 @@ export async function GET(_request: Request, context: RouteContext) {
         .select('*')
         .eq('song_id', songId)
         .eq('owner_id', user.id)
+        .eq('is_current', true)
         .order('created_at', { ascending: false })
         .returns<AnalysisResultRow[]>(),
       supabase

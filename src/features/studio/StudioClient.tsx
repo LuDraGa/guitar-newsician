@@ -53,6 +53,12 @@ import {
   getStemSeparationDurationLimitWarning,
 } from '@/lib/audio/stem-separation-limits';
 import { parseLrc } from '@/lib/music/lrc';
+import {
+  ANALYZE_FULL_ANALYZERS,
+  PIPELINE_VERSIONS,
+  computeStageStatuses,
+  type PipelineStage,
+} from '@/server/werecode/pipeline-versions';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
 import type { AssetSummary, SongSummary, StudioDetail } from '@/types/werecode-client';
 import { MusicXmlPreviewPanel } from './MusicXmlPreviewPanel';
@@ -76,6 +82,7 @@ type SaveLyricsResult = {
 };
 
 type StudioTab = 'karaoke' | 'guitar' | 'lyrics';
+type AnalyzeDepth = 'quick' | 'full';
 type GuitarMode = 'chords' | 'sheet' | 'tab';
 type LyricDisplayLine = { id: string; timestamp: number | null; text: string };
 type StemMixState = { level: number; muted: boolean; solo: boolean };
@@ -144,6 +151,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<StudioTab>('karaoke');
+  const [analyzeDepth, setAnalyzeDepth] = useState<AnalyzeDepth>('full');
   const [coachOpen, setCoachOpen] = useState(false);
   const [transportMinimized, setTransportMinimized] = useState(false);
   const [transportTime, setTransportTime] = useState(0);
@@ -176,7 +184,12 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     [assets]
   );
   const playableStemAssets = useMemo(() => dedupeLatestStemAssets(stemAssets), [stemAssets]);
+  const stageStatuses = useMemo(
+    () => computeStageStatuses(assets.map((asset) => ({ kind: asset.kind, pipeline_version: asset.pipeline_version ?? null }))),
+    [assets]
+  );
   const lyricLines = useMemo(() => deriveLyricLines(syncedLyrics, plainLyrics), [plainLyrics, syncedLyrics]);
+  const sectionSegments = useMemo(() => deriveSectionSegments(analysisResults), [analysisResults]);
   const facts = useMemo(() => buildSongFacts(song), [song]);
   const stemSeparationWarning = useMemo(
     () => getStemSeparationDurationLimitWarning(sourceAsset?.duration_sec ?? song?.duration_sec, DEFAULT_STEM_SEPARATION_ARTIFACT_FORMAT),
@@ -562,13 +575,20 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   }
 
   const workflowActions = {
-    analyze: () =>
-      sourceAsset &&
-      runWorkflow('Analysis', '/api/workflows/analyze', {
-        source_asset_id: sourceAsset.id,
-        preset: 'quick',
-      }),
-    stems: () =>
+    analyze: (options?: { force?: boolean; analyzers?: readonly string[] }) => {
+      // Depth toggle drives the analyzer set: full sends the explicit list
+      // (incl. chords + structure); quick uses the cheap preset.
+      const analyzers = options?.analyzers ?? (analyzeDepth === 'full' ? ANALYZE_FULL_ANALYZERS : undefined);
+      return (
+        sourceAsset &&
+        runWorkflow('Analysis', '/api/workflows/analyze', {
+          source_asset_id: sourceAsset.id,
+          ...(analyzers ? { analyzers } : { preset: 'quick' }),
+          ...(options?.force ? { force: true } : {}),
+        })
+      );
+    },
+    stems: (options?: { force?: boolean }) =>
       sourceAsset &&
       runWorkflow('Stem separation', '/api/workflows/separate', {
         source_asset_id: sourceAsset.id,
@@ -576,19 +596,22 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         model: 'htdemucs_6s',
         shifts: 2,
         output_format: DEFAULT_STEM_SEPARATION_ARTIFACT_FORMAT,
+        ...(options?.force ? { force: true } : {}),
       }),
     lyricsFetch: () => runWorkflow('Lyrics fetch', '/api/workflows/lyrics/fetch', {}),
-    lyricsAlign: () =>
+    lyricsAlign: (options?: { force?: boolean }) =>
       (vocalAsset ?? sourceAsset) &&
       runWorkflow('Lyrics alignment', '/api/workflows/lyrics/align', {
         source_asset_id: (vocalAsset ?? sourceAsset)!.id,
         known_lyrics: (plainLyrics?.content ?? lyricsDraft) || undefined,
+        ...(options?.force ? { force: true } : {}),
       }),
-    midi: () =>
+    midi: (options?: { force?: boolean }) =>
       (sourceAsset ?? vocalAsset) &&
       runWorkflow('MIDI transcription', '/api/workflows/midi/transcribe', {
         source_asset_id: (sourceAsset ?? vocalAsset)!.id,
         stem_name: vocalAsset ? 'vocals' : undefined,
+        ...(options?.force ? { force: true } : {}),
       }),
     musicXml: () =>
       noteEventsAsset &&
@@ -596,6 +619,14 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         note_events_asset_id: noteEventsAsset.id,
         title: song?.title,
       }),
+  };
+
+  // Force re-run a stage with the latest pipeline model (used by the staleness banner).
+  const stageRerunners: Record<PipelineStage, () => void> = {
+    separate: () => void workflowActions.stems({ force: true }),
+    analyze: () => void workflowActions.analyze({ force: true }),
+    midi_transcribe: () => void workflowActions.midi({ force: true }),
+    lyrics_align: () => void workflowActions.lyricsAlign({ force: true }),
   };
 
   return (
@@ -637,6 +668,72 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                 </span>
               )}
             </div>
+
+            {sourceAsset && (
+              <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-[var(--line)] px-3 py-2 text-[13px]">
+                <div className="inline-flex items-center gap-2">
+                  <span className="text-[var(--muted)]">Analysis</span>
+                  <div className="inline-flex items-center gap-1" role="group" aria-label="Analysis depth">
+                    {(['quick', 'full'] as const).map((depth) => {
+                      const active = analyzeDepth === depth;
+                      return (
+                        <button
+                          key={depth}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => setAnalyzeDepth(depth)}
+                          className={`inline-flex h-7 items-center rounded-full px-3 text-[12px] font-bold capitalize transition ${
+                            active
+                              ? 'shadow-none'
+                              : 'bg-transparent text-[var(--muted)] shadow-[inset_0_0_0_1.5px_var(--line)] hover:text-[var(--ink)]'
+                          }`}
+                          style={active ? { background: 'var(--ink)', color: 'var(--paper)' } : undefined}
+                          title={
+                            depth === 'quick'
+                              ? 'Quick: tempo, key, basics (fast)'
+                              : 'Full: adds chords + structure (slower)'
+                          }
+                        >
+                          {depth}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {stageStatuses.length > 0 && (
+                  <div className="inline-flex flex-wrap items-center gap-2 border-l border-[var(--line)] pl-3">
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-[var(--muted)]">
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Re-run
+                    </span>
+                    {stageStatuses.map(({ stage, isStale }) => (
+                      <button
+                        key={stage}
+                        type="button"
+                        onClick={stageRerunners[stage]}
+                        disabled={Boolean(running)}
+                        className="pill"
+                        title={
+                          (isStale
+                            ? `Newer model available — re-run ${PIPELINE_VERSIONS[stage].label} (latest ${PIPELINE_VERSIONS[stage].version})`
+                            : `Re-run ${PIPELINE_VERSIONS[stage].label} with the latest model (${PIPELINE_VERSIONS[stage].version})`) +
+                          (stage === 'analyze'
+                            ? analyzeDepth === 'full'
+                              ? ' — full set incl. chords + structure'
+                              : ' — quick set: tempo, key, basics'
+                            : '')
+                        }
+                      >
+                        {PIPELINE_VERSIONS[stage].label}
+                        {stage === 'analyze' && <span className="ml-1 opacity-70">({analyzeDepth})</span>}
+                        {isStale && <span className="ml-1.5 opacity-70">· new model</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="min-h-0 flex-1">
               {tab === 'karaoke' && (
@@ -708,6 +805,9 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                 onMinimizedChange={setTransportMinimized}
                 onTimeChange={setTransportTime}
                 onPlayingChange={setTransportPlaying}
+                sections={sectionSegments}
+                analyzing={Boolean(running)}
+                onRunAnalyze={sourceAsset ? () => void workflowActions.analyze() : undefined}
               />
             </div>
           </div>
@@ -1360,6 +1460,9 @@ function TransportCard({
   onMinimizedChange,
   onTimeChange,
   onPlayingChange,
+  sections,
+  analyzing,
+  onRunAnalyze,
 }: {
   song: SongSummary | null;
   audioUrl: string | null;
@@ -1370,6 +1473,9 @@ function TransportCard({
   onMinimizedChange: (minimized: boolean) => void;
   onTimeChange: (time: number) => void;
   onPlayingChange: (playing: boolean) => void;
+  sections: SectionSegment[];
+  analyzing: boolean;
+  onRunAnalyze?: () => void;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stemAudioRefs = useRef(new Map<string, HTMLAudioElement>());
@@ -1405,6 +1511,7 @@ function TransportCard({
   const hasPlayableAudio = hasStemPlayback ? stemsReady : Boolean(audioUrl);
   const playbackModeLabel = preparingPlayback ? `Preparing stems ${readyStemCount}/${stemSources.length}` : hasStemPlayback ? 'Stems mix' : 'Original';
   const playButtonLabel = preparingPlayback ? playbackModeLabel : playing ? 'Pause' : 'Play';
+  const currentSection = sections.find((section) => time >= section.start && time < section.end);
 
   const getActiveAudios = useCallback(() => {
     if (hasStemPlayback) {
@@ -1631,6 +1738,16 @@ function TransportCard({
   function renderWaveform(heightClass: string, showLoopRange: boolean) {
     return (
       <div className={`relative flex ${heightClass} flex-1 items-center gap-[2px] border-l border-r border-[var(--line-2)] px-3`}>
+        {duration > 0 &&
+          sections.map((section, index) =>
+            section.start <= 0 ? null : (
+              <div
+                key={index}
+                className="pointer-events-none absolute bottom-0 top-0 border-l border-[var(--line-2)]"
+                style={{ left: `${Math.min(100, (section.start / duration) * 100)}%` }}
+              />
+            )
+          )}
         {showLoopRange && loopRange && (
           <div
             className="pointer-events-none absolute bottom-2 top-2 rounded-[6px] bg-[var(--accent-soft)]"
@@ -1785,7 +1902,21 @@ function TransportCard({
             <div className="flex items-center gap-3">
               <span className="mono text-sm font-bold">{formatSeconds(time)}</span>
               <span className="text-xs text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</span>
-              <span className="chip accent">Practice</span>
+              {sections.length > 0 ? (
+                currentSection && <span className="chip accent">{currentSection.name}</span>
+              ) : onRunAnalyze ? (
+                <button
+                  type="button"
+                  onClick={onRunAnalyze}
+                  disabled={analyzing}
+                  className="chip accent inline-flex items-center gap-1 disabled:opacity-50"
+                  style={{ cursor: analyzing ? 'default' : 'pointer' }}
+                  title="Run analysis to detect song sections (verse, chorus, bridge)"
+                >
+                  <Wand2 className="h-3 w-3" />
+                  {analyzing ? 'Analyzing…' : 'Run analysis for sections'}
+                </button>
+              ) : null}
               <span className={`chip ${hasStemPlayback && stemsReady ? 'live' : ''}`}>{playbackModeLabel}</span>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
@@ -2904,6 +3035,88 @@ function parseAlignmentLyrics(content: string): LyricDisplayLine[] {
   } catch {
     return [];
   }
+}
+
+type SectionSegment = { start: number; end: number; name: string };
+
+// Pull the live `structure_msaf` row and turn its mapped_segments into named,
+// playhead-comparable spans. The analyzer envelope is stored whole, so the
+// segments live at row.data.data.mapped_segments (see persistAnalysisResults).
+function deriveSectionSegments(analysisResults: AnalysisResultRow[]): SectionSegment[] {
+  const row =
+    analysisResults.find((result) => result.analyzer_name === 'structure_msaf' && result.ok && result.is_current) ??
+    analysisResults.find((result) => result.analyzer_name === 'structure_msaf' && result.ok);
+  if (!row || !row.data || typeof row.data !== 'object' || Array.isArray(row.data)) {
+    return [];
+  }
+  const inner = (row.data as Record<string, unknown>).data;
+  if (!inner || typeof inner !== 'object' || Array.isArray(inner)) {
+    return [];
+  }
+  const rawSegments = (inner as Record<string, unknown>).mapped_segments;
+  if (!Array.isArray(rawSegments)) {
+    return [];
+  }
+
+  const parsed = rawSegments
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return null;
+      }
+      const record = entry as Record<string, unknown>;
+      const start = typeof record.start_sec === 'number' ? record.start_sec : null;
+      const end = typeof record.end_sec === 'number' ? record.end_sec : null;
+      const section = typeof record.section === 'string' ? record.section.trim().toLowerCase() : '';
+      // Drop non-finite spans and degenerate slivers so they never flash as active.
+      if (start === null || end === null || !Number.isFinite(start) || !Number.isFinite(end) || end - start < 0.5) {
+        return null;
+      }
+      return { start, end, section };
+    })
+    .filter((entry): entry is { start: number; end: number; section: string } => entry !== null)
+    .sort((a, b) => a.start - b.start);
+
+  return nameSectionSegments(parsed);
+}
+
+// Naming rules: generic "section" → Intro/Outro by position (else "Section N");
+// real types (verse/chorus/bridge…) get a 1/2 suffix only when that type recurs.
+function nameSectionSegments(segments: { start: number; end: number; section: string }[]): SectionSegment[] {
+  const isGeneric = (section: string) => !section || section === 'section';
+  const typeCounts = new Map<string, number>();
+  for (const seg of segments) {
+    if (!isGeneric(seg.section)) {
+      typeCounts.set(seg.section, (typeCounts.get(seg.section) ?? 0) + 1);
+    }
+  }
+  const midGenericCount = segments.filter((seg, i) => isGeneric(seg.section) && i !== 0 && i !== segments.length - 1).length;
+
+  const runningIndex = new Map<string, number>();
+  let midGenericIndex = 0;
+
+  return segments.map((seg, index) => {
+    let name: string;
+    if (isGeneric(seg.section)) {
+      if (index === 0) {
+        name = 'Intro';
+      } else if (index === segments.length - 1) {
+        name = 'Outro';
+      } else {
+        midGenericIndex += 1;
+        name = midGenericCount > 1 ? `Section ${midGenericIndex}` : 'Section';
+      }
+    } else {
+      const title = seg.section.charAt(0).toUpperCase() + seg.section.slice(1);
+      if ((typeCounts.get(seg.section) ?? 0) > 1) {
+        const n = (runningIndex.get(seg.section) ?? 0) + 1;
+        runningIndex.set(seg.section, n);
+        name = `${title} ${n}`;
+      } else {
+        name = title;
+      }
+    }
+    return { start: seg.start, end: seg.end, name };
+  });
 }
 
 function deriveChordEvents(analysisResults: AnalysisResultRow[]): ChordEvent[] {

@@ -112,6 +112,8 @@ export type AssetRow = {
   source_asset_id: string | null;
   modal_model: string | null;
   modal_endpoint: string | null;
+  pipeline_version: string | null;
+  is_current: boolean;
   metadata: Json;
   created_at: string;
 };
@@ -127,6 +129,7 @@ export type AnalysisResultRow = {
   elapsed_sec: number | null;
   error: string | null;
   data: Json;
+  is_current: boolean;
   created_at: string;
 };
 
