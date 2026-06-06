@@ -189,7 +189,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   );
   const lyricLines = useMemo(() => deriveLyricLines(syncedLyrics, plainLyrics), [plainLyrics, syncedLyrics]);
   const sectionSegments = useMemo(() => deriveSectionSegments(analysisResults), [analysisResults]);
-  const facts = useMemo(() => buildSongFacts(song), [song]);
+  const facts = useMemo(() => buildSongFacts(song, analysisResults), [song, analysisResults]);
   const stemSeparationWarning = useMemo(
     () => getStemSeparationDurationLimitWarning(sourceAsset?.duration_sec ?? song?.duration_sec, DEFAULT_STEM_SEPARATION_ARTIFACT_FORMAT),
     [song?.duration_sec, sourceAsset?.duration_sec]
@@ -3357,13 +3357,17 @@ function activeChordIndex(events: ChordEvent[], currentTime: number) {
   return active;
 }
 
-function buildSongFacts(song: SongSummary | null): Array<[string, string]> {
+function buildSongFacts(song: SongSummary | null, analysisResults: AnalysisResultRow[] = []): Array<[string, string]> {
   const metadata =
     song?.metadata && typeof song.metadata === 'object' && !Array.isArray(song.metadata)
       ? (song.metadata as Record<string, unknown>)
       : {};
-  const key = readMetadata(metadata, ['key', 'musical_key']) ?? '--';
-  const tempo = readMetadata(metadata, ['tempo', 'bpm', 'tempo_bpm']);
+  // Manual metadata (rarely set) wins; otherwise fall back to the live analyzer
+  // rows the run already loads. Tuning/Capo have no analyzer, so they stay
+  // static placeholders.
+  const analyzed = deriveKeyTempo(analysisResults);
+  const key = readMetadata(metadata, ['key', 'musical_key']) ?? analyzed.key ?? '--';
+  const tempo = readMetadata(metadata, ['tempo', 'bpm', 'tempo_bpm']) ?? analyzed.tempo;
   const tuning = readMetadata(metadata, ['tuning']) ?? 'Standard';
   const capo = readMetadata(metadata, ['capo']) ?? 'None';
 
@@ -3373,6 +3377,36 @@ function buildSongFacts(song: SongSummary | null): Array<[string, string]> {
     ['Tuning', tuning],
     ['Capo', capo],
   ];
+}
+
+// Pull current key/tempo straight from the analyzer rows. As with the structure
+// and chord derivations, the analyzer envelope is stored whole, so the useful
+// fields live at row.data.data (see persistAnalysisResults).
+function deriveKeyTempo(analysisResults: AnalysisResultRow[]): { key: string | null; tempo: string | null } {
+  const tonal = readAnalyzerData(analysisResults, 'tonal_key');
+  const rawKey = typeof tonal?.key === 'string' ? tonal.key.trim() : '';
+  const rawScale = typeof tonal?.scale === 'string' ? tonal.scale.trim() : '';
+  const key = rawKey ? (rawScale ? `${rawKey} ${rawScale}` : rawKey) : null;
+
+  const beats = readAnalyzerData(analysisResults, 'tempo_beats');
+  const rawBpm = typeof beats?.bpm === 'number' && Number.isFinite(beats.bpm) ? beats.bpm : null;
+  const tempo = rawBpm !== null ? String(Math.round(rawBpm)) : null;
+
+  return { key, tempo };
+}
+
+function readAnalyzerData(analysisResults: AnalysisResultRow[], name: string): Record<string, unknown> | null {
+  const row =
+    analysisResults.find((result) => result.analyzer_name === name && result.ok && result.is_current) ??
+    analysisResults.find((result) => result.analyzer_name === name && result.ok);
+  if (!row || !row.data || typeof row.data !== 'object' || Array.isArray(row.data)) {
+    return null;
+  }
+  const inner = (row.data as Record<string, unknown>).data;
+  if (!inner || typeof inner !== 'object' || Array.isArray(inner)) {
+    return null;
+  }
+  return inner as Record<string, unknown>;
 }
 
 function readMetadata(metadata: Record<string, unknown>, keys: string[]) {
