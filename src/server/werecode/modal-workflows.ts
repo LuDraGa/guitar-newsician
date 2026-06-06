@@ -2,6 +2,13 @@ import 'server-only';
 
 import { z } from 'zod';
 
+import {
+  DEFAULT_STEM_SEPARATION_ARTIFACT_FORMAT,
+  estimateStereoWavBytes,
+  getStemSeparationDurationLimitWarning,
+  stemSeparationContentType,
+  type StemSeparationArtifactFormat,
+} from '@/lib/audio/stem-separation-limits';
 import { RouteNotFoundError } from '@/lib/http/route-error';
 import { modalFetch } from '@/lib/modal/client';
 import {
@@ -48,6 +55,7 @@ type OutputSpec = {
   bucket: WereCodeStorageBucket;
   objectPath: string;
   contentType?: string;
+  expectedFormat?: StemSeparationArtifactFormat;
 };
 
 type LyricsResolution = {
@@ -72,18 +80,7 @@ const sourceAssetInputSchema = z
 export const analyzeWorkflowSchema = sourceAssetInputSchema.extend({
   song_id: z.string().uuid(),
   analyzers: z
-    .array(
-      z.enum([
-        'basic_stats',
-        'tempo',
-        'key',
-        'chords',
-        'structure',
-        'tempo_beats',
-        'tonal_key',
-        'structure_msaf',
-      ])
-    )
+    .array(z.enum(['basic_stats', 'tempo', 'key', 'chords', 'structure', 'tempo_beats', 'tonal_key', 'structure_msaf']))
     .optional(),
   preset: z.enum(['quick', 'full', 'production', 'chord', 'structure']).optional(),
   transpose_to: z.string().trim().min(1).optional(),
@@ -97,6 +94,7 @@ export const separateWorkflowSchema = sourceAssetInputSchema.extend({
     .default(['vocals', 'drums', 'bass', 'other', 'guitar', 'piano']),
   model: z.enum(['htdemucs', 'htdemucs_ft', 'htdemucs_6s', 'mdx_extra']).default('htdemucs_6s'),
   shifts: z.number().int().min(0).max(20).default(2),
+  output_format: z.enum(['flac', 'wav']).default(DEFAULT_STEM_SEPARATION_ARTIFACT_FORMAT),
 });
 
 export const lyricsAlignWorkflowSchema = sourceAssetInputSchema.extend({
@@ -191,12 +189,29 @@ export async function runAnalyzeWorkflow(input: z.infer<typeof analyzeWorkflowSc
 
 export async function runSeparateWorkflow(input: z.infer<typeof separateWorkflowSchema>, existingJob?: JobRow) {
   const context = await workflowContext('separate', '/separate', input, existingJob);
+  const song = await requireOwnedSong(context.supabase, context.userId, input.song_id);
+  const inputAsset = await resolveInputAssetDuration(context.supabase, input, context.userId, input.song_id);
+  const durationSec = inputAsset?.duration_sec ?? song.duration_sec;
+  const durationWarning = getStemSeparationDurationLimitWarning(durationSec, input.output_format);
+
+  if (durationWarning) {
+    return skipSeparateForDurationGuard(context, input, durationSec, durationWarning);
+  }
+
   const outputSpecs = input.stems.map((stem) => ({
     key: stem,
     kind: stemToAssetKind(stem),
     bucket: WERECODE_STORAGE_BUCKETS.artifacts,
-    objectPath: buildObjectPath(context.userId, input.song_id, 'artifacts', context.job.id, 'stems', `${stem}.wav`),
-    contentType: 'audio/wav',
+    objectPath: buildObjectPath(
+      context.userId,
+      input.song_id,
+      'artifacts',
+      context.job.id,
+      'stems',
+      `${stem}.${input.output_format}`
+    ),
+    contentType: stemSeparationContentType(input.output_format),
+    expectedFormat: input.output_format,
   }));
   const inputUrl = await resolveInputUrl(context.supabase, input, context.userId, input.song_id);
   const output_upload_urls = await createUploadUrlMap(outputSpecs);
@@ -211,11 +226,85 @@ export async function runSeparateWorkflow(input: z.infer<typeof separateWorkflow
       stems: input.stems,
       model: input.model,
       shifts: input.shifts,
+      output_format: input.output_format,
       job_id: context.job.id,
     },
     outputSpecs,
     songId: input.song_id,
   });
+}
+
+async function resolveInputAssetDuration(
+  supabase: SupabaseClient,
+  input: { source_asset_id?: string },
+  ownerId: string,
+  songId: string
+) {
+  if (!input.source_asset_id) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('assets')
+    .select('duration_sec')
+    .eq('id', input.source_asset_id)
+    .eq('owner_id', ownerId)
+    .eq('song_id', songId)
+    .maybeSingle<{ duration_sec: number | null }>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function skipSeparateForDurationGuard(
+  context: { supabase: SupabaseClient; userId: string; job: JobRow },
+  input: z.infer<typeof separateWorkflowSchema>,
+  durationSec: number | null | undefined,
+  durationWarning: string
+) {
+  const estimatedBytesPerStem =
+    typeof durationSec === 'number' && Number.isFinite(durationSec) ? estimateStereoWavBytes(durationSec) : null;
+
+  const diagnostics: Diagnostic[] = [
+    {
+      level: 'error',
+      stage: 'separate_duration_guard',
+      message: durationWarning,
+      details: {
+        duration_sec: durationSec ?? null,
+        output_format: input.output_format,
+        stem_count: input.stems.length,
+        estimated_wav_bytes_per_stem: estimatedBytesPerStem,
+        estimated_wav_bytes_total: estimatedBytesPerStem !== null ? estimatedBytesPerStem * input.stems.length : null,
+      } as unknown as Json,
+    },
+  ];
+
+  const modal: ModalResponse = {
+    status: 'failed',
+    diagnostics,
+    skipped_modal: true,
+  };
+
+  const job = await updateJob(context.supabase, context.job.owner_id, context.job.id, {
+    status: 'failed',
+    progress: 0,
+    message: 'Stem separation skipped before Modal',
+    error_message: durationWarning,
+    response_payload: modal as unknown as Json,
+    diagnostics: diagnostics as unknown as Json,
+    completed_at: new Date().toISOString(),
+  });
+
+  return {
+    job,
+    song: null,
+    assets: [] as AssetRow[],
+    modal,
+  };
 }
 
 export async function runLyricsAlignWorkflow(input: z.infer<typeof lyricsAlignWorkflowSchema>, existingJob?: JobRow) {
@@ -247,7 +336,14 @@ export async function runLyricsAlignWorkflow(input: z.infer<typeof lyricsAlignWo
   }
 
   const outputSpecs = [
-    jsonOutput(context.userId, input.song_id, context.job.id, 'lyrics_alignment', 'lyrics_alignment', 'lyrics_alignment.json'),
+    jsonOutput(
+      context.userId,
+      input.song_id,
+      context.job.id,
+      'lyrics_alignment',
+      'lyrics_alignment',
+      'lyrics_alignment.json'
+    ),
   ];
   const inputUrl = await resolveInputUrl(context.supabase, input, context.userId, input.song_id);
   const output_upload_urls = await createUploadUrlMap(outputSpecs);
@@ -312,7 +408,10 @@ export async function runLyricsFetchWorkflow(input: z.infer<typeof lyricsFetchWo
   };
 }
 
-export async function runMidiTranscribeWorkflow(input: z.infer<typeof midiTranscribeWorkflowSchema>, existingJob?: JobRow) {
+export async function runMidiTranscribeWorkflow(
+  input: z.infer<typeof midiTranscribeWorkflowSchema>,
+  existingJob?: JobRow
+) {
   const context = await workflowContext('midi_transcribe', '/midi/transcribe', input, existingJob);
   const outputSpecs: OutputSpec[] = [
     {
@@ -450,7 +549,12 @@ async function completeJobWithSyncedLyrics(
   });
 }
 
-async function workflowContext(jobType: JobType, endpoint: string | null, requestPayload: unknown, existingJob?: JobRow) {
+async function workflowContext(
+  jobType: JobType,
+  endpoint: string | null,
+  requestPayload: unknown,
+  existingJob?: JobRow
+) {
   const { user, supabase } = await getWereCodeRequestContext();
 
   if (existingJob) {
@@ -497,10 +601,22 @@ async function runJobWithModal(options: {
     modal_endpoint: options.endpoint,
   });
 
-  const modal = await modalFetch<ModalResponse>(options.endpoint, {
+  let modal = await modalFetch<ModalResponse>(options.endpoint, {
     method: 'POST',
     body: JSON.stringify(options.payload),
   });
+
+  if (options.outputSpecs?.length && ((modal.status ?? 'ready') === 'ready' || modal.status === 'skipped')) {
+    const artifactFormatDiagnostics = validateModalArtifactFormats(options.outputSpecs, modal);
+    if (artifactFormatDiagnostics.length > 0) {
+      modal = {
+        ...modal,
+        status: 'failed',
+        diagnostics: [...(modal.diagnostics ?? []), ...artifactFormatDiagnostics],
+      };
+    }
+  }
+
   const modalStatus = modal.status ?? 'ready';
   const ready = modalStatus === 'ready' || modalStatus === 'skipped';
   const pending = modalStatus === 'accepted' || modalStatus === 'processing';
@@ -509,18 +625,24 @@ async function runJobWithModal(options: {
   if (failed && options.outputSpecs?.length) {
     await cleanupOutputSpecs(options.supabase, options.outputSpecs);
   }
-  const assets = ready && options.outputSpecs?.length
-    ? await createAssetRows(options.supabase, {
-        ownerId: options.job.owner_id,
-        songId: options.songId ?? options.job.song_id,
-        job: options.job,
-        outputSpecs: options.outputSpecs,
-        modal,
-      })
-    : [];
+  const assets =
+    ready && options.outputSpecs?.length
+      ? await createAssetRows(options.supabase, {
+          ownerId: options.job.owner_id,
+          songId: options.songId ?? options.job.song_id,
+          job: options.job,
+          outputSpecs: options.outputSpecs,
+          modal,
+        })
+      : [];
   const song =
     ready && assets.length > 0 && (options.songId ?? options.job.song_id)
-      ? await updateSongReadiness(options.supabase, options.job.owner_id, options.songId ?? options.job.song_id!, assets)
+      ? await updateSongReadiness(
+          options.supabase,
+          options.job.owner_id,
+          options.songId ?? options.job.song_id!,
+          assets
+        )
       : null;
 
   const updatedJob = await updateJob(options.supabase, options.job.owner_id, options.job.id, {
@@ -756,31 +878,35 @@ async function createAssetRows(
     modal: ModalResponse;
   }
 ) {
-  const rows = options.outputSpecs.map((spec) => {
-    const artifact = options.modal.artifacts?.[spec.key] ?? (spec.key === 'midi' ? options.modal.artifact ?? undefined : undefined);
+  const rows = options.outputSpecs
+    .map((spec) => {
+      const artifact =
+        options.modal.artifacts?.[spec.key] ??
+        (spec.key === 'midi' ? (options.modal.artifact ?? undefined) : undefined);
 
-    if (!artifact?.uploaded) {
-      return null;
-    }
+      if (!artifact?.uploaded) {
+        return null;
+      }
 
-    return {
-      owner_id: options.ownerId,
-      song_id: options.songId ?? null,
-      version_id: options.job.version_id,
-      kind: spec.kind,
-      bucket_id: spec.bucket,
-      object_path: spec.objectPath,
-      content_type: artifact?.mime_type ?? spec.contentType ?? null,
-      byte_size: readByteSize(artifact),
-      duration_sec: artifact?.duration_sec ?? null,
-      modal_model: artifact?.model ?? null,
-      modal_endpoint: options.job.modal_endpoint,
-      metadata: {
-        job_id: options.job.id,
-        modal_artifact: artifact ?? null,
-      },
-    };
-  }).filter((row) => row !== null);
+      return {
+        owner_id: options.ownerId,
+        song_id: options.songId ?? null,
+        version_id: options.job.version_id,
+        kind: spec.kind,
+        bucket_id: spec.bucket,
+        object_path: spec.objectPath,
+        content_type: artifact?.mime_type ?? spec.contentType ?? null,
+        byte_size: readByteSize(artifact),
+        duration_sec: artifact?.duration_sec ?? null,
+        modal_model: artifact?.model ?? null,
+        modal_endpoint: options.job.modal_endpoint,
+        metadata: {
+          job_id: options.job.id,
+          modal_artifact: artifact ?? null,
+        },
+      };
+    })
+    .filter((row) => row !== null);
 
   if (rows.length === 0) {
     return [];
@@ -994,7 +1120,10 @@ function jsonOutput(
 }
 
 function buildObjectPath(...parts: string[]) {
-  return parts.flatMap((part) => part.split('/')).filter(Boolean).join('/');
+  return parts
+    .flatMap((part) => part.split('/'))
+    .filter(Boolean)
+    .join('/');
 }
 
 function stemToAssetKind(stem: string): AssetKind {
@@ -1059,6 +1188,61 @@ function readByteSize(artifact: ArtifactMetadata | undefined) {
   return typeof value === 'number' ? value : null;
 }
 
+function validateModalArtifactFormats(outputSpecs: OutputSpec[], modal: ModalResponse): Diagnostic[] {
+  const mismatches = outputSpecs
+    .map((spec) => {
+      const expectedFormat = spec.expectedFormat;
+      const artifact = modal.artifacts?.[spec.key] ?? (spec.key === 'midi' ? modal.artifact ?? undefined : undefined);
+
+      if (!expectedFormat || !artifact?.uploaded || artifactMatchesExpectedFormat(artifact, expectedFormat)) {
+        return null;
+      }
+
+      return {
+        key: spec.key,
+        expected_format: expectedFormat,
+        expected_mime_type: spec.contentType ?? null,
+        actual_format: artifact.format ?? null,
+        actual_mime_type: artifact.mime_type ?? null,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+  if (mismatches.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      level: 'error',
+      stage: 'separate_artifact_format',
+      message: 'Modal returned stem artifacts in a different format than WereCode requested.',
+      details: {
+        mismatches,
+      } as unknown as Json,
+    },
+  ];
+}
+
+function artifactMatchesExpectedFormat(artifact: ArtifactMetadata, expectedFormat: StemSeparationArtifactFormat) {
+  const actualFormat = artifact.format?.toLowerCase() ?? null;
+  const actualMime = artifact.mime_type?.split(';')[0]?.trim().toLowerCase() ?? null;
+
+  if (actualFormat === expectedFormat) {
+    return true;
+  }
+
+  if (expectedFormat === 'flac') {
+    return actualMime === 'audio/flac' || actualMime === 'audio/x-flac';
+  }
+
+  return actualMime === 'audio/wav' || actualMime === 'audio/x-wav' || actualMime === 'audio/wave';
+}
+
 function firstDiagnosticMessage(diagnostics: Diagnostic[] | undefined) {
-  return diagnostics?.find((diagnostic) => diagnostic.level === 'error')?.message ?? diagnostics?.[0]?.message ?? 'Modal job failed';
+  return (
+    diagnostics?.find((diagnostic) => diagnostic.level === 'error')?.message ??
+    diagnostics?.[0]?.message ??
+    'Modal job failed'
+  );
 }

@@ -48,6 +48,10 @@ import {
   toStudioDetail,
   useWereCodeDataCache,
 } from '@/lib/client-cache/werecode-data-cache';
+import {
+  DEFAULT_STEM_SEPARATION_ARTIFACT_FORMAT,
+  getStemSeparationDurationLimitWarning,
+} from '@/lib/audio/stem-separation-limits';
 import { parseLrc } from '@/lib/music/lrc';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
 import type { AssetSummary, SongSummary, StudioDetail } from '@/types/werecode-client';
@@ -174,6 +178,10 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const playableStemAssets = useMemo(() => dedupeLatestStemAssets(stemAssets), [stemAssets]);
   const lyricLines = useMemo(() => deriveLyricLines(syncedLyrics, plainLyrics), [plainLyrics, syncedLyrics]);
   const facts = useMemo(() => buildSongFacts(song), [song]);
+  const stemSeparationWarning = useMemo(
+    () => getStemSeparationDurationLimitWarning(sourceAsset?.duration_sec ?? song?.duration_sec, DEFAULT_STEM_SEPARATION_ARTIFACT_FORMAT),
+    [song?.duration_sec, sourceAsset?.duration_sec]
+  );
   const stemPlaybackSources = useMemo(
     () =>
       playableStemAssets
@@ -567,6 +575,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         stems: ['vocals', 'drums', 'bass', 'other', 'guitar', 'piano'],
         model: 'htdemucs_6s',
         shifts: 2,
+        output_format: DEFAULT_STEM_SEPARATION_ARTIFACT_FORMAT,
       }),
     lyricsFetch: () => runWorkflow('Lyrics fetch', '/api/workflows/lyrics/fetch', {}),
     lyricsAlign: () =>
@@ -641,6 +650,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   stemUrls={stemUrls}
                   stemSignError={stemSignError}
                   sourceAsset={sourceAsset}
+                  stemSeparationWarning={stemSeparationWarning}
                   analysisResults={analysisResults}
                   running={running}
                   onUpdateStemMix={updateStemMix}
@@ -806,6 +816,7 @@ function KaraokeProductView({
   stemUrls,
   stemSignError,
   sourceAsset,
+  stemSeparationWarning,
   analysisResults,
   running,
   onUpdateStemMix,
@@ -828,6 +839,7 @@ function KaraokeProductView({
   stemUrls: Record<string, string>;
   stemSignError: string | null;
   sourceAsset: AssetSummary | undefined;
+  stemSeparationWarning: string | null;
   analysisResults: AnalysisResultRow[];
   running: string | null;
   onUpdateStemMix: (assetId: string, patch: Partial<StemMixState>) => void;
@@ -851,6 +863,7 @@ function KaraokeProductView({
             stemUrls={stemUrls}
             stemSignError={stemSignError}
             sourceAsset={sourceAsset}
+            stemSeparationWarning={stemSeparationWarning}
             running={running}
             onUpdateStemMix={onUpdateStemMix}
             onPreviewStemLevel={onPreviewStemLevel}
@@ -882,6 +895,7 @@ function StemsPanel({
   stemUrls,
   stemSignError,
   sourceAsset,
+  stemSeparationWarning,
   running,
   onUpdateStemMix,
   onPreviewStemLevel,
@@ -894,6 +908,7 @@ function StemsPanel({
   stemUrls: Record<string, string>;
   stemSignError: string | null;
   sourceAsset: AssetSummary | undefined;
+  stemSeparationWarning: string | null;
   running: string | null;
   onUpdateStemMix: (assetId: string, patch: Partial<StemMixState>) => void;
   onPreviewStemLevel: (assetId: string, level: number) => void;
@@ -913,6 +928,7 @@ function StemsPanel({
         {stemAssets.length > 0 && <span className="chip">{Object.keys(stemUrls).length === stemAssets.length ? 'live mix' : 'signing'}</span>}
       </div>
       {stemSignError && <div className="chip danger mb-2 w-fit">{stemSignError}</div>}
+      {stemSeparationWarning && <div className="chip danger mb-2 w-fit">{stemSeparationWarning}</div>}
 
       {stemAssets.length > 0 ? (
         <div className="grid flex-1 content-center gap-1.5">
@@ -988,7 +1004,7 @@ function StemsPanel({
             {
               label: running === 'Stem separation' ? 'Extracting' : 'Extract stems',
               icon: running === 'Stem separation' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />,
-              disabled: !sourceAsset || Boolean(running),
+              disabled: !sourceAsset || Boolean(running) || Boolean(stemSeparationWarning),
               onClick: onRunStems,
             },
           ]}
