@@ -162,6 +162,9 @@ export type JobRow = {
   diagnostics: Json;
   started_at: string | null;
   completed_at: string | null;
+  modal_call_id: string | null;
+  finalize_spec: Json;
+  finalize_claimed_at: string | null;
   created_at: string;
   updated_at: string;
 };

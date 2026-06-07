@@ -14,6 +14,17 @@ export class RouteNotFoundError extends Error {
   }
 }
 
+export class WorkflowConflictError extends Error {
+  readonly status = 409;
+  readonly code: string;
+
+  constructor(message = 'A job is already running', code = 'workflow_already_running') {
+    super(message);
+    this.name = 'WorkflowConflictError';
+    this.code = code;
+  }
+}
+
 export function routeErrorResponse(error: unknown, fallbackMessage: string) {
   if (error instanceof ZodError) {
     return jsonError('Invalid request body', {
@@ -31,6 +42,13 @@ export function routeErrorResponse(error: unknown, fallbackMessage: string) {
   }
 
   if (error instanceof RouteNotFoundError) {
+    return jsonError(error.message, {
+      status: error.status,
+      code: error.code,
+    });
+  }
+
+  if (error instanceof WorkflowConflictError) {
     return jsonError(error.message, {
       status: error.status,
       code: error.code,

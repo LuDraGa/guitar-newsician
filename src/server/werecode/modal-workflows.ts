@@ -9,7 +9,7 @@ import {
   stemSeparationContentType,
   type StemSeparationArtifactFormat,
 } from '@/lib/audio/stem-separation-limits';
-import { RouteNotFoundError } from '@/lib/http/route-error';
+import { RouteNotFoundError, WorkflowConflictError } from '@/lib/http/route-error';
 import { modalFetch } from '@/lib/modal/client';
 import { deriveStudioOverviewData } from '@/lib/music/analysis-overview';
 import {
@@ -45,6 +45,7 @@ type ArtifactMetadata = {
 
 type ModalResponse = {
   status?: string;
+  call_id?: string | null;
   artifacts?: Record<string, ArtifactMetadata>;
   artifact?: ArtifactMetadata | null;
   diagnostics?: Diagnostic[];
@@ -158,6 +159,121 @@ export async function runStoredJob(jobId: string) {
   }
 }
 
+// Option 2 (async): toggled by env so the default (and local dev) stays synchronous.
+function modalAsyncEnabled(): boolean {
+  const value = process.env.WERECODE_MODAL_ASYNC;
+  return value === '1' || value === 'true';
+}
+
+// Poll the gateway for a spawned Modal call. Returns the original endpoint's
+// ModalResponse (as `result`) once the call has settled, else `{ status: 'processing' }`.
+async function pollModalJob(callId: string): Promise<{ status: string; result?: ModalResponse }> {
+  return modalFetch<{ status: string; result?: ModalResponse }>(`/jobs/${encodeURIComponent(callId)}`, {
+    method: 'GET',
+  });
+}
+
+type FinalizeSpec = {
+  outputSpecs?: OutputSpec[];
+  songId?: string | null;
+  pipelineStage?: PipelineStage | null;
+};
+
+function parseFinalizeSpec(value: unknown): FinalizeSpec {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    outputSpecs: Array.isArray(record.outputSpecs) ? (record.outputSpecs as OutputSpec[]) : undefined,
+    songId: typeof record.songId === 'string' ? record.songId : null,
+    pipelineStage: (record.pipelineStage as PipelineStage | null) ?? null,
+  };
+}
+
+// Single-finalizer claim: only one poller may finalize a given job. Re-claimable
+// after 2 min so a crashed finalize can be retried. Two narrow updates avoid a
+// PostgREST `or()` over a timestamp value.
+async function claimJobFinalize(supabase: SupabaseClient, ownerId: string, jobId: string): Promise<boolean> {
+  const now = new Date().toISOString();
+  const staleBefore = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+
+  const fresh = await supabase
+    .from('jobs')
+    .update({ finalize_claimed_at: now })
+    .eq('id', jobId)
+    .eq('owner_id', ownerId)
+    .eq('status', 'processing')
+    .is('finalize_claimed_at', null)
+    .select('id');
+  if (fresh.error) {
+    throw fresh.error;
+  }
+  if ((fresh.data?.length ?? 0) > 0) {
+    return true;
+  }
+
+  const stale = await supabase
+    .from('jobs')
+    .update({ finalize_claimed_at: now })
+    .eq('id', jobId)
+    .eq('owner_id', ownerId)
+    .eq('status', 'processing')
+    .lt('finalize_claimed_at', staleBefore)
+    .select('id');
+  if (stale.error) {
+    throw stale.error;
+  }
+  return (stale.data?.length ?? 0) > 0;
+}
+
+// Advance one async job: poll the gateway for its spawned Modal call and, once the
+// call has settled, finalize it (create assets, persist stage data, flip status)
+// via the shared finalizeJobFromModal. Client-driven and user-session scoped.
+export async function finalizeStoredJob(jobId: string) {
+  const { user, supabase } = await getWereCodeRequestContext();
+  const { data: job, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('id', jobId)
+    .eq('owner_id', user.id)
+    .maybeSingle<JobRow>();
+
+  if (error) {
+    throw error;
+  }
+  if (!job) {
+    throw new RouteNotFoundError('Job not found', 'job_not_found');
+  }
+
+  const idle = { job, song: null as SongRow | null, assets: [] as AssetRow[] };
+  if (job.status !== 'processing' || !job.modal_call_id) {
+    return idle;
+  }
+
+  const polled = await pollModalJob(job.modal_call_id);
+  const polledStatus = polled.status ?? 'processing';
+  if (polledStatus === 'processing' || polledStatus === 'accepted') {
+    return idle;
+  }
+
+  if (!(await claimJobFinalize(supabase, user.id, job.id))) {
+    return idle;
+  }
+
+  const spec = parseFinalizeSpec(job.finalize_spec);
+  const modalResult: ModalResponse = polled.result ?? { status: polledStatus };
+
+  return finalizeJobFromModal({
+    supabase,
+    job,
+    modal: modalResult,
+    outputSpecs: spec.outputSpecs,
+    songId: spec.songId ?? undefined,
+    pipelineStage: spec.pipelineStage ?? undefined,
+  });
+}
+
 export async function runAnalyzeWorkflow(input: z.infer<typeof analyzeWorkflowSchema>, existingJob?: JobRow) {
   const context = await workflowContext('analyze', '/analyze/music', input, existingJob);
 
@@ -172,7 +288,9 @@ export async function runAnalyzeWorkflow(input: z.infer<typeof analyzeWorkflowSc
   const inputUrl = await resolveInputUrl(context.supabase, input, context.userId, input.song_id);
   const output_upload_urls = await createUploadUrlMap(outputSpecs);
 
-  const result = await runJobWithModal({
+  // Stage persistence (persistAnalysisResults) is centralized in finalizeJobFromModal,
+  // so the result already carries analysisResults for both sync and async paths.
+  return runJobWithModal({
     supabase: context.supabase,
     job: context.job,
     endpoint: '/analyze/music',
@@ -189,15 +307,6 @@ export async function runAnalyzeWorkflow(input: z.infer<typeof analyzeWorkflowSc
     songId: input.song_id,
     pipelineStage: 'analyze',
   });
-  const analysisResults =
-    result.job.status === 'ready'
-      ? await persistAnalysisResults(context.supabase, context.userId, input.song_id, result)
-      : [];
-
-  return {
-    ...result,
-    analysisResults,
-  };
 }
 
 export async function runSeparateWorkflow(input: z.infer<typeof separateWorkflowSchema>, existingJob?: JobRow) {
@@ -376,7 +485,9 @@ export async function runLyricsAlignWorkflow(input: z.infer<typeof lyricsAlignWo
   const inputUrl = await resolveInputUrl(context.supabase, input, context.userId, input.song_id);
   const output_upload_urls = await createUploadUrlMap(outputSpecs);
 
-  const result = await runJobWithModal({
+  // Stage persistence (persistAlignedLyrics) is centralized in finalizeJobFromModal,
+  // so the result already carries lyrics for both sync and async paths.
+  return runJobWithModal({
     supabase: context.supabase,
     job: context.job,
     endpoint: '/lyrics/align',
@@ -391,15 +502,6 @@ export async function runLyricsAlignWorkflow(input: z.infer<typeof lyricsAlignWo
     songId: input.song_id,
     pipelineStage: 'lyrics_align',
   });
-  const lyrics =
-    result.job.status === 'ready'
-      ? await persistAlignedLyrics(context.supabase, context.userId, input.song_id, result)
-      : null;
-
-  return {
-    ...result,
-    lyrics,
-  };
 }
 
 export async function runLyricsFetchWorkflow(input: z.infer<typeof lyricsFetchWorkflowSchema>, existingJob?: JobRow) {
@@ -608,17 +710,40 @@ async function workflowContext(
   const songId = getSongId(requestPayload);
   if (songId) {
     await requireOwnedSong(supabase, user.id, songId);
+
+    // Dedup guard: never start a second run of the same stage for a song while one
+    // is still queued/processing. Stops a double-click, a second tab, or a
+    // reload-then-retry from launching a duplicate (and duplicately-billed) Modal
+    // job. The partial unique index `jobs_active_stage_dedup_idx` is the race
+    // backstop for the window between this read and the insert below.
+    const active = await findActiveJob(supabase, user.id, songId, jobType);
+    if (active) {
+      throw workflowConflict(jobType);
+    }
   }
 
-  const job = await createJob(supabase, user.id, {
-    song_id: songId,
-    job_type: jobType,
-    modal_endpoint: endpoint,
-    request_payload: {
-      workflow: jobType,
-      ...(assertRecord(requestPayload) as Record<string, unknown>),
-    },
-  });
+  let job: JobRow;
+  try {
+    job = await createJob(supabase, user.id, {
+      song_id: songId,
+      job_type: jobType,
+      modal_endpoint: endpoint,
+      request_payload: {
+        workflow: jobType,
+        ...(assertRecord(requestPayload) as Record<string, unknown>),
+      },
+    });
+  } catch (error) {
+    // Lost the race against a concurrent enqueue of the same stage — the partial
+    // unique index rejected the duplicate. Surface it as a conflict, not a 500.
+    if (songId && isUniqueViolation(error)) {
+      const active = await findActiveJob(supabase, user.id, songId, jobType);
+      if (active) {
+        throw workflowConflict(jobType);
+      }
+    }
+    throw error;
+  }
 
   return { userId: user.id, supabase, job };
 }
@@ -726,10 +851,40 @@ async function runJobWithModal(options: {
     modal_endpoint: options.endpoint,
   });
 
-  let modal = await modalFetch<ModalResponse>(options.endpoint, {
+  const modal = await modalFetch<ModalResponse>(options.endpoint, {
     method: 'POST',
     body: JSON.stringify(options.payload),
+    // Async (Option 2): ask the gateway to spawn the work and return immediately.
+    // When the flag is off the header is absent and the gateway runs synchronously
+    // exactly as today.
+    ...(modalAsyncEnabled() ? { headers: { 'x-werecode-async': '1' } } : {}),
   });
+
+  return finalizeJobFromModal({
+    supabase: options.supabase,
+    job: options.job,
+    modal,
+    outputSpecs: options.outputSpecs,
+    songId: options.songId,
+    pipelineStage: options.pipelineStage,
+  });
+}
+
+// Terminal half of a Modal-backed job: validate artifacts, supersede prior stage
+// outputs, create asset rows, update song readiness, and write the final job row.
+// Extracted from runJobWithModal so it can run from either the synchronous path
+// (today) or a Modal completion callback (Phase 2), using whichever Supabase client
+// the caller supplies — the user-session client today, a service-role client from
+// the callback (no user session on a Modal callback).
+async function finalizeJobFromModal(options: {
+  supabase: SupabaseClient;
+  job: JobRow;
+  modal: ModalResponse;
+  outputSpecs?: OutputSpec[];
+  songId?: string;
+  pipelineStage?: PipelineStage;
+}) {
+  let modal = options.modal;
 
   if (options.outputSpecs?.length && ((modal.status ?? 'ready') === 'ready' || modal.status === 'skipped')) {
     const artifactFormatDiagnostics = validateModalArtifactFormats(options.outputSpecs, modal);
@@ -791,13 +946,38 @@ async function runJobWithModal(options: {
     response_payload: modal as Json,
     diagnostics: (modal.diagnostics ?? []) as Json,
     completed_at: pending ? null : new Date().toISOString(),
+    // Async (Option 2): when Modal only accepted the spawn, stash the call id and
+    // the spec the later poll/finalize needs to resume this job.
+    ...(pending
+      ? {
+          modal_call_id: typeof modal.call_id === 'string' ? modal.call_id : null,
+          finalize_spec: {
+            outputSpecs: options.outputSpecs ?? [],
+            songId: options.songId ?? null,
+            pipelineStage: options.pipelineStage ?? null,
+          } as unknown as Json,
+        }
+      : {}),
   });
+
+  // Stage-specific persistence is centralized here (keyed by pipelineStage) so the
+  // synchronous path and the async poll/finalize path produce identical results.
+  const analysisResults =
+    ready && targetSongId && options.pipelineStage === 'analyze'
+      ? await persistAnalysisResults(options.supabase, options.job.owner_id, targetSongId, { assets, modal })
+      : [];
+  const lyrics =
+    ready && targetSongId && options.pipelineStage === 'lyrics_align'
+      ? await persistAlignedLyrics(options.supabase, options.job.owner_id, targetSongId, { assets, modal })
+      : null;
 
   return {
     job: updatedJob,
     song,
     assets,
     modal,
+    analysisResults,
+    lyrics,
   };
 }
 
@@ -849,6 +1029,45 @@ async function createJob(
   }
 
   return data;
+}
+
+// A stage is "in flight" while its job is queued or processing; that is the
+// window during which a duplicate trigger must be refused.
+async function findActiveJob(
+  supabase: SupabaseClient,
+  ownerId: string,
+  songId: string,
+  jobType: JobType
+): Promise<JobRow | null> {
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .eq('song_id', songId)
+    .eq('job_type', jobType)
+    .in('status', ['queued', 'processing'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<JobRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === '23505'
+  );
+}
+
+function workflowConflict(jobType: JobType): WorkflowConflictError {
+  return new WorkflowConflictError(`A ${jobType.replaceAll('_', ' ')} job is already running for this song.`);
 }
 
 async function getOwnedSong(supabase: SupabaseClient, ownerId: string, songId: string) {

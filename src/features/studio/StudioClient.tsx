@@ -153,7 +153,15 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const [stemMix, setStemMix] = useState<Record<string, StemMixState>>({});
   const [stemSignError, setStemSignError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState<string | null>(null);
+  const [running, setRunning] = useState<ReadonlySet<string>>(() => new Set<string>());
+  // Stages observed as still in flight on the server (e.g. a job started before a
+  // reload, or in another tab). Merged with the local `running` set so the UI
+  // reflects work it did not itself start; server-seeded, never touched by
+  // begin/finishStage.
+  const [reconnectingStages, setReconnectingStages] = useState<ReadonlySet<string>>(() => new Set<string>());
+  // Bumped after an async enqueue to (re)start the job poll, so an in-session async
+  // job is advanced even though nothing was active at mount.
+  const [jobPollNonce, setJobPollNonce] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<StudioTab>('karaoke');
@@ -370,6 +378,12 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   // Tracks the most recently requested song so an awaited IndexedDB/network
   // result is discarded if the user navigated to a different song meanwhile.
   const loadRequestRef = useRef<string | null>(null);
+  // Last-seen set of server-active stages, so a poll tick can detect when a
+  // reconnected job settled and pull its fresh artifacts exactly once.
+  const prevActiveStagesRef = useRef<ReadonlySet<string>>(new Set<string>());
+  // Job ids whose /sync advance is in flight, so overlapping poll ticks don't
+  // double-fire (the server also single-finalizes via an atomic claim).
+  const syncingJobsRef = useRef<Set<string>>(new Set<string>());
 
   const persistActiveStudioDetail = useCallback((targetSongId: string) => {
     const detail = useWereCodeDataCache.getState().studioBySongId[targetSongId]?.detail;
@@ -465,6 +479,102 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     return () => window.clearTimeout(timer);
   }, [initialSongId, loadStudio]);
 
+  // Reload reconnect: reflect any workflow that was still queued/processing on the
+  // server (started before a reload, or in another tab) and poll until it settles,
+  // then pull the fresh artifacts. Bounded; stops once nothing is active. Phase 2
+  // replaces this poll with a Supabase Realtime subscription on `jobs`.
+  useEffect(() => {
+    if (!songId) {
+      // No song selected: leave the stale set in place (the memo below ignores it
+      // when there is no song; the next song's first poll overwrites it).
+      prevActiveStagesRef.current = new Set<string>();
+      return;
+    }
+
+    const jobTypeToStage: Record<string, string> = {
+      analyze: 'Analysis',
+      separate: 'Stem separation',
+      lyrics_fetch: 'Lyrics fetch',
+      lyrics_align: 'Lyrics alignment',
+      midi_transcribe: 'MIDI transcription',
+    };
+
+    let cancelled = false;
+    let timer: number | undefined;
+    let ticks = 0;
+    const MAX_TICKS = 120; // ~8 min ceiling at 4s — guards a job that never settles.
+    const POLL_MS = 4000;
+
+    prevActiveStagesRef.current = new Set<string>();
+
+    const syncJob = async (jobId: string) => {
+      if (syncingJobsRef.current.has(jobId)) {
+        return;
+      }
+      syncingJobsRef.current.add(jobId);
+      try {
+        // Advance one async job server-side: poll the Modal gateway and finalize
+        // when ready. No-ops for synchronous jobs (no Modal call id); the next poll
+        // tick reflects the new status.
+        await fetchJson(`/api/jobs/${jobId}/sync`, { method: 'POST' });
+      } catch {
+        // Best-effort; the next tick retries.
+      } finally {
+        syncingJobsRef.current.delete(jobId);
+      }
+    };
+
+    const poll = async () => {
+      let active: Set<string>;
+      try {
+        const payload = await fetchJson<{ jobs: Array<{ id: string; job_type: string; status: string }> }>(
+          `/api/jobs?songId=${songId}&limit=20`
+        );
+        if (cancelled) {
+          return;
+        }
+        const activeJobs = payload.jobs.filter((job) => job.status === 'queued' || job.status === 'processing');
+        active = new Set(
+          activeJobs.map((job) => jobTypeToStage[job.job_type]).filter((stage): stage is string => Boolean(stage))
+        );
+        // Drive async completion: ask the server to advance each in-flight job.
+        for (const job of activeJobs) {
+          void syncJob(job.id);
+        }
+      } catch {
+        // Best-effort: keep the prior view and retry next tick.
+        if (!cancelled && ticks < MAX_TICKS) {
+          ticks += 1;
+          timer = window.setTimeout(() => void poll(), POLL_MS);
+        }
+        return;
+      }
+
+      const prev = prevActiveStagesRef.current;
+      const settled = [...prev].some((stage) => !active.has(stage));
+      prevActiveStagesRef.current = active;
+      setReconnectingStages(active);
+      if (settled) {
+        // A reconnected job finished — pull its artifacts into the bundle.
+        void loadStudio(songId, { force: true });
+      }
+
+      if (!cancelled && active.size > 0 && ticks < MAX_TICKS) {
+        ticks += 1;
+        timer = window.setTimeout(() => void poll(), POLL_MS);
+      }
+    };
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [songId, loadStudio, jobPollNonce]);
+
   useEffect(() => {
     const onToggleCoach = () => setCoachOpen((open) => !open);
     window.addEventListener('werecode:toggle-coach', onToggleCoach);
@@ -478,13 +588,35 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     }
   }, []);
 
+  // Per-stage run tracking: stages run concurrently, so we track the set of
+  // in-flight stage names instead of a single "is anything running" flag. Each
+  // stage's controls disable only while that stage itself is running.
+  const beginStage = (name: string) =>
+    setRunning((current) => {
+      if (current.has(name)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(name);
+      return next;
+    });
+  const finishStage = (name: string) =>
+    setRunning((current) => {
+      if (!current.has(name)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.delete(name);
+      return next;
+    });
+
   async function runWorkflow(name: string, endpoint: string, payload: Record<string, unknown>) {
     if (!song) {
       setError('Select a song first');
       return;
     }
 
-    setRunning(name);
+    beginStage(name);
     setError(null);
     setMessage(null);
 
@@ -547,10 +679,25 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
             : `${name} completed${result.assets?.length ? ` with ${result.assets.length} artifact(s)` : ''}`
         );
       }
+
+      if (jobStatus === 'processing') {
+        // Async enqueue accepted by Modal: keep this stage shown busy (it would
+        // otherwise flicker idle when the fast enqueue resolves) and (re)start the
+        // job poll so it is advanced to completion mid-session.
+        setReconnectingStages((current) => {
+          if (current.has(name)) {
+            return current;
+          }
+          const next = new Set(current);
+          next.add(name);
+          return next;
+        });
+        setJobPollNonce((nonce) => nonce + 1);
+      }
     } catch (workflowError) {
       setError(workflowError instanceof Error ? workflowError.message : `${name} failed`);
     } finally {
-      setRunning(null);
+      finishStage(name);
     }
   }
 
@@ -581,7 +728,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
       return;
     }
 
-    setRunning('Save lyrics');
+    beginStage('Save lyrics');
     setError(null);
     setMessage(null);
 
@@ -637,7 +784,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save lyrics');
       throw saveError;
     } finally {
-      setRunning(null);
+      finishStage('Save lyrics');
     }
   }
 
@@ -688,6 +835,16 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
       }),
   };
 
+  // Union of locally in-flight stages and server-observed in-flight stages; this
+  // is the busy-state every stage control reads from.
+  const runningStages = useMemo(
+    () =>
+      !songId || reconnectingStages.size === 0
+        ? running
+        : new Set<string>([...running, ...reconnectingStages]),
+    [running, reconnectingStages, songId]
+  );
+
   return (
     <section className="flex h-full min-h-0 w-full flex-col overflow-visible pb-0 md:overflow-hidden">
       {!song && !loading ? (
@@ -725,7 +882,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   onDepthChange={setAnalyzeDepth}
                   hasAnalysis={analysisResults.length > 0}
                   stale={staleStages.has('analyze')}
-                  running={running}
+                  running={runningStages}
                   onRun={() => void workflowActions.analyze()}
                   onRerun={() => void workflowActions.analyze({ force: true })}
                 />
@@ -755,7 +912,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   sourceAsset={sourceAsset}
                   stemSeparationWarning={stemSeparationWarning}
                   analysisResults={analysisResults}
-                  running={running}
+                  running={runningStages}
                   onUpdateStemMix={updateStemMix}
                   onPreviewStemLevel={previewStemLevel}
                   onSoloStem={soloStem}
@@ -779,7 +936,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   tabAsset={tabAsset}
                   noteEventsAsset={noteEventsAsset}
                   sourceAsset={sourceAsset}
-                  running={running}
+                  running={runningStages}
                   onOpenAsset={(asset) => void openAsset(asset)}
                   onRunMidi={() => void workflowActions.midi()}
                   onRunMusicXml={() => void workflowActions.musicXml()}
@@ -795,7 +952,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   plainLyrics={plainLyrics}
                   currentTime={transportTime}
                   playing={transportPlaying}
-                  running={running}
+                  running={runningStages}
                   onLyricsDraftChange={setLyricsDraft}
                   onSave={savePlainLyrics}
                   onFetchLyrics={() => void workflowActions.lyricsFetch()}
@@ -820,7 +977,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                 onTimeChange={setTransportTime}
                 onPlayingChange={setTransportPlaying}
                 sections={sectionSegments}
-                analyzing={Boolean(running)}
+                analyzing={runningStages.has('Analysis')}
                 onRunAnalyze={sourceAsset ? () => void workflowActions.analyze() : undefined}
               />
             </div>
@@ -970,11 +1127,11 @@ function AnalysisControl({
   onDepthChange: (depth: AnalyzeDepth) => void;
   hasAnalysis: boolean;
   stale: boolean;
-  running: string | null;
+  running: ReadonlySet<string>;
   onRun: () => void;
   onRerun: () => void;
 }) {
-  const busy = running === 'Analysis';
+  const busy = running.has('Analysis');
   return (
     <div className="flex items-center gap-2.5">
       <span className="label">Analysis</span>
@@ -1006,7 +1163,7 @@ function AnalysisControl({
         idleIcon={hasAnalysis ? <RefreshCw className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
         busy={busy}
         stale={stale && hasAnalysis}
-        disabled={Boolean(running)}
+        disabled={running.has('Analysis')}
         onClick={hasAnalysis ? onRerun : onRun}
         title={
           hasAnalysis
@@ -1059,7 +1216,7 @@ function KaraokeProductView({
   sourceAsset: AssetSummary | undefined;
   stemSeparationWarning: string | null;
   analysisResults: AnalysisResultRow[];
-  running: string | null;
+  running: ReadonlySet<string>;
   onUpdateStemMix: (assetId: string, patch: Partial<StemMixState>) => void;
   onPreviewStemLevel: (assetId: string, level: number) => void;
   onSoloStem: (assetId: string) => void;
@@ -1137,7 +1294,7 @@ function StemsPanel({
   stemSignError: string | null;
   sourceAsset: AssetSummary | undefined;
   stemSeparationWarning: string | null;
-  running: string | null;
+  running: ReadonlySet<string>;
   onUpdateStemMix: (assetId: string, patch: Partial<StemMixState>) => void;
   onPreviewStemLevel: (assetId: string, level: number) => void;
   onSoloStem: (assetId: string) => void;
@@ -1161,9 +1318,9 @@ function StemsPanel({
             <PipelineActionButton
               label="Re-run"
               idleIcon={<RefreshCw className="h-3.5 w-3.5" />}
-              busy={running === 'Stem separation'}
+              busy={running.has('Stem separation')}
               stale={stale}
-              disabled={!sourceAsset || Boolean(running) || Boolean(stemSeparationWarning)}
+              disabled={!sourceAsset || running.has('Stem separation') || Boolean(stemSeparationWarning)}
               onClick={onRerun}
               title={stale ? 'Newer stem model available — re-separate' : 'Re-separate stems with the latest model'}
             />
@@ -1245,9 +1402,9 @@ function StemsPanel({
           desc="Separate this track into vocals, guitar, bass, drums, and other parts to mix or isolate practice layers."
           ctas={[
             {
-              label: running === 'Stem separation' ? 'Extracting' : 'Extract stems',
-              icon: running === 'Stem separation' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />,
-              disabled: !sourceAsset || Boolean(running) || Boolean(stemSeparationWarning),
+              label: running.has('Stem separation') ? 'Extracting' : 'Extract stems',
+              icon: running.has('Stem separation') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />,
+              disabled: !sourceAsset || running.has('Stem separation') || Boolean(stemSeparationWarning),
               onClick: onRunStems,
             },
           ]}
@@ -1391,7 +1548,7 @@ function CurrentChordPanel({
 }: {
   currentTime: number;
   analysisResults: AnalysisResultRow[];
-  running: string | null;
+  running: ReadonlySet<string>;
   onRunAnalyze: () => void;
 }) {
   const chordEvents = useMemo(() => deriveChordEvents(analysisResults), [analysisResults]);
@@ -1412,9 +1569,9 @@ function CurrentChordPanel({
       ) : !hasAnalysis ? (
         <div className="flex items-center gap-3">
           <span className="label">Chords</span>
-          <button type="button" onClick={onRunAnalyze} disabled={Boolean(running)} className="pill ghost sm">
+          <button type="button" onClick={onRunAnalyze} disabled={running.has('Analysis')} className="pill ghost sm">
             <PillIcon>
-              {running === 'Analysis' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Activity className="h-3.5 w-3.5" />}
+              {running.has('Analysis') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Activity className="h-3.5 w-3.5" />}
             </PillIcon>
             Detect chords
           </button>
@@ -1448,7 +1605,7 @@ function LyricsPane({
   lines: LyricDisplayLine[];
   syncedLyrics: LyricsRow | undefined;
   plainLyrics: LyricsRow | undefined;
-  running: string | null;
+  running: ReadonlySet<string>;
   onFetchLyrics: () => void;
   onAlignLyrics: () => void;
   onEditLyrics: () => void;
@@ -1540,17 +1697,17 @@ function LyricsPane({
             <PipelineActionButton
               label="Re-sync"
               idleIcon={<ListMusic className="h-3.5 w-3.5" />}
-              busy={running === 'Lyrics alignment'}
+              busy={running.has('Lyrics alignment')}
               stale={lyricsStale}
-              disabled={Boolean(running)}
+              disabled={running.has('Lyrics alignment')}
               onClick={onRerunLyrics}
               title={lyricsStale ? 'Newer alignment model available — re-sync' : 'Re-sync lyrics with the latest model'}
             />
           )}
           {plainLyrics && !syncedLyrics && (
-            <button type="button" onClick={onAlignLyrics} disabled={Boolean(running)} className="pill sm">
+            <button type="button" onClick={onAlignLyrics} disabled={running.has('Lyrics alignment')} className="pill sm">
               <PillIcon>
-                {running === 'Lyrics alignment' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListMusic className="h-3.5 w-3.5" />}
+                {running.has('Lyrics alignment') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListMusic className="h-3.5 w-3.5" />}
               </PillIcon>
               Sync
             </button>
@@ -1595,9 +1752,9 @@ function LyricsPane({
           desc="Fetch lyrics from the provider, or write and time them in the editor."
           ctas={[
             {
-              label: running === 'Lyrics fetch' ? 'Fetching' : 'Fetch lyrics',
-              icon: running === 'Lyrics fetch' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />,
-              disabled: Boolean(running),
+              label: running.has('Lyrics fetch') ? 'Fetching' : 'Fetch lyrics',
+              icon: running.has('Lyrics fetch') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />,
+              disabled: running.has('Lyrics fetch'),
               onClick: onFetchLyrics,
             },
             { label: 'Create in editor', icon: <Type className="h-3.5 w-3.5" />, onClick: onEditLyrics, variant: 'ghost' },
@@ -2154,7 +2311,7 @@ function GuitarLearnerView({
   tabAsset: AssetSummary | undefined;
   noteEventsAsset: AssetSummary | undefined;
   sourceAsset: AssetSummary | undefined;
-  running: string | null;
+  running: ReadonlySet<string>;
   onOpenAsset: (asset: AssetSummary) => void;
   onRunMidi: () => void;
   onRunMusicXml: () => void;
@@ -2186,9 +2343,9 @@ function GuitarLearnerView({
         <PipelineActionButton
           label={noteEventsAsset ? 'Re-run MIDI' : 'MIDI'}
           idleIcon={<FileMusic className="h-3.5 w-3.5" />}
-          busy={running === 'MIDI transcription'}
+          busy={running.has('MIDI transcription')}
           stale={midiStale}
-          disabled={!sourceAsset || Boolean(running)}
+          disabled={!sourceAsset || running.has('MIDI transcription')}
           onClick={noteEventsAsset ? onRerunMidi : onRunMidi}
           title={
             noteEventsAsset
@@ -2198,9 +2355,9 @@ function GuitarLearnerView({
               : 'Transcribe MIDI from this track'
           }
         />
-        <button type="button" onClick={onRunMusicXml} disabled={!noteEventsAsset || Boolean(running)} className="pill ghost sm">
+        <button type="button" onClick={onRunMusicXml} disabled={!noteEventsAsset || running.has('MusicXML conversion')} className="pill ghost sm">
           <PillIcon>
-            {running === 'MusicXML conversion' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sheet className="h-3.5 w-3.5" />}
+            {running.has('MusicXML conversion') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sheet className="h-3.5 w-3.5" />}
           </PillIcon>
           MusicXML
         </button>
@@ -2311,7 +2468,7 @@ function LyricsEditorProductView({
   plainLyrics: LyricsRow | undefined;
   currentTime: number;
   playing: boolean;
-  running: string | null;
+  running: ReadonlySet<string>;
   onLyricsDraftChange: (value: string) => void;
   onSave: (payload: EditorLyricsSavePayload) => Promise<void>;
   onFetchLyrics: () => void;
@@ -2507,9 +2664,9 @@ function LyricsEditorProductView({
               </PillIcon>
               Import
             </button>
-            <button type="button" onClick={() => void saveEditorDraft()} disabled={Boolean(running)} className="pill sm">
+            <button type="button" onClick={() => void saveEditorDraft()} disabled={running.has('Save lyrics')} className="pill sm">
               <PillIcon>
-                {running === 'Save lyrics' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                {running.has('Save lyrics') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
               </PillIcon>
               {dirty ? 'Save' : 'Saved'}
               <span className="mono opacity-60">⌘S</span>
@@ -2588,9 +2745,9 @@ function LyricsEditorProductView({
               desc="Fetch lyrics from the provider, or import plain text or .lrc content."
               ctas={[
                 {
-                  label: running === 'Lyrics fetch' ? 'Fetching' : 'Fetch lyrics',
-                  icon: running === 'Lyrics fetch' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />,
-                  disabled: Boolean(running),
+                  label: running.has('Lyrics fetch') ? 'Fetching' : 'Fetch lyrics',
+                  icon: running.has('Lyrics fetch') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />,
+                  disabled: running.has('Lyrics fetch'),
                   onClick: onFetchLyrics,
                 },
                 { label: 'Import', icon: <Upload className="h-3.5 w-3.5" />, onClick: () => setShowImport(true), variant: 'ghost' },
@@ -2689,16 +2846,16 @@ function LyricsEditorProductView({
             </button>
           </div>
           <div className="mt-4 grid gap-2">
-            <button type="button" onClick={onFetchLyrics} disabled={Boolean(running)} className="pill ghost sm w-full">
+            <button type="button" onClick={onFetchLyrics} disabled={running.has('Lyrics fetch')} className="pill ghost sm w-full">
               <PillIcon>
-                {running === 'Lyrics fetch' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />}
+                {running.has('Lyrics fetch') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />}
               </PillIcon>
               Fetch lyrics
             </button>
             <button
               type="button"
               onClick={syncedLyrics ? onRerunLyrics : onAlignLyrics}
-              disabled={!canAlign || Boolean(running)}
+              disabled={!canAlign || running.has('Lyrics alignment')}
               className="pill sm w-full"
               title={
                 syncedLyrics
@@ -2709,10 +2866,10 @@ function LyricsEditorProductView({
               }
             >
               <PillIcon>
-                {running === 'Lyrics alignment' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListMusic className="h-3.5 w-3.5" />}
+                {running.has('Lyrics alignment') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListMusic className="h-3.5 w-3.5" />}
               </PillIcon>
               {syncedLyrics ? 'Re-align' : 'Auto-align'}
-              {lyricsStale && syncedLyrics && running !== 'Lyrics alignment' && (
+              {lyricsStale && syncedLyrics && !running.has('Lyrics alignment') && (
                 <span className="pulse h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} aria-hidden />
               )}
             </button>
