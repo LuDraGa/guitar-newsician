@@ -1,10 +1,19 @@
 'use client';
 
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import type { MusicXmlPreviewData } from '@/lib/music/musicxml';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
 import type { AssetSummary, JobSummary, SignedAssetUrl, SongSummary, StudioDetail } from '@/types/werecode-client';
+
+import { clearStoredStudioDetails } from './studio-detail-store';
+
+// localStorage holds only the lightweight summary slices (no blobs); the heavy
+// per-song Studio bundle lives in IndexedDB (studio-detail-store) and signed
+// URLs live in sessionStorage. Bump these keys on a breaking shape change.
+const STORAGE_KEY = 'werecode-data-cache:v1';
+const SIGNED_URL_STORAGE_KEY = 'werecode:signed-urls:v1';
 
 type AssetCacheEntry = {
   assets: AssetSummary[];
@@ -27,6 +36,7 @@ type MusicXmlPreviewCacheEntry = {
 };
 
 type WereCodeDataCacheState = {
+  owner: string | null;
   songs: SongSummary[];
   songsLoaded: boolean;
   songsLoadedAt: number | null;
@@ -53,10 +63,12 @@ type WereCodeDataCacheState = {
   setStudioAnalysisResults: (songId: string, analysisResults: AnalysisResultRow[]) => void;
   setSignedAssetUrls: (signedUrls: SignedAssetUrl[]) => void;
   setMusicXmlPreview: (assetId: string, preview: MusicXmlPreviewData) => void;
+  setOwner: (owner: string | null) => void;
   clear: () => void;
 };
 
 const emptyState = {
+  owner: null as string | null,
   songs: [],
   songsLoaded: false,
   songsLoadedAt: null,
@@ -70,7 +82,9 @@ const emptyState = {
   musicXmlPreviewsByAssetId: {},
 };
 
-export const useWereCodeDataCache = create<WereCodeDataCacheState>((set) => ({
+export const useWereCodeDataCache = create<WereCodeDataCacheState>()(
+  persist(
+    (set) => ({
   ...emptyState,
   setSongs: (songs) =>
     set({
@@ -238,11 +252,121 @@ export const useWereCodeDataCache = create<WereCodeDataCacheState>((set) => ({
         },
       },
     })),
+  setOwner: (owner) => set({ owner }),
   clear: () => set(emptyState),
-}));
+    }),
+    {
+      name: STORAGE_KEY,
+      version: 1,
+      storage: createJSONStorage(() => localStorage),
+      // Persist ONLY the owner id. It is never rendered, so synchronous
+      // rehydration cannot cause an SSR hydration mismatch — yet it survives a
+      // reload, which is what lets reconcileWereCodeCacheOwner() detect an
+      // account switch and wipe the durable IndexedDB/sessionStorage tiers.
+      // Rendered summaries (songs/jobs/assets) and blobs stay out of localStorage
+      // on purpose; the heavy Studio bundle persists via IndexedDB instead.
+      partialize: (state) => ({
+        owner: state.owner,
+      }),
+    }
+  )
+);
 
 export function clearWereCodeDataCache() {
   useWereCodeDataCache.getState().clear();
+  void useWereCodeDataCache.persist.clearStorage();
+  clearPersistedSignedUrls();
+  void clearStoredStudioDetails();
+}
+
+// Drop cached data when the signed-in owner changes (e.g. an account switch in
+// the same browser without an explicit sign-out) so one user never sees
+// another's persisted rows. Called from the auth surface once the session user
+// id is known.
+export function reconcileWereCodeCacheOwner(userId: string) {
+  if (!userId) {
+    return;
+  }
+
+  const { owner } = useWereCodeDataCache.getState();
+  if (owner && owner !== userId) {
+    clearWereCodeDataCache();
+  }
+
+  useWereCodeDataCache.getState().setOwner(userId);
+}
+
+function hydratePersistedSignedUrls(): Record<string, SignedUrlCacheEntry> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(SIGNED_URL_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, SignedUrlCacheEntry>;
+    const now = Date.now();
+    const next: Record<string, SignedUrlCacheEntry> = {};
+    for (const [assetId, entry] of Object.entries(parsed)) {
+      if (
+        entry &&
+        typeof entry.signedUrl === 'string' &&
+        typeof entry.expiresAt === 'number' &&
+        entry.expiresAt > now
+      ) {
+        next[assetId] = entry;
+      }
+    }
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+function persistSignedUrls(map: Record<string, SignedUrlCacheEntry>) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(SIGNED_URL_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore quota
+  }
+}
+
+export function clearPersistedSignedUrls() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.sessionStorage.removeItem(SIGNED_URL_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+// Signed URLs are short-lived capability tokens: persist them to sessionStorage
+// (per-tab, cleared on tab close) so a reload reuses the exact URL string and
+// keeps the browser disk cache warm for replays — without writing tokens to
+// localStorage at rest. Expired entries are dropped on hydrate.
+if (typeof window !== 'undefined') {
+  const hydrated = hydratePersistedSignedUrls();
+  if (Object.keys(hydrated).length > 0) {
+    useWereCodeDataCache.setState({ signedUrlsByAssetId: hydrated });
+  }
+
+  let lastSignedUrls = useWereCodeDataCache.getState().signedUrlsByAssetId;
+  useWereCodeDataCache.subscribe((state) => {
+    if (state.signedUrlsByAssetId !== lastSignedUrls) {
+      lastSignedUrls = state.signedUrlsByAssetId;
+      persistSignedUrls(lastSignedUrls);
+    }
+  });
 }
 
 export function getCachedSignedAssetUrl(assetId: string, marginMs = 60_000) {

@@ -21,6 +21,7 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } fro
 
 import { CoverArt, PillIcon, ReadinessChips, StatusDot } from '@/components/werecode/WereCodePrimitives';
 import { toJobSummary, toSongSummary, useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
+import { deleteStoredStudioDetail } from '@/lib/client-cache/studio-detail-store';
 import { getSupabaseBrowserClient } from '@/lib/supabase/browser';
 import type { JobRow, SongRow } from '@/types/werecode';
 import type { SongSummary } from '@/types/werecode-client';
@@ -259,6 +260,10 @@ export function LibraryClient() {
         .from(signedUpload.bucket)
         .uploadToSignedUrl(signedUpload.objectPath, signedUpload.token, uploadFile, {
           contentType: uploadFile.type || 'application/octet-stream',
+          // Source audio is immutable per object path, so let the browser disk
+          // cache hold it long-term. Combined with stable signed-URL reuse
+          // (sessionStorage), replays after a reload skip Supabase entirely.
+          cacheControl: '31536000',
         });
 
       if (uploadError) {
@@ -348,6 +353,7 @@ export function LibraryClient() {
         method: 'DELETE',
       });
       removeCachedSong(song.id);
+      void deleteStoredStudioDetail(song.id);
       setDeleteTarget(null);
       setMessage(`Deleted ${song.title}`);
     } catch (deleteError) {

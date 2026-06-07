@@ -49,9 +49,21 @@ import {
   useWereCodeDataCache,
 } from '@/lib/client-cache/werecode-data-cache';
 import {
+  STUDIO_DETAIL_TTL_MS,
+  getStoredStudioDetail,
+  putStoredStudioDetail,
+} from '@/lib/client-cache/studio-detail-store';
+import {
   DEFAULT_STEM_SEPARATION_ARTIFACT_FORMAT,
   getStemSeparationDurationLimitWarning,
 } from '@/lib/audio/stem-separation-limits';
+import {
+  activeChordIndex,
+  buildSongFacts,
+  deriveChordEvents,
+  deriveSectionSegments,
+  type SectionSegment,
+} from '@/lib/music/analysis-overview';
 import { parseLrc } from '@/lib/music/lrc';
 import { ANALYZE_FULL_ANALYZERS, computeStageStatuses } from '@/server/werecode/pipeline-versions';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
@@ -89,7 +101,6 @@ type EditorLyricsSavePayload = {
   plainContent: string;
   lrcContent: string | null;
 };
-type ChordEvent = { time: number; endTime: number | null; chord: string };
 type StemLevelPreviewDetail = { assetId: string; level: number };
 
 const stemLevelPreviewEvent = 'werecode:stem-level-preview';
@@ -356,43 +367,95 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     };
   }, [playableStemAssets, setCachedSignedAssetUrls, signablePlaybackAssets, songId, sourceAsset]);
 
-  const loadStudio = useCallback(async (nextSongId: string, options?: { force?: boolean }) => {
-    setError(null);
-    const selectedSongId = nextSongId;
-    setSongId(selectedSongId);
+  // Tracks the most recently requested song so an awaited IndexedDB/network
+  // result is discarded if the user navigated to a different song meanwhile.
+  const loadRequestRef = useRef<string | null>(null);
 
-    if (!selectedSongId) {
-      setSong(null);
-      setAssets([]);
-      setAnalysisResults([]);
-      setLyrics([]);
-      setLyricsDraft('');
-      setAudioUrl(null);
-      setStemUrls({});
-      setStemMix({});
-      setStemSignError(null);
-      setLoading(false);
-      return;
+  const persistActiveStudioDetail = useCallback((targetSongId: string) => {
+    const detail = useWereCodeDataCache.getState().studioBySongId[targetSongId]?.detail;
+    if (detail) {
+      void putStoredStudioDetail(targetSongId, detail);
     }
+  }, []);
 
-    const cachedStudio = options?.force ? null : useWereCodeDataCache.getState().studioBySongId[selectedSongId]?.detail;
-    if (cachedStudio) {
-      applyStudioDetail(cachedStudio);
-      setLoading(false);
-      return;
-    }
+  const loadStudio = useCallback(
+    async (nextSongId: string, options?: { force?: boolean }) => {
+      setError(null);
+      const selectedSongId = nextSongId;
+      loadRequestRef.current = selectedSongId;
+      setSongId(selectedSongId);
 
-    setLoading(true);
-    try {
-      const detail = await fetchJson<StudioDetail>(`/api/studio/${selectedSongId}`);
-      setCachedStudioDetail(selectedSongId, detail);
-      applyStudioDetail(detail);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load studio');
-    } finally {
-      setLoading(false);
-    }
-  }, [applyStudioDetail, setCachedStudioDetail]);
+      if (!selectedSongId) {
+        setSong(null);
+        setAssets([]);
+        setAnalysisResults([]);
+        setLyrics([]);
+        setLyricsDraft('');
+        setAudioUrl(null);
+        setStemUrls({});
+        setStemMix({});
+        setStemSignError(null);
+        setLoading(false);
+        return;
+      }
+
+      const force = options?.force ?? false;
+
+      // 1) Warm in-session cache — instant, no await.
+      const liveDetail = force ? null : useWereCodeDataCache.getState().studioBySongId[selectedSongId]?.detail;
+      if (liveDetail) {
+        applyStudioDetail(liveDetail);
+        setLoading(false);
+        return;
+      }
+
+      // 2) Durable IndexedDB tier — survives reload. Paint immediately when
+      //    present; revalidate over the network only when stale or forced.
+      let paintedFromDisk = false;
+      if (!force) {
+        const stored = await getStoredStudioDetail(selectedSongId).catch(() => null);
+        if (loadRequestRef.current !== selectedSongId) {
+          return;
+        }
+        if (stored) {
+          setCachedStudioDetail(selectedSongId, stored.detail);
+          applyStudioDetail(stored.detail);
+          setLoading(false);
+          paintedFromDisk = true;
+          if (Date.now() - stored.loadedAt < STUDIO_DETAIL_TTL_MS) {
+            return;
+          }
+        }
+      }
+
+      // 3) Network. Show the spinner only when nothing was painted from disk.
+      if (!paintedFromDisk) {
+        setLoading(true);
+      }
+      try {
+        const detail = await fetchJson<StudioDetail>(`/api/studio/${selectedSongId}`);
+        if (loadRequestRef.current !== selectedSongId) {
+          return;
+        }
+        setCachedStudioDetail(selectedSongId, detail);
+        applyStudioDetail(detail);
+        persistActiveStudioDetail(selectedSongId);
+      } catch (loadError) {
+        if (loadRequestRef.current !== selectedSongId) {
+          return;
+        }
+        // A failed background revalidation keeps the disk copy on screen.
+        if (!paintedFromDisk) {
+          setError(loadError instanceof Error ? loadError.message : 'Could not load studio');
+        }
+      } finally {
+        if (loadRequestRef.current === selectedSongId) {
+          setLoading(false);
+        }
+      }
+    },
+    [applyStudioDetail, persistActiveStudioDetail, setCachedStudioDetail]
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -470,6 +533,10 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
           setLyricsDraft(nextPlainLyrics.content ?? '');
         }
       }
+      // Mirror the patched bundle to the durable tier so a reload reflects the
+      // workflow result without re-reading from Supabase.
+      persistActiveStudioDetail(nextSongId);
+
       if (jobStatus === 'failed') {
         setError(result.job?.error_message ?? `${name} failed`);
         setMessage(null);
@@ -564,6 +631,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         setCachedStudioLyrics(song.id, nextLyrics);
         setLyricsDraft(plainResult.lyrics?.content ?? plainContent);
       }
+      persistActiveStudioDetail(song.id);
       setMessage('Lyrics saved');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save lyrics');
@@ -3159,268 +3227,9 @@ function parseAlignmentLyrics(content: string): LyricDisplayLine[] {
   }
 }
 
-type SectionSegment = { start: number; end: number; name: string };
-
-// Pull the live `structure_msaf` row and turn its mapped_segments into named,
-// playhead-comparable spans. The analyzer envelope is stored whole, so the
-// segments live at row.data.data.mapped_segments (see persistAnalysisResults).
-function deriveSectionSegments(analysisResults: AnalysisResultRow[]): SectionSegment[] {
-  const row =
-    analysisResults.find((result) => result.analyzer_name === 'structure_msaf' && result.ok && result.is_current) ??
-    analysisResults.find((result) => result.analyzer_name === 'structure_msaf' && result.ok);
-  if (!row || !row.data || typeof row.data !== 'object' || Array.isArray(row.data)) {
-    return [];
-  }
-  const inner = (row.data as Record<string, unknown>).data;
-  if (!inner || typeof inner !== 'object' || Array.isArray(inner)) {
-    return [];
-  }
-  const rawSegments = (inner as Record<string, unknown>).mapped_segments;
-  if (!Array.isArray(rawSegments)) {
-    return [];
-  }
-
-  const parsed = rawSegments
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-        return null;
-      }
-      const record = entry as Record<string, unknown>;
-      const start = typeof record.start_sec === 'number' ? record.start_sec : null;
-      const end = typeof record.end_sec === 'number' ? record.end_sec : null;
-      const section = typeof record.section === 'string' ? record.section.trim().toLowerCase() : '';
-      // Drop non-finite spans and degenerate slivers so they never flash as active.
-      if (start === null || end === null || !Number.isFinite(start) || !Number.isFinite(end) || end - start < 0.5) {
-        return null;
-      }
-      return { start, end, section };
-    })
-    .filter((entry): entry is { start: number; end: number; section: string } => entry !== null)
-    .sort((a, b) => a.start - b.start);
-
-  return nameSectionSegments(parsed);
-}
-
-// Naming rules: generic "section" → Intro/Outro by position (else "Section N");
-// real types (verse/chorus/bridge…) get a 1/2 suffix only when that type recurs.
-function nameSectionSegments(segments: { start: number; end: number; section: string }[]): SectionSegment[] {
-  const isGeneric = (section: string) => !section || section === 'section';
-  const typeCounts = new Map<string, number>();
-  for (const seg of segments) {
-    if (!isGeneric(seg.section)) {
-      typeCounts.set(seg.section, (typeCounts.get(seg.section) ?? 0) + 1);
-    }
-  }
-  const midGenericCount = segments.filter((seg, i) => isGeneric(seg.section) && i !== 0 && i !== segments.length - 1).length;
-
-  const runningIndex = new Map<string, number>();
-  let midGenericIndex = 0;
-
-  return segments.map((seg, index) => {
-    let name: string;
-    if (isGeneric(seg.section)) {
-      if (index === 0) {
-        name = 'Intro';
-      } else if (index === segments.length - 1) {
-        name = 'Outro';
-      } else {
-        midGenericIndex += 1;
-        name = midGenericCount > 1 ? `Section ${midGenericIndex}` : 'Section';
-      }
-    } else {
-      const title = seg.section.charAt(0).toUpperCase() + seg.section.slice(1);
-      if ((typeCounts.get(seg.section) ?? 0) > 1) {
-        const n = (runningIndex.get(seg.section) ?? 0) + 1;
-        runningIndex.set(seg.section, n);
-        name = `${title} ${n}`;
-      } else {
-        name = title;
-      }
-    }
-    return { start: seg.start, end: seg.end, name };
-  });
-}
-
-function deriveChordEvents(analysisResults: AnalysisResultRow[]): ChordEvent[] {
-  const events = analysisResults
-    .filter((result) => result.ok)
-    .flatMap((result) => collectChordEvents(result.data, 0))
-    .filter((event) => Number.isFinite(event.time) && event.time >= 0 && event.chord);
-  const seen = new Set<string>();
-
-  return events
-    .sort((a, b) => a.time - b.time)
-    .filter((event) => {
-      const key = `${event.time.toFixed(2)}:${event.chord}`;
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    });
-}
-
-function collectChordEvents(value: unknown, depth: number): ChordEvent[] {
-  if (depth > 5 || value === null || typeof value !== 'object') {
-    return [];
-  }
-
-  if (Array.isArray(value)) {
-    const direct = value.map((item) => chordEventFromUnknown(item)).filter((event): event is ChordEvent => Boolean(event));
-    if (direct.length > 0) {
-      return direct;
-    }
-    return value.flatMap((item) => collectChordEvents(item, depth + 1));
-  }
-
-  const record = value as Record<string, unknown>;
-  const direct = chordEventFromRecord(record);
-  if (direct) {
-    return [direct];
-  }
-
-  const prioritizedKeys = ['chords', 'chord_track', 'chordTrack', 'chord_events', 'chordEvents', 'events', 'segments'];
-  const prioritized = prioritizedKeys.flatMap((key) => collectChordEvents(record[key], depth + 1));
-  if (prioritized.length > 0) {
-    return prioritized;
-  }
-
-  return Object.values(record).flatMap((entry) => collectChordEvents(entry, depth + 1));
-}
-
-function chordEventFromUnknown(value: unknown) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? chordEventFromRecord(value as Record<string, unknown>) : null;
-}
-
-function chordEventFromRecord(record: Record<string, unknown>): ChordEvent | null {
-  const chord = readChordLabel(record);
-  const time = readNumber(record, ['time', 'start', 'start_sec', 'start_time', 'timestamp', 'onset']);
-  if (!chord || time === null) {
-    return null;
-  }
-
-  return {
-    chord,
-    time,
-    endTime: readNumber(record, ['end', 'end_sec', 'end_time', 'stop', 'stop_sec']),
-  };
-}
-
-function readChordLabel(record: Record<string, unknown>) {
-  for (const key of ['chord', 'chord_name', 'symbol', 'label']) {
-    const value = record[key];
-    if (typeof value === 'string' && isChordLike(value)) {
-      return normalizeChordLabel(value);
-    }
-  }
-
-  const root = typeof record.root === 'string' ? record.root.trim() : '';
-  const quality = typeof record.quality === 'string' ? record.quality.trim() : '';
-  const combined = `${root}${quality}`;
-  return isChordLike(combined) ? normalizeChordLabel(combined) : null;
-}
-
-function isChordLike(value: string) {
-  const trimmed = value.trim();
-  return /^(?:N\.?C\.?|no chord|[A-G](?:#|b|♭|♯)?(?::?(?:m|min|maj|dim|aug|sus|add|dom|ø|o|\+|-)?[0-9#b♭♯+\-/()]*)?)$/i.test(trimmed);
-}
-
-function normalizeChordLabel(value: string) {
-  const trimmed = value.trim();
-  return /^no chord$/i.test(trimmed) ? 'N.C.' : trimmed.replaceAll('♭', 'b').replaceAll('♯', '#');
-}
-
-function readNumber(record: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-  }
-  return null;
-}
-
-function activeChordIndex(events: ChordEvent[], currentTime: number) {
-  let active = -1;
-  for (let index = 0; index < events.length; index += 1) {
-    const event = events[index];
-    const nextTime = events[index + 1]?.time ?? Infinity;
-    const endTime = event.endTime ?? nextTime;
-    if (currentTime >= event.time && currentTime < endTime) {
-      active = index;
-      break;
-    }
-    if (currentTime >= event.time) {
-      active = index;
-    }
-  }
-  return active;
-}
-
-function buildSongFacts(song: SongSummary | null, analysisResults: AnalysisResultRow[] = []): Array<[string, string]> {
-  const metadata =
-    song?.metadata && typeof song.metadata === 'object' && !Array.isArray(song.metadata)
-      ? (song.metadata as Record<string, unknown>)
-      : {};
-  // Manual metadata (rarely set) wins; otherwise fall back to the live analyzer
-  // rows the run already loads. Tuning/Capo have no analyzer, so they stay
-  // static placeholders.
-  const analyzed = deriveKeyTempo(analysisResults);
-  const key = readMetadata(metadata, ['key', 'musical_key']) ?? analyzed.key ?? '--';
-  const tempo = readMetadata(metadata, ['tempo', 'bpm', 'tempo_bpm']) ?? analyzed.tempo;
-  const tuning = readMetadata(metadata, ['tuning']) ?? 'Standard';
-  const capo = readMetadata(metadata, ['capo']) ?? 'None';
-
-  return [
-    ['Key', key],
-    ['Tempo', tempo ? `${tempo} BPM` : '-- BPM'],
-    ['Tuning', tuning],
-    ['Capo', capo],
-  ];
-}
-
-// Pull current key/tempo straight from the analyzer rows. As with the structure
-// and chord derivations, the analyzer envelope is stored whole, so the useful
-// fields live at row.data.data (see persistAnalysisResults).
-function deriveKeyTempo(analysisResults: AnalysisResultRow[]): { key: string | null; tempo: string | null } {
-  const tonal = readAnalyzerData(analysisResults, 'tonal_key');
-  const rawKey = typeof tonal?.key === 'string' ? tonal.key.trim() : '';
-  const rawScale = typeof tonal?.scale === 'string' ? tonal.scale.trim() : '';
-  const key = rawKey ? (rawScale ? `${rawKey} ${rawScale}` : rawKey) : null;
-
-  const beats = readAnalyzerData(analysisResults, 'tempo_beats');
-  const rawBpm = typeof beats?.bpm === 'number' && Number.isFinite(beats.bpm) ? beats.bpm : null;
-  const tempo = rawBpm !== null ? String(Math.round(rawBpm)) : null;
-
-  return { key, tempo };
-}
-
-function readAnalyzerData(analysisResults: AnalysisResultRow[], name: string): Record<string, unknown> | null {
-  const row =
-    analysisResults.find((result) => result.analyzer_name === name && result.ok && result.is_current) ??
-    analysisResults.find((result) => result.analyzer_name === name && result.ok);
-  if (!row || !row.data || typeof row.data !== 'object' || Array.isArray(row.data)) {
-    return null;
-  }
-  const inner = (row.data as Record<string, unknown>).data;
-  if (!inner || typeof inner !== 'object' || Array.isArray(inner)) {
-    return null;
-  }
-  return inner as Record<string, unknown>;
-}
-
-function readMetadata(metadata: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = metadata[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value;
-    }
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return String(Math.round(value));
-    }
-  }
-  return null;
-}
+// Analysis derivations (sections, chords, key/tempo, song facts) live in
+// `@/lib/music/analysis-overview` — shared with the server-side `studio_overview`
+// summary so the on-screen render and the stored summary can never drift.
 
 function formatSeconds(seconds: number) {
   const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;

@@ -3,7 +3,7 @@
 import { LogIn, LogOut, UserCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { clearWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
+import { clearWereCodeDataCache, reconcileWereCodeCacheOwner } from '@/lib/client-cache/werecode-data-cache';
 import { getSupabaseBrowserClient } from '@/lib/supabase/browser';
 
 type PublicUser = {
@@ -34,7 +34,12 @@ export function AuthButton() {
       setSession({ authEnabled: false, configured: false, user: null });
       return;
     }
-    setSession((await response.json()) as SessionPayload);
+    const payload = (await response.json()) as SessionPayload;
+    if (payload.user?.id) {
+      // Clear another account's persisted cache before showing this session.
+      reconcileWereCodeCacheOwner(payload.user.id);
+    }
+    setSession(payload);
   }
 
   useEffect(() => {

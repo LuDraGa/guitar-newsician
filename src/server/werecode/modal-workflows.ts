@@ -11,6 +11,7 @@ import {
 } from '@/lib/audio/stem-separation-limits';
 import { RouteNotFoundError } from '@/lib/http/route-error';
 import { modalFetch } from '@/lib/modal/client';
+import { deriveStudioOverviewData } from '@/lib/music/analysis-overview';
 import {
   WERECODE_STORAGE_BUCKETS,
   type WereCodeStorageBucket,
@@ -20,7 +21,7 @@ import {
 import { getWereCodeRequestContext, requireOwnedSong, type WereCodeSupabaseClient } from '@/server/werecode/context';
 import { lookupLyrics, type LyricsLookupResult } from '@/server/werecode/lyrics-lookup';
 import { PIPELINE_VERSIONS, STAGE_ASSET_KINDS, type PipelineStage } from '@/server/werecode/pipeline-versions';
-import type { AssetKind, AssetRow, JobRow, JobType, Json, LyricsRow, SongRow } from '@/types/werecode';
+import type { AnalysisResultRow, AssetKind, AssetRow, JobRow, JobType, Json, LyricsRow, SongRow } from '@/types/werecode';
 
 type SupabaseClient = WereCodeSupabaseClient;
 
@@ -1140,6 +1141,27 @@ async function persistAnalysisResults(
     return [];
   }
 
+  // Derive the compact studio_overview summary from the fresh analyzer rows and
+  // persist it alongside them. Cold /api/studio reads only this one small row
+  // instead of every heavy analyzer envelope. It is excluded from the response
+  // below so the live post-run client keeps deriving from the full rows it has.
+  const overviewData = deriveStudioOverviewData(rows as unknown as AnalysisResultRow[]);
+  const rowsToInsert = [
+    ...rows,
+    {
+      owner_id: ownerId,
+      song_id: songId,
+      asset_id: assetId,
+      analyzer_name: 'studio_overview',
+      analyzer_version: null,
+      ok: true,
+      elapsed_sec: null,
+      error: null,
+      data: overviewData as unknown as Json,
+      is_current: true,
+    },
+  ];
+
   // Replace-in-place: soft-archive prior analyzer rows for this song before
   // inserting the fresh set as current (mirrors asset supersede).
   const { error: supersedeError } = await supabase
@@ -1152,12 +1174,12 @@ async function persistAnalysisResults(
     throw supersedeError;
   }
 
-  const { data, error } = await supabase.from('analysis_results').insert(rows).select('*');
+  const { data, error } = await supabase.from('analysis_results').insert(rowsToInsert).select('*');
   if (error) {
     throw error;
   }
 
-  return data ?? [];
+  return (data ?? []).filter((row) => row.analyzer_name !== 'studio_overview');
 }
 
 async function persistAlignedLyrics(
