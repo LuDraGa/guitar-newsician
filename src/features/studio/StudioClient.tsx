@@ -24,7 +24,10 @@ import {
   Pause,
   Play,
   Repeat,
+  Repeat1,
   RefreshCw,
+  RotateCcw,
+  RotateCw,
   Save,
   Scissors,
   Send,
@@ -34,6 +37,7 @@ import {
   Trash2,
   Type,
   Upload,
+  Volume2,
   Wand2,
   X,
 } from 'lucide-react';
@@ -65,6 +69,7 @@ import {
   type SectionSegment,
 } from '@/lib/music/analysis-overview';
 import { parseLrc } from '@/lib/music/lrc';
+import { createBrowserAudioContext } from '@/lib/music/waveform/audio-context';
 import { ANALYZE_FULL_ANALYZERS, computeStageStatuses } from '@/server/werecode/pipeline-versions';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
 import type { AssetSummary, SongSummary, StudioDetail } from '@/types/werecode-client';
@@ -1765,6 +1770,427 @@ function LyricsPane({
   );
 }
 
+type EngineLoop = { start: number; end: number } | null;
+type EngineSource = { id: string; url: string };
+
+const ORIGINAL_SOURCE_ID = '__original__';
+
+/**
+ * Sample-accurate multi-stem transport built on a single AudioContext clock.
+ *
+ * Every stem is decoded to an AudioBuffer and played from an AudioBufferSourceNode
+ * scheduled against one shared `ctx.currentTime` anchor, so the stems can never drift
+ * relative to each other — this is what kills the old loop-desync (separate <audio>
+ * elements each ran on their own clock and were re-seeked independently). Per-stem gain
+ * feeds a master gain (0–1.5, so >100% boost is possible) into a soft limiter so the
+ * boost stays loud without hard-clipping. Loop / repeat use the source nodes' native
+ * gapless loop; control changes (rate, loop bounds, seek) reschedule from the live
+ * position, steady-state looping never reschedules.
+ */
+/**
+ * Module-level cache of decoded PCM keyed by source URL. `AudioBuffer`s are not bound
+ * to the `AudioContext` that decoded them, so re-opening the same song reuses them —
+ * no re-fetch, no re-decode → playback is ready instantly on revisit (the slow part is
+ * `decodeAudioData` over multi-MB FLAC). Bounded by total sample bytes (LRU eviction)
+ * so memory stays in check across songs.
+ */
+const decodedBufferCache = new Map<string, AudioBuffer>();
+let decodedBufferCacheBytes = 0;
+const DECODED_CACHE_MAX_BYTES = 220 * 1024 * 1024; // ≈ one 4-stem, ~4-min song
+
+function audioBufferBytes(buffer: AudioBuffer) {
+  return buffer.length * buffer.numberOfChannels * 4; // f32 samples
+}
+
+function cacheDecodedBuffer(url: string, buffer: AudioBuffer) {
+  if (decodedBufferCache.has(url)) {
+    // Refresh LRU recency without touching the byte total.
+    decodedBufferCache.delete(url);
+    decodedBufferCache.set(url, buffer);
+    return;
+  }
+  decodedBufferCache.set(url, buffer);
+  decodedBufferCacheBytes += audioBufferBytes(buffer);
+  while (decodedBufferCacheBytes > DECODED_CACHE_MAX_BYTES && decodedBufferCache.size > 1) {
+    const oldestKey: string | undefined = decodedBufferCache.keys().next().value;
+    if (oldestKey === undefined) {
+      break;
+    }
+    const oldest = decodedBufferCache.get(oldestKey);
+    decodedBufferCache.delete(oldestKey);
+    if (oldest) {
+      decodedBufferCacheBytes -= audioBufferBytes(oldest);
+    }
+  }
+}
+
+function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: number) {
+  const ctxRef = useRef<AudioContext | null>(null);
+  const masterGainRef = useRef<GainNode | null>(null);
+  const buffersRef = useRef(new Map<string, AudioBuffer>());
+  const gainNodesRef = useRef(new Map<string, GainNode>());
+  const sourcesRef = useRef(new Map<string, AudioBufferSourceNode>());
+  const desiredGainRef = useRef(new Map<string, number>());
+  const masterVolumeRef = useRef(0.8);
+  const rateRef = useRef(1);
+  const loopRef = useRef<EngineLoop>(null);
+  const startCtxTimeRef = useRef(0);
+  const startOffsetRef = useRef(0);
+  const pausedOffsetRef = useRef(0);
+  const playingRef = useRef(false);
+  const durationRef = useRef(fallbackDuration);
+  const rafRef = useRef<number | null>(null);
+
+  const [ready, setReady] = useState(false);
+  const [decodedCount, setDecodedCount] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(fallbackDuration);
+
+  const totalCount = engineSources.length;
+  const signature = useMemo(() => engineSources.map((source) => `${source.id}::${source.url}`).join('|'), [engineSources]);
+
+  // Reset transport state the instant the stem set changes (React's "adjust state
+  // during render" pattern) so the decode effect can stay purely imperative.
+  const [renderedSignature, setRenderedSignature] = useState(signature);
+  if (renderedSignature !== signature) {
+    setRenderedSignature(signature);
+    setReady(false);
+    setDecodedCount(0);
+    setPlaying(false);
+    setTime(0);
+    setDuration(fallbackDuration);
+  }
+
+  const computePosition = useCallback(() => {
+    if (!playingRef.current) {
+      return pausedOffsetRef.current;
+    }
+    const ctx = ctxRef.current;
+    if (!ctx) {
+      return pausedOffsetRef.current;
+    }
+    const elapsed = Math.max(0, ctx.currentTime - startCtxTimeRef.current) * rateRef.current;
+    let pos = startOffsetRef.current + elapsed;
+    const loop = loopRef.current;
+    if (loop && loop.end > loop.start && pos > loop.end) {
+      pos = loop.start + ((pos - loop.end) % (loop.end - loop.start));
+    } else if (!loop && durationRef.current > 0 && pos > durationRef.current) {
+      pos = durationRef.current;
+    }
+    return pos;
+  }, []);
+
+  const stopSources = useCallback(() => {
+    for (const source of sourcesRef.current.values()) {
+      try {
+        source.stop();
+      } catch {
+        // already stopped
+      }
+      try {
+        source.disconnect();
+      } catch {
+        // already disconnected
+      }
+    }
+    sourcesRef.current.clear();
+  }, []);
+
+  const startSourcesAt = useCallback(
+    (offset: number) => {
+      const ctx = ctxRef.current;
+      if (!ctx || buffersRef.current.size === 0) {
+        return;
+      }
+      stopSources();
+      const loop = loopRef.current;
+      let startOffset: number;
+      if (loop && loop.end > loop.start) {
+        startOffset = Math.min(Math.max(offset, loop.start), loop.end - 0.001);
+      } else {
+        startOffset = Math.max(0, Math.min(offset, durationRef.current || offset));
+      }
+      // Tiny shared look-ahead so every source begins on the exact same clock instant.
+      const when = ctx.currentTime + 0.03;
+      for (const [id, buffer] of buffersRef.current) {
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.playbackRate.value = rateRef.current;
+        if (loop && loop.end > loop.start) {
+          source.loop = true;
+          source.loopStart = loop.start;
+          source.loopEnd = loop.end;
+        }
+        const gain = gainNodesRef.current.get(id);
+        if (gain) {
+          source.connect(gain);
+        }
+        source.start(when, startOffset);
+        sourcesRef.current.set(id, source);
+      }
+      startCtxTimeRef.current = when;
+      startOffsetRef.current = startOffset;
+    },
+    [stopSources]
+  );
+
+  const stopRaf = useCallback(() => {
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+
+  const startRaf = useCallback(() => {
+    if (rafRef.current != null) {
+      return;
+    }
+    const loop = () => {
+      const pos = computePosition();
+      if (!loopRef.current && durationRef.current > 0 && pos >= durationRef.current) {
+        stopSources();
+        playingRef.current = false;
+        setPlaying(false);
+        pausedOffsetRef.current = durationRef.current;
+        setTime(durationRef.current);
+        rafRef.current = null;
+        return;
+      }
+      setTime(pos);
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
+  }, [computePosition, stopSources]);
+
+  const play = useCallback(async () => {
+    const ctx = ctxRef.current;
+    if (!ctx || buffersRef.current.size === 0) {
+      return;
+    }
+    try {
+      await ctx.resume();
+    } catch {
+      // resume can reject if the context was closed mid-flight
+    }
+    let offset = pausedOffsetRef.current;
+    if (durationRef.current > 0 && offset >= durationRef.current - 0.05) {
+      offset = 0;
+    }
+    startSourcesAt(offset);
+    playingRef.current = true;
+    setPlaying(true);
+    startRaf();
+  }, [startRaf, startSourcesAt]);
+
+  const pause = useCallback(() => {
+    if (!playingRef.current) {
+      return;
+    }
+    pausedOffsetRef.current = computePosition();
+    stopSources();
+    playingRef.current = false;
+    setPlaying(false);
+    stopRaf();
+    setTime(pausedOffsetRef.current);
+  }, [computePosition, stopRaf, stopSources]);
+
+  const toggle = useCallback(async () => {
+    if (playingRef.current) {
+      pause();
+    } else {
+      await play();
+    }
+  }, [pause, play]);
+
+  const seek = useCallback(
+    (next: number) => {
+      const target = Math.max(0, Math.min(durationRef.current || next, next));
+      pausedOffsetRef.current = target;
+      if (playingRef.current) {
+        startSourcesAt(target);
+      }
+      setTime(target);
+    },
+    [startSourcesAt]
+  );
+
+  const nudge = useCallback(
+    (delta: number) => {
+      seek(computePosition() + delta);
+    },
+    [computePosition, seek]
+  );
+
+  const setRate = useCallback(
+    (rate: number) => {
+      const pos = computePosition();
+      rateRef.current = rate;
+      if (playingRef.current) {
+        startSourcesAt(pos);
+      }
+    },
+    [computePosition, startSourcesAt]
+  );
+
+  const setMasterVolume = useCallback((value: number) => {
+    masterVolumeRef.current = value;
+    const ctx = ctxRef.current;
+    const node = masterGainRef.current;
+    if (ctx && node) {
+      node.gain.setTargetAtTime(value, ctx.currentTime, 0.02);
+    }
+  }, []);
+
+  const setStemGain = useCallback((id: string, value: number) => {
+    desiredGainRef.current.set(id, value);
+    const ctx = ctxRef.current;
+    const node = gainNodesRef.current.get(id);
+    if (ctx && node) {
+      node.gain.setTargetAtTime(value, ctx.currentTime, 0.02);
+    }
+  }, []);
+
+  const setLoop = useCallback(
+    (loop: EngineLoop) => {
+      loopRef.current = loop && loop.end > loop.start ? loop : null;
+      if (playingRef.current) {
+        startSourcesAt(computePosition());
+      }
+    },
+    [computePosition, startSourcesAt]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    playingRef.current = false;
+    stopRaf();
+    pausedOffsetRef.current = 0;
+    durationRef.current = fallbackDuration;
+
+    if (engineSources.length === 0) {
+      stopSources();
+      buffersRef.current.clear();
+      gainNodesRef.current.clear();
+      if (ctxRef.current) {
+        void ctxRef.current.close().catch(() => undefined);
+        ctxRef.current = null;
+      }
+      masterGainRef.current = null;
+      return;
+    }
+
+    const ctx = createBrowserAudioContext();
+    ctxRef.current = ctx;
+    const master = ctx.createGain();
+    master.gain.value = masterVolumeRef.current;
+    // Soft limiter: lets master boost past 100% stay loud without harsh digital clipping.
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -2;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
+    master.connect(limiter);
+    limiter.connect(ctx.destination);
+    masterGainRef.current = master;
+    buffersRef.current = new Map();
+    gainNodesRef.current = new Map();
+    sourcesRef.current = new Map();
+
+    let settled = 0;
+    let decoded = 0;
+    let maxDuration = 0;
+
+    for (const source of engineSources) {
+      const cached = decodedBufferCache.get(source.url);
+      const decodePromise: Promise<AudioBuffer> = cached
+        ? Promise.resolve(cached)
+        : fetch(source.url)
+            .then((response) => {
+              if (!response.ok) {
+                throw new Error(`Failed to fetch stem audio: ${response.status}`);
+              }
+              return response.arrayBuffer();
+            })
+            .then((arrayBuffer) => ctx.decodeAudioData(arrayBuffer));
+
+      decodePromise
+        .then((audioBuffer) => {
+          cacheDecodedBuffer(source.url, audioBuffer);
+          if (cancelled || ctxRef.current !== ctx) {
+            return;
+          }
+          buffersRef.current.set(source.id, audioBuffer);
+          const gain = ctx.createGain();
+          gain.gain.value = desiredGainRef.current.get(source.id) ?? 0;
+          gain.connect(master);
+          gainNodesRef.current.set(source.id, gain);
+          maxDuration = Math.max(maxDuration, audioBuffer.duration);
+          durationRef.current = Math.max(durationRef.current, maxDuration);
+          setDuration((current) => Math.max(current, maxDuration, fallbackDuration));
+          decoded += 1;
+          setDecodedCount(decoded);
+        })
+        .catch(() => {
+          // A single stem failing to decode shouldn't sink the whole mix.
+        })
+        .finally(() => {
+          if (cancelled || ctxRef.current !== ctx) {
+            return;
+          }
+          settled += 1;
+          if (settled === engineSources.length) {
+            setReady(decoded > 0);
+          }
+        });
+    }
+
+    return () => {
+      cancelled = true;
+      stopRaf();
+      stopSources();
+      buffersRef.current.clear();
+      gainNodesRef.current.clear();
+      if (ctxRef.current === ctx) {
+        void ctx.close().catch(() => undefined);
+        ctxRef.current = null;
+        masterGainRef.current = null;
+      }
+    };
+    // Only the stem set (ids + urls) should trigger a full decode/teardown.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+
+  useEffect(() => {
+    if (fallbackDuration > durationRef.current) {
+      durationRef.current = fallbackDuration;
+      setDuration((current) => Math.max(current, fallbackDuration));
+    }
+  }, [fallbackDuration]);
+
+  const playable = decodedCount > 0;
+
+  return {
+    ready,
+    playable,
+    decodedCount,
+    totalCount,
+    duration,
+    playing,
+    time,
+    play,
+    pause,
+    toggle,
+    seek,
+    nudge,
+    setRate,
+    setMasterVolume,
+    setStemGain,
+    setLoop,
+  };
+}
+
 function TransportCard({
   song,
   audioUrl,
@@ -1792,157 +2218,79 @@ function TransportCard({
   analyzing: boolean;
   onRunAnalyze?: () => void;
 }) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const stemAudioRefs = useRef(new Map<string, HTMLAudioElement>());
+  const engineSources = useMemo<EngineSource[]>(() => {
+    if (stemSources.length > 0) {
+      return stemSources.map((source) => ({ id: source.id, url: source.url }));
+    }
+    if (audioUrl) {
+      return [{ id: ORIGINAL_SOURCE_ID, url: audioUrl }];
+    }
+    return [];
+  }, [audioUrl, stemSources]);
+
+  const fallbackDuration = song?.duration_sec ?? 0;
+  const {
+    ready: engineReady,
+    decodedCount,
+    totalCount,
+    duration,
+    playing,
+    time,
+    toggle,
+    seek,
+    nudge,
+    setRate: setEngineRate,
+    setMasterVolume: setEngineMasterVolume,
+    setStemGain,
+    setLoop: setEngineLoop,
+  } = usePlaybackEngine(engineSources, fallbackDuration);
+
   const stemSourcesRef = useRef(stemSources);
   const anySoloRef = useRef(false);
-  const latestTimeRef = useRef(0);
-  const lastFollowerSyncAtRef = useRef(0);
+  const sentTimeRef = useRef(-1);
   const handledSeekCommandIdRef = useRef<number | null>(null);
   const handledPlaybackCommandIdRef = useRef<number | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [time, setTime] = useState(0);
-  const [duration, setDuration] = useState(song?.duration_sec ?? 0);
   const [rate, setRate] = useState(1);
+  const [masterVolume, setMasterVolume] = useState(80);
   const [loopStart, setLoopStart] = useState<number | null>(null);
   const [loopEnd, setLoopEnd] = useState<number | null>(null);
-  const [readyStemState, setReadyStemState] = useState<{ sourceSignature: string; ids: Set<string> }>(() => ({
-    sourceSignature: '',
-    ids: new Set(),
-  }));
-  const bars = useMemo(() => makeBars(song?.id ?? 'studio', 120), [song?.id]);
-  const hasLoop = loopStart !== null || loopEnd !== null;
+  const [repeatSong, setRepeatSong] = useState(false);
+
   const hasStemPlayback = stemSources.length > 0;
+  const hasLoop = loopStart !== null || loopEnd !== null;
   const anySolo = stemSources.some((source) => source.solo);
-  const stemSourceSignature = useMemo(() => stemSources.map((source) => `${source.id}:${source.url}`).join('|'), [stemSources]);
   const stemMixSignature = useMemo(
     () => stemSources.map((source) => `${source.id}:${source.level}:${source.muted ? 1 : 0}:${source.solo ? 1 : 0}`).join('|'),
     [stemSources]
   );
-  const readyStemCount =
-    readyStemState.sourceSignature === stemSourceSignature ? stemSources.filter((source) => readyStemState.ids.has(source.id)).length : 0;
-  const stemsReady = !hasStemPlayback || (readyStemCount === stemSources.length && stemSources.length > 0);
-  const preparingPlayback = hasStemPlayback && !stemsReady;
-  const hasPlayableAudio = hasStemPlayback ? stemsReady : Boolean(audioUrl);
-  const playbackModeLabel = preparingPlayback ? `Preparing stems ${readyStemCount}/${stemSources.length}` : hasStemPlayback ? 'Stems mix' : 'Original';
-  const playButtonLabel = preparingPlayback ? playbackModeLabel : playing ? 'Pause' : 'Play';
+  const preparingPlayback = totalCount > 0 && !engineReady;
+  const hasPlayableAudio = engineReady;
+  const playbackModeLabel = hasStemPlayback ? 'Stems mix' : 'Original';
+  const playButtonLabel = preparingPlayback ? 'Preparing playback' : playing ? 'Pause' : 'Play';
   const currentSection = sections.find((section) => time >= section.start && time < section.end);
 
-  const getActiveAudios = useCallback(() => {
-    if (hasStemPlayback) {
-      return stemSources.map((source) => stemAudioRefs.current.get(source.id)).filter((audio): audio is HTMLAudioElement => Boolean(audio));
+  const effectiveLoop = useMemo<EngineLoop>(() => {
+    if (loopStart !== null && loopEnd !== null && loopEnd > loopStart) {
+      return { start: loopStart, end: loopEnd };
     }
-    return audioRef.current ? [audioRef.current] : [];
-  }, [hasStemPlayback, stemSources]);
-
-  const markStemReady = useCallback((assetId: string) => {
-    setReadyStemState((current) => {
-      const currentIds = current.sourceSignature === stemSourceSignature ? current.ids : new Set<string>();
-      if (current.sourceSignature === stemSourceSignature && currentIds.has(assetId)) {
-        return current;
-      }
-      const next = new Set(currentIds);
-      next.add(assetId);
-      return { sourceSignature: stemSourceSignature, ids: next };
-    });
-  }, [stemSourceSignature]);
-
-  const setAllAudioTimes = useCallback(
-    (next: number) => {
-      for (const audio of getActiveAudios()) {
-        audio.currentTime = next;
-      }
-      lastFollowerSyncAtRef.current = performance.now();
-    },
-    [getActiveAudios]
-  );
-
-  const syncStemFollowers = useCallback(
-    (masterTime: number, force = false) => {
-      if (!hasStemPlayback || stemSources.length < 2) {
-        return;
-      }
-
-      const now = performance.now();
-      if (!force && now - lastFollowerSyncAtRef.current < 1000) {
-        return;
-      }
-
-      let synced = false;
-      for (const source of stemSources.slice(1)) {
-        const audio = stemAudioRefs.current.get(source.id);
-        if (!audio || audio.paused || Math.abs(audio.currentTime - masterTime) <= 0.45) {
-          continue;
-        }
-        audio.currentTime = masterTime;
-        synced = true;
-      }
-
-      if (synced || force) {
-        lastFollowerSyncAtRef.current = now;
-      }
-    },
-    [hasStemPlayback, stemSources]
-  );
-
-  const pauseAll = useCallback(() => {
-    for (const audio of getActiveAudios()) {
-      audio.pause();
+    if (repeatSong && duration > 0) {
+      return { start: 0, end: duration };
     }
-    setPlaying(false);
-  }, [getActiveAudios]);
-
-  const playAll = useCallback(async () => {
-    const audios = getActiveAudios();
-    if (audios.length === 0) {
-      return;
-    }
-    if (hasStemPlayback && (!stemsReady || audios.length !== stemSources.length)) {
-      return;
-    }
-
-    for (const audio of audios) {
-      audio.currentTime = time;
-    }
-    lastFollowerSyncAtRef.current = performance.now();
-
-    try {
-      await Promise.all(audios.map((audio) => audio.play()));
-      setPlaying(true);
-    } catch {
-      for (const audio of audios) {
-        audio.pause();
-      }
-      setPlaying(false);
-    }
-  }, [getActiveAudios, hasStemPlayback, stemSources.length, stemsReady, time]);
-
-  const toggle = useCallback(async () => {
-    if (playing) {
-      pauseAll();
-      return;
-    }
-    await playAll();
-  }, [pauseAll, playAll, playing]);
-
-  const seekTo = useCallback(
-    (next: number) => {
-      const safeNext = Math.max(0, Math.min(duration || next, next));
-      latestTimeRef.current = safeNext;
-      setTime(safeNext);
-      setAllAudioTimes(safeNext);
-    },
-    [duration, setAllAudioTimes]
-  );
-
-  useEffect(() => {
-    onTimeChange(time);
-    latestTimeRef.current = time;
-  }, [onTimeChange, time]);
+    return null;
+  }, [duration, loopEnd, loopStart, repeatSong]);
 
   useEffect(() => {
     onPlayingChange(playing);
   }, [onPlayingChange, playing]);
+
+  useEffect(() => {
+    // Drive the seeker at 60Hz locally, but only push time upstream ~20Hz so the
+    // heavier lyric/chord panels don't re-render on every animation frame.
+    if (!playing || Math.abs(time - sentTimeRef.current) >= 0.05) {
+      sentTimeRef.current = time;
+      onTimeChange(time);
+    }
+  }, [onTimeChange, playing, time]);
 
   useEffect(() => {
     stemSourcesRef.current = stemSources;
@@ -1950,72 +2298,153 @@ function TransportCard({
   }, [anySolo, stemSources]);
 
   useEffect(() => {
+    setEngineRate(rate);
+  }, [rate, setEngineRate]);
+
+  useEffect(() => {
+    setEngineMasterVolume(masterVolume / 100);
+  }, [masterVolume, setEngineMasterVolume]);
+
+  useEffect(() => {
+    setEngineLoop(effectiveLoop);
+  }, [effectiveLoop, setEngineLoop]);
+
+  useEffect(() => {
+    if (hasStemPlayback) {
+      for (const source of stemSources) {
+        setStemGain(source.id, getStemVolume(source, anySolo));
+      }
+    } else if (audioUrl) {
+      setStemGain(ORIGINAL_SOURCE_ID, 1);
+    }
+  }, [anySolo, audioUrl, hasStemPlayback, setStemGain, stemMixSignature, stemSources]);
+
+  useEffect(() => {
     const handlePreview = (event: Event) => {
       const detail = (event as CustomEvent<StemLevelPreviewDetail>).detail;
       if (!detail || typeof detail.assetId !== 'string' || typeof detail.level !== 'number') {
         return;
       }
-
       const source = stemSourcesRef.current.find((item) => item.id === detail.assetId);
-      const audio = stemAudioRefs.current.get(detail.assetId);
-      if (!source || !audio) {
+      if (!source) {
         return;
       }
-
-      const volume = getStemVolume({ ...source, level: detail.level }, anySoloRef.current);
-      audio.volume = volume;
-      audio.dataset.effectiveVolume = String(volume);
+      setStemGain(detail.assetId, getStemVolume({ ...source, level: detail.level }, anySoloRef.current));
     };
 
     window.addEventListener(stemLevelPreviewEvent, handlePreview);
     return () => window.removeEventListener(stemLevelPreviewEvent, handlePreview);
-  }, []);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (audio) {
-      audio.playbackRate = rate;
-    }
-    for (const audioNode of stemAudioRefs.current.values()) {
-      audioNode.playbackRate = rate;
-    }
-  }, [rate, stemSources]);
-
-  useEffect(() => {
-    for (const source of stemSources) {
-      const audio = stemAudioRefs.current.get(source.id);
-      if (!audio) {
-        continue;
-      }
-      const volume = getStemVolume(source, anySolo);
-      audio.volume = volume;
-      audio.dataset.effectiveVolume = String(volume);
-    }
-  }, [anySolo, stemMixSignature, stemSources]);
+  }, [setStemGain]);
 
   useEffect(() => {
     if (!seekCommand || handledSeekCommandIdRef.current === seekCommand.id) {
       return;
     }
-
     handledSeekCommandIdRef.current = seekCommand.id;
-    const timer = window.setTimeout(() => seekTo(seekCommand.time), 0);
-    return () => window.clearTimeout(timer);
-  }, [seekCommand, seekTo]);
+    seek(seekCommand.time);
+  }, [seek, seekCommand]);
 
   useEffect(() => {
     if (!playbackCommand || handledPlaybackCommandIdRef.current === playbackCommand.id) {
       return;
     }
-
     handledPlaybackCommandIdRef.current = playbackCommand.id;
-    const timer = window.setTimeout(() => {
-      if (playbackCommand.action === 'toggle') {
-        void toggle();
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
+    if (playbackCommand.action === 'toggle') {
+      void toggle();
+    }
   }, [playbackCommand, toggle]);
+
+  useEffect(() => {
+    // Arrow keys scrub the transport: a quick tap jumps ±5s, holding scrubs
+    // continuously with a pace that accelerates the longer the key is held.
+    const TAP_MS = 160;
+    const BASE_RATE = 5; // seconds of audio per real second at the start of a hold
+    const MAX_RATE = 45;
+    const RAMP_MS = 2500;
+    let direction = 0;
+    let pressStart = 0;
+    let lastFrame = 0;
+    let raf: number | null = null;
+    let moved = false;
+
+    const frame = (now: number) => {
+      const held = now - pressStart;
+      const dt = (now - lastFrame) / 1000;
+      lastFrame = now;
+      if (held >= TAP_MS) {
+        const ramp = Math.min(1, (held - TAP_MS) / RAMP_MS);
+        const velocity = BASE_RATE + (MAX_RATE - BASE_RATE) * ramp * ramp;
+        nudge(direction * velocity * dt);
+        moved = true;
+      }
+      raf = requestAnimationFrame(frame);
+    };
+
+    const directionOf = (key: string) => (key === 'ArrowLeft' ? -1 : key === 'ArrowRight' ? 1 : 0);
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const typing = !!target && (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable);
+
+      if (event.code === 'Space' || event.key === ' ') {
+        // Space toggles play/pause — but let a focused control run its own native
+        // Space (button click, range, select) so we never double-fire.
+        if (typing || tag === 'BUTTON' || tag === 'SELECT' || tag === 'A') {
+          return;
+        }
+        event.preventDefault();
+        void toggle();
+        return;
+      }
+
+      if (typing) {
+        return;
+      }
+      const next = directionOf(event.key);
+      if (next === 0) {
+        return;
+      }
+      event.preventDefault();
+      if (event.repeat || direction !== 0) {
+        return;
+      }
+      direction = next;
+      pressStart = performance.now();
+      lastFrame = pressStart;
+      moved = false;
+      raf = requestAnimationFrame(frame);
+    };
+
+    const onKeyUp = (event: KeyboardEvent) => {
+      const released = directionOf(event.key);
+      if (released === 0 || released !== direction) {
+        return;
+      }
+      const held = performance.now() - pressStart;
+      if (raf != null) {
+        cancelAnimationFrame(raf);
+        raf = null;
+      }
+      if (held < TAP_MS && !moved) {
+        nudge(direction * 5);
+      }
+      direction = 0;
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      if (raf != null) {
+        cancelAnimationFrame(raf);
+      }
+    };
+  }, [nudge, toggle]);
 
   function setLoopStartAtPlayhead() {
     const nextStart = Math.min(time, Math.max(0, (duration || time) - 0.5));
@@ -2040,7 +2469,7 @@ function TransportCard({
     setLoopEnd(null);
   }
 
-  const progress = duration > 0 ? time / duration : 0;
+  const progress = duration > 0 ? Math.min(1, Math.max(0, time / duration)) : 0;
   const loopRange =
     loopStart !== null && loopEnd !== null && loopEnd > loopStart && duration > 0
       ? (() => {
@@ -2050,54 +2479,63 @@ function TransportCard({
         })()
       : null;
 
-  function renderWaveform(heightClass: string, showLoopRange: boolean) {
+  function renderSeeker(heightClass: string, showLoopRange: boolean) {
+    const fillPercent = progress * 100;
     return (
-      <div className={`relative flex ${heightClass} flex-1 items-center gap-[2px] border-l border-r border-[var(--line-2)] px-3`}>
+      <div className={`relative flex ${heightClass} flex-1 items-center`}>
+        <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-[var(--hair)]">
+          {showLoopRange && loopRange && (
+            <div
+              className="pointer-events-none absolute inset-y-0 bg-[var(--accent)] opacity-25"
+              style={{ left: `${loopRange.left}%`, width: `${loopRange.width}%` }}
+            />
+          )}
+          <div
+            className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-[var(--ink)]"
+            style={{ width: `${fillPercent}%` }}
+          />
+          {preparingPlayback && totalCount > 0 && (
+            <div
+              className="pointer-events-none absolute bottom-0 left-0 h-[2px] bg-[var(--accent)] transition-[width] duration-200"
+              style={{ width: `${(decodedCount / totalCount) * 100}%` }}
+            />
+          )}
+        </div>
         {duration > 0 &&
           sections.map((section, index) =>
             section.start <= 0 ? null : (
               <div
                 key={index}
-                className="pointer-events-none absolute bottom-0 top-0 border-l border-[var(--line-2)]"
+                className="pointer-events-none absolute top-1/2 h-3 w-[1.5px] -translate-y-1/2 rounded-full bg-[var(--accent)] opacity-55"
                 style={{ left: `${Math.min(100, (section.start / duration) * 100)}%` }}
               />
             )
           )}
         {showLoopRange && loopRange && (
-          <div
-            className="pointer-events-none absolute bottom-2 top-2 rounded-[6px] bg-[var(--accent-soft)]"
-            style={{ left: `${loopRange.left}%`, width: `${loopRange.width}%` }}
-          />
-        )}
-        {bars.map((bar, index) => {
-          const played = index / bars.length <= progress;
-          return (
+          <>
             <div
-              key={index}
-              className="flex-1 rounded-full"
-              style={{
-                height: `${bar}%`,
-                background: played ? 'var(--ink)' : 'var(--hair)',
-              }}
+              className="pointer-events-none absolute top-1/2 h-4 w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--accent)]"
+              style={{ left: `${loopRange.left}%` }}
             />
-          );
-        })}
+            <div
+              className="pointer-events-none absolute top-1/2 h-4 w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--accent)]"
+              style={{ left: `${loopRange.left + loopRange.width}%` }}
+            />
+          </>
+        )}
+        <div
+          className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--ink)] shadow-[var(--shadow-card)] ring-2 ring-[var(--paper)]"
+          style={{ left: `${fillPercent}%` }}
+        />
         <input
           type="range"
           min={0}
           max={duration || 1}
-          step={0.1}
+          step={0.01}
           value={time}
-          onChange={(event) => {
-            const next = Number(event.target.value);
-            seekTo(next);
-          }}
+          onChange={(event) => seek(Number(event.target.value))}
           className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
           aria-label="Seek playback"
-        />
-        <div
-          className="pointer-events-none absolute bottom-[-4px] top-[-4px] w-0.5 bg-[var(--accent)]"
-          style={{ left: `${Math.min(100, Math.max(0, progress * 100))}%` }}
         />
       </div>
     );
@@ -2105,74 +2543,6 @@ function TransportCard({
 
   return (
     <section className="surface shrink-0 px-5 py-4">
-      {!hasStemPlayback && audioUrl && (
-        <audio
-          ref={audioRef}
-          src={audioUrl}
-          preload="metadata"
-          onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || song?.duration_sec || 0)}
-          onTimeUpdate={(event) => {
-            const next = event.currentTarget.currentTime;
-            if (loopStart !== null && loopEnd !== null && loopEnd > loopStart && next >= loopEnd) {
-              setAllAudioTimes(loopStart);
-              latestTimeRef.current = loopStart;
-              setTime(loopStart);
-              return;
-            }
-            latestTimeRef.current = next;
-            setTime(next);
-          }}
-          onEnded={() => pauseAll()}
-          className="hidden"
-        />
-      )}
-      {hasStemPlayback &&
-        stemSources.map((source, index) => (
-          <audio
-            key={source.id}
-            ref={(node) => {
-              if (node) {
-                stemAudioRefs.current.set(source.id, node);
-                node.playbackRate = rate;
-                const volume = getStemVolume(source, anySolo);
-                node.volume = volume;
-                node.dataset.effectiveVolume = String(volume);
-              } else {
-                stemAudioRefs.current.delete(source.id);
-              }
-            }}
-            src={source.url}
-            data-stem-id={source.id}
-            data-stem-kind={source.kind}
-            preload="metadata"
-            onLoadedMetadata={(event) => {
-              const nextDuration = event.currentTarget.duration || song?.duration_sec || 0;
-              setDuration((current) => Math.max(current || 0, nextDuration));
-              if (event.currentTarget.readyState >= 3) {
-                markStemReady(source.id);
-              }
-            }}
-            onCanPlay={() => markStemReady(source.id)}
-            onTimeUpdate={
-              index === 0
-                ? (event) => {
-                    const next = event.currentTarget.currentTime;
-                    if (loopStart !== null && loopEnd !== null && loopEnd > loopStart && next >= loopEnd) {
-                      setAllAudioTimes(loopStart);
-                      latestTimeRef.current = loopStart;
-                      setTime(loopStart);
-                      return;
-                    }
-                    syncStemFollowers(next);
-                    latestTimeRef.current = next;
-                    setTime(next);
-                  }
-                : undefined
-            }
-            onEnded={() => pauseAll()}
-            className="hidden"
-          />
-        ))}
       {minimized ? (
         <div className="flex items-center gap-3">
           <button
@@ -2188,7 +2558,7 @@ function TransportCard({
             <div className="mono text-sm font-bold">{formatSeconds(time)}</div>
             <div className="text-[11px] text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</div>
           </div>
-          {renderWaveform('h-11', false)}
+          {renderSeeker('h-11', true)}
           <button
             type="button"
             onClick={() => onMinimizedChange(false)}
@@ -2201,7 +2571,18 @@ function TransportCard({
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => nudge(-5)}
+              disabled={!hasPlayableAudio}
+              className="flex h-9 shrink-0 items-center gap-1 rounded-[12px] px-2.5 text-[var(--muted)] transition hover:bg-[var(--card)] hover:text-[var(--ink)] disabled:opacity-45"
+              aria-label="Back 5 seconds"
+              title="Back 5s (← tap, hold to scrub)"
+            >
+              <RotateCcw className="h-4 w-4" />
+              <span className="mono text-[11px] font-bold leading-none">5</span>
+            </button>
             <button
               type="button"
               onClick={() => void toggle()}
@@ -2211,7 +2592,18 @@ function TransportCard({
             >
               {preparingPlayback ? <Loader2 className="h-5 w-5 animate-spin" /> : playing ? <Pause className="h-5 w-5" /> : <Play className="h-6 w-6" />}
             </button>
-            {renderWaveform('h-16', true)}
+            <button
+              type="button"
+              onClick={() => nudge(5)}
+              disabled={!hasPlayableAudio}
+              className="flex h-9 shrink-0 items-center gap-1 rounded-[12px] px-2.5 text-[var(--muted)] transition hover:bg-[var(--card)] hover:text-[var(--ink)] disabled:opacity-45"
+              aria-label="Forward 5 seconds"
+              title="Forward 5s (→ tap, hold to scrub)"
+            >
+              <span className="mono text-[11px] font-bold leading-none">5</span>
+              <RotateCw className="h-4 w-4" />
+            </button>
+            {renderSeeker('h-16', true)}
           </div>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -2232,9 +2624,23 @@ function TransportCard({
                   {analyzing ? 'Analyzing…' : 'Run analysis for sections'}
                 </button>
               ) : null}
-              <span className={`chip ${hasStemPlayback && stemsReady ? 'live' : ''}`}>{playbackModeLabel}</span>
+              <span className={`chip ${hasStemPlayback && engineReady ? 'live' : ''}`}>{playbackModeLabel}</span>
             </div>
-            <div className="flex flex-wrap justify-end gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex items-center gap-2 rounded-full bg-[var(--paper-2)] px-3 py-1" title={`Master volume ${masterVolume}%`}>
+                <Volume2 className="h-3.5 w-3.5 text-[var(--muted)]" />
+                <input
+                  type="range"
+                  min={0}
+                  max={150}
+                  step={1}
+                  value={masterVolume}
+                  onChange={(event) => setMasterVolume(Number(event.target.value))}
+                  className="h-1 w-24 cursor-pointer accent-[var(--ink)]"
+                  aria-label="Master volume"
+                />
+                <span className="mono w-9 text-right text-[11px] text-[var(--muted)]">{masterVolume}%</span>
+              </div>
               <div className={`flex items-center gap-1 rounded-full px-2 py-1 ${hasLoop ? 'bg-[var(--accent-soft)]' : 'bg-[var(--paper-2)]'}`}>
                 <Repeat className="h-3.5 w-3.5 text-[var(--accent)]" />
                 <button
@@ -2266,6 +2672,20 @@ function TransportCard({
                   </button>
                 )}
               </div>
+              <button
+                type="button"
+                onClick={() => setRepeatSong((value) => !value)}
+                className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition ${
+                  repeatSong ? '' : 'bg-[var(--paper-2)] text-[var(--muted)] hover:text-[var(--ink)]'
+                }`}
+                style={repeatSong ? { background: 'var(--ink)', color: 'var(--paper)' } : undefined}
+                aria-label="Repeat song"
+                aria-pressed={repeatSong}
+                title={repeatSong ? 'Repeat song: on' : 'Repeat song: off'}
+              >
+                <Repeat1 className="h-3.5 w-3.5" />
+                Repeat
+              </button>
               {[0.5, 0.75, 1, 1.5, 1.75, 2].map((speed) => (
                 <button
                   key={speed}
@@ -3393,16 +3813,4 @@ function formatSeconds(seconds: number) {
   const minutes = Math.floor(safe / 60);
   const wholeSeconds = Math.floor(safe % 60);
   return `${minutes}:${wholeSeconds.toString().padStart(2, '0')}`;
-}
-
-function makeBars(seed: string, count: number) {
-  let hash = 0;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash = (hash * 31 + seed.charCodeAt(index)) % 9973;
-  }
-  return Array.from({ length: count }, (_, index) => {
-    const wave = Math.sin((index / count) * Math.PI);
-    const rand = Math.abs(Math.sin((hash + index * 37) * 0.18));
-    return Math.round(18 + (0.35 + wave * 0.65) * (24 + rand * 58));
-  });
 }
