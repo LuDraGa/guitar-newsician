@@ -162,3 +162,53 @@ User feedback after the engine landed. Decisions confirmed:
 - [ ] **(2) Width / spacing** — DEFERRED (user: "we'll get to this later").
 
 Status: design pass v2 IMPLEMENTED — typecheck + lint clean. Live verification pending.
+
+---
+
+## Design pass v3 (transport polish round 2)
+
+- [x] **(3) Repeat no longer glitches/pauses** — `setLoop` updated existing source nodes' `loop`/`loopStart`/`loopEnd` flags in place when the playhead is inside the new window (always true for repeat-song) instead of stop+recreate. Eliminates the ~30ms silent gap that read as a pause. Reschedule only kept for an A/B window set *ahead* of the playhead (a genuine seek).
+- [x] **(4) Section markers uniform thickness** — hairline `<div>`s at fractional `left:%` anti-aliased to inconsistent widths. Replaced with one SVG overlay (`shapeRendering="crispEdges"` + non-scaling stroke) → pixel-snapped, identical. Recoloured: sections grey `--muted`, loop band/caps stay rust `--accent` (clearly different).
+- [x] **(1) Crisper vertical** — expanded seeker `h-16`→`h-10`, play button `h-14`→`h-12`, section `py-4`→`py-3`, top-row `gap-4`→`gap-3`. Less dead space even with the new labels row.
+- [x] **(2) Clickable section labels** — compact grey row under the seeker; each section name seeks to its start, active one highlighted ink. Removed the redundant single accent current-section chip from the meta row.
+
+Status: design pass v3 IMPLEMENTED — typecheck + lint clean. Live verification pending.
+
+---
+
+## Design pass v4 (transport redesign — match target mock)
+
+User compared current transport to a target mock and chose **full match**, with
+section names **abbreviated** (full name on hover) to survive songs with many sections.
+
+### Target layout
+```
+[↺5] (▶) [5↻]   [In][V1][Pre][ Chorus ][V2]…  ← section ruler (proportional, timeline-aligned)
+                ███████████●░░░░░░░░░░░░       ← seeker (black fill, A/B letter flags + rust tint)   🔊──80%
+2:34 /4:49  ◇Chorus  Press [space] to play     [A-B | A1:18 | B1:56 | ×]  [⟳ Repeat ◯]  SPEED 0.5x…2x  ⌄
+```
+
+### Tasks
+- [x] **Section ruler** — `renderSectionRuler()`: each section a clickable segment, `left`/`width` ∝ time, 2px gaps, active = rust outline + soft fill + accent-ink, inactive = paper-2 + muted, hover = card. Replaces the flat wrapped text list.
+- [x] **Abbreviated labels** — `abbreviateSection()` (Chorus 4→C4, Verse 2→V2, Section 1→S1, Bridge→Br, Intro→In, Outro→Out, …) + known-word map + fallback; full name in `title`.
+- [x] **Seeker tweaks** — `renderSeeker(h, showLoop, showSectionTicks)`: ticks OFF in expanded (ruler owns structure), ON in minimized. Rust **A/B letter flag badges** at the loop boundaries.
+- [x] **A/B loop pill group** — `A-B` label + ink pills `A m:ss`/`B m:ss` (muted when unset) + `×`. Dropped the repeat-icon prefix.
+- [x] **Repeat → toggle switch** — track + knob (ink on / hair off), `⟳ Repeat` label. Icon `Repeat` (loop), retired `Repeat1`.
+- [x] **Space hint** — `Press [space] to play/pause` with a styled `<kbd>` keycap (hidden < sm).
+- [x] **SPEED label** before the speed chips.
+- [x] **◇ section chip** (`Diamond` icon) by the time = current section.
+- [x] **Volume → top-right** of the seeker row, plain (speaker + slider + %).
+- [x] typecheck + lint clean.
+
+Status: design pass v4 IMPLEMENTED — typecheck + lint clean. Live verification pending.
+
+---
+
+## Design pass v5 (fidelity polish — match the mock's *feel*)
+
+Structure matched but look/feel was far. Fixes:
+- [x] **Ruler cards** — soft-grey card look: `bg-[var(--paper-2)]` + hairline `inset 1px var(--line-2)`, font `10px`→`12px` (medium; active semibold), radius `6`→`7`, height `h-7`→`h-8`, segment gap `2`→`3px`. Active = clean `--card` bg + rust ring + accent-ink text (was flat accent-soft). Inactive segments now actually read as cards.
+- [x] **Seeker section gaps** — replaced expanded SVG ticks with 3px `--card`-coloured notches *through* the line at each boundary (the "invisible parts" showing section bounds). `renderSeeker` now takes `sectionMarks: 'ticks' | 'gaps' | 'none'` — expanded `gaps`, minimized `ticks`. Gaps align with the ruler's segment gaps.
+- [x] **Bottom-right grouping/font** — A/B pills `11`→`12px`, `px-2`→`px-2.5`. Repeat de-chromed (borderless, `13px`). Speeds regrouped under the `SPEED` label in a tight `gap-0.5` cluster; inactive = plain muted text, active = ink pill (was a row of bordered chips). Outer group gap `2`→`3` for cleaner separation.
+
+Status: design pass v5 IMPLEMENTED — typecheck + lint clean. Live verification pending.

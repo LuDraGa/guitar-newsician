@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Diamond,
   DownloadCloud,
   FileMusic,
   Flag,
@@ -24,7 +25,6 @@ import {
   Pause,
   Play,
   Repeat,
-  Repeat1,
   RefreshCw,
   RotateCcw,
   RotateCw,
@@ -2053,10 +2053,30 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
 
   const setLoop = useCallback(
     (loop: EngineLoop) => {
-      loopRef.current = loop && loop.end > loop.start ? loop : null;
-      if (playingRef.current) {
-        startSourcesAt(computePosition());
+      const normalized = loop && loop.end > loop.start ? loop : null;
+      loopRef.current = normalized;
+      if (!playingRef.current) {
+        return;
       }
+      // If the playhead is already inside the new window (always true for
+      // repeat-song = whole track), or we're clearing the loop, flip the loop
+      // flags on the live source nodes in place — no stop/recreate, no audible
+      // gap. Only a window set *ahead* of the playhead needs a real reschedule.
+      const pos = computePosition();
+      const contained = !normalized || (pos >= normalized.start && pos < normalized.end);
+      if (contained && sourcesRef.current.size > 0) {
+        for (const source of sourcesRef.current.values()) {
+          if (normalized) {
+            source.loop = true;
+            source.loopStart = normalized.start;
+            source.loopEnd = normalized.end;
+          } else {
+            source.loop = false;
+          }
+        }
+        return;
+      }
+      startSourcesAt(pos);
     },
     [computePosition, startSourcesAt]
   );
@@ -2189,6 +2209,43 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
     setStemGain,
     setLoop,
   };
+}
+
+const SECTION_ABBREVIATIONS: Record<string, string> = {
+  intro: 'In',
+  outro: 'Out',
+  verse: 'V',
+  chorus: 'C',
+  bridge: 'Br',
+  section: 'S',
+  pre: 'Pre',
+  prechorus: 'PC',
+  'pre-chorus': 'PC',
+  postchorus: 'PoC',
+  'post-chorus': 'PoC',
+  instrumental: 'Inst',
+  interlude: 'Int',
+  intermezzo: 'Int',
+  solo: 'Solo',
+  hook: 'Hk',
+  refrain: 'Ref',
+  breakdown: 'Bd',
+  drop: 'Drop',
+  build: 'Bld',
+  buildup: 'Bld',
+  ending: 'End',
+  coda: 'Coda',
+};
+
+/** Compact a section name so it survives a narrow ruler segment ("Chorus 4" → "C4"). */
+function abbreviateSection(name: string): string {
+  const trimmed = name.trim();
+  const match = trimmed.match(/^(.*?[A-Za-z])[\s-]*(\d+)?$/);
+  const word = (match?.[1] ?? trimmed).trim();
+  const num = match?.[2] ?? '';
+  const known = SECTION_ABBREVIATIONS[word.toLowerCase()];
+  const base = known ?? (word ? word.slice(0, 2).replace(/^./, (c) => c.toUpperCase()) : trimmed.slice(0, 2));
+  return `${base}${num}`;
 }
 
 function TransportCard({
@@ -2479,8 +2536,43 @@ function TransportCard({
         })()
       : null;
 
-  function renderSeeker(heightClass: string, showLoopRange: boolean) {
+  function renderSectionRuler() {
+    if (duration <= 0 || sections.length === 0) {
+      return null;
+    }
+    return (
+      <div className="relative h-8 w-full">
+        {sections.map((section, index) => {
+          const left = Math.min(100, Math.max(0, (section.start / duration) * 100));
+          const width = Math.min(100 - left, Math.max(0, ((section.end - section.start) / duration) * 100));
+          if (width <= 0) {
+            return null;
+          }
+          const active = currentSection === section;
+          return (
+            <button
+              key={index}
+              type="button"
+              onClick={() => seek(section.start)}
+              title={`${section.name} · ${formatSeconds(section.start)}`}
+              className={`absolute inset-y-0 flex items-center justify-center overflow-hidden rounded-[7px] px-1.5 text-[12px] leading-none transition ${
+                active
+                  ? 'bg-[var(--card)] font-semibold text-[var(--accent-ink)] shadow-[inset_0_0_0_1.5px_var(--accent)]'
+                  : 'bg-[var(--paper-2)] font-medium text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line-2)] hover:bg-[var(--card)] hover:text-[var(--ink)]'
+              }`}
+              style={{ left: `${left}%`, width: `calc(${width}% - 3px)` }}
+            >
+              <span className="truncate">{abbreviateSection(section.name)}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderSeeker(heightClass: string, showLoopRange: boolean, sectionMarks: 'ticks' | 'gaps' | 'none') {
     const fillPercent = progress * 100;
+    const loopEndPercent = loopRange ? loopRange.left + loopRange.width : 0;
     return (
       <div className={`relative flex ${heightClass} flex-1 items-center`}>
         <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-[var(--hair)]">
@@ -2494,6 +2586,19 @@ function TransportCard({
             className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-[var(--ink)]"
             style={{ width: `${fillPercent}%` }}
           />
+          {sectionMarks === 'gaps' &&
+            duration > 0 &&
+            sections.map((section, index) =>
+              section.start <= 0 ? null : (
+                // Tiny panel-coloured notch through the line at each section boundary —
+                // reads as the line "breaking" into sections without adding clutter.
+                <div
+                  key={index}
+                  className="pointer-events-none absolute inset-y-0 w-[3px] -translate-x-1/2 bg-[var(--card)]"
+                  style={{ left: `${Math.min(100, (section.start / duration) * 100)}%` }}
+                />
+              )
+            )}
           {preparingPlayback && totalCount > 0 && (
             <div
               className="pointer-events-none absolute bottom-0 left-0 h-[2px] bg-[var(--accent)] transition-[width] duration-200"
@@ -2501,16 +2606,37 @@ function TransportCard({
             />
           )}
         </div>
-        {duration > 0 &&
-          sections.map((section, index) =>
-            section.start <= 0 ? null : (
-              <div
-                key={index}
-                className="pointer-events-none absolute top-1/2 h-3 w-[1.5px] -translate-y-1/2 rounded-full bg-[var(--accent)] opacity-55"
-                style={{ left: `${Math.min(100, (section.start / duration) * 100)}%` }}
-              />
-            )
-          )}
+        {sectionMarks === 'ticks' && duration > 0 && sections.length > 0 && (
+          // One SVG overlay with crispEdges + non-scaling stroke so every section
+          // tick snaps to the pixel grid and renders identical thickness — a row of
+          // fractionally-positioned hairline <div>s anti-aliases to inconsistent widths.
+          <svg
+            className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+            preserveAspectRatio="none"
+            viewBox="0 0 100 100"
+            aria-hidden
+          >
+            {sections.map((section, index) => {
+              if (section.start <= 0) {
+                return null;
+              }
+              const x = Math.min(100, (section.start / duration) * 100);
+              return (
+                <line
+                  key={index}
+                  x1={x}
+                  x2={x}
+                  y1={32}
+                  y2={68}
+                  stroke="var(--muted)"
+                  strokeWidth={1.5}
+                  vectorEffect="non-scaling-stroke"
+                  shapeRendering="crispEdges"
+                />
+              );
+            })}
+          </svg>
+        )}
         {showLoopRange && loopRange && (
           <>
             <div
@@ -2519,8 +2645,20 @@ function TransportCard({
             />
             <div
               className="pointer-events-none absolute top-1/2 h-4 w-[2px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--accent)]"
-              style={{ left: `${loopRange.left + loopRange.width}%` }}
+              style={{ left: `${loopEndPercent}%` }}
             />
+            <span
+              className="pointer-events-none absolute top-0 z-10 flex h-[15px] min-w-[15px] -translate-x-1/2 items-center justify-center rounded-[4px] bg-[var(--accent)] px-1 text-[9px] font-bold leading-none text-white"
+              style={{ left: `${loopRange.left}%` }}
+            >
+              A
+            </span>
+            <span
+              className="pointer-events-none absolute top-0 z-10 flex h-[15px] min-w-[15px] -translate-x-1/2 items-center justify-center rounded-[4px] bg-[var(--accent)] px-1 text-[9px] font-bold leading-none text-white"
+              style={{ left: `${loopEndPercent}%` }}
+            >
+              B
+            </span>
           </>
         )}
         <div
@@ -2542,7 +2680,7 @@ function TransportCard({
   }
 
   return (
-    <section className="surface shrink-0 px-5 py-4">
+    <section className="surface shrink-0 px-5 py-3">
       {minimized ? (
         <div className="flex items-center gap-3">
           <button
@@ -2558,7 +2696,7 @@ function TransportCard({
             <div className="mono text-sm font-bold">{formatSeconds(time)}</div>
             <div className="text-[11px] text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</div>
           </div>
-          {renderSeeker('h-11', true)}
+          {renderSeeker('h-11', true, 'ticks')}
           <button
             type="button"
             onClick={() => onMinimizedChange(false)}
@@ -2571,7 +2709,7 @@ function TransportCard({
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => nudge(-5)}
@@ -2587,10 +2725,10 @@ function TransportCard({
               type="button"
               onClick={() => void toggle()}
               disabled={!hasPlayableAudio}
-              className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
+              className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
               aria-label={playButtonLabel}
             >
-              {preparingPlayback ? <Loader2 className="h-5 w-5 animate-spin" /> : playing ? <Pause className="h-5 w-5" /> : <Play className="h-6 w-6" />}
+              {preparingPlayback ? <Loader2 className="h-5 w-5 animate-spin" /> : playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
             </button>
             <button
               type="button"
@@ -2603,15 +2741,35 @@ function TransportCard({
               <span className="mono text-[11px] font-bold leading-none">5</span>
               <RotateCw className="h-4 w-4" />
             </button>
-            {renderSeeker('h-16', true)}
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              {renderSectionRuler()}
+              {renderSeeker('h-8', true, 'gaps')}
+            </div>
+            <div className="flex shrink-0 items-center gap-2" title={`Master volume ${masterVolume}%`}>
+              <Volume2 className="h-4 w-4 text-[var(--muted)]" />
+              <input
+                type="range"
+                min={0}
+                max={150}
+                step={1}
+                value={masterVolume}
+                onChange={(event) => setMasterVolume(Number(event.target.value))}
+                className="h-1 w-24 cursor-pointer accent-[var(--ink)]"
+                aria-label="Master volume"
+              />
+              <span className="mono w-9 text-right text-[11px] text-[var(--muted)]">{masterVolume}%</span>
+            </div>
           </div>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="mono text-sm font-bold">{formatSeconds(time)}</span>
               <span className="text-xs text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</span>
-              {sections.length > 0 ? (
-                currentSection && <span className="chip accent">{currentSection.name}</span>
-              ) : onRunAnalyze ? (
+              {currentSection ? (
+                <span className="chip accent inline-flex items-center gap-1">
+                  <Diamond className="h-3 w-3" />
+                  {currentSection.name}
+                </span>
+              ) : sections.length === 0 && onRunAnalyze ? (
                 <button
                   type="button"
                   onClick={onRunAnalyze}
@@ -2625,30 +2783,27 @@ function TransportCard({
                 </button>
               ) : null}
               <span className={`chip ${hasStemPlayback && engineReady ? 'live' : ''}`}>{playbackModeLabel}</span>
+              {hasPlayableAudio && (
+                <span className="hidden items-center gap-1 text-[11px] text-[var(--faint)] sm:inline-flex">
+                  Press
+                  <kbd className="rounded-[4px] bg-[var(--paper-2)] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line)]">
+                    space
+                  </kbd>
+                  to {playing ? 'pause' : 'play'}
+                </span>
+              )}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <div className="flex items-center gap-2 rounded-full bg-[var(--paper-2)] px-3 py-1" title={`Master volume ${masterVolume}%`}>
-                <Volume2 className="h-3.5 w-3.5 text-[var(--muted)]" />
-                <input
-                  type="range"
-                  min={0}
-                  max={150}
-                  step={1}
-                  value={masterVolume}
-                  onChange={(event) => setMasterVolume(Number(event.target.value))}
-                  className="h-1 w-24 cursor-pointer accent-[var(--ink)]"
-                  aria-label="Master volume"
-                />
-                <span className="mono w-9 text-right text-[11px] text-[var(--muted)]">{masterVolume}%</span>
-              </div>
-              <div className={`flex items-center gap-1 rounded-full px-2 py-1 ${hasLoop ? 'bg-[var(--accent-soft)]' : 'bg-[var(--paper-2)]'}`}>
-                <Repeat className="h-3.5 w-3.5 text-[var(--accent)]" />
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <div className="flex items-center gap-1 rounded-full bg-[var(--paper-2)] p-1">
+                <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)]">A-B</span>
                 <button
                   type="button"
                   onClick={setLoopStartAtPlayhead}
                   disabled={!hasPlayableAudio}
-                  className={`chip ${loopStart !== null ? 'on' : ''}`}
-                  title="Set loop start"
+                  className={`mono rounded-full px-2.5 py-1 text-[12px] font-semibold transition disabled:opacity-45 ${
+                    loopStart !== null ? 'bg-[var(--ink)] text-[var(--paper)]' : 'text-[var(--muted)] hover:text-[var(--ink)]'
+                  }`}
+                  title="Set loop start (A)"
                 >
                   A {loopStart !== null ? formatSeconds(loopStart) : '--'}
                 </button>
@@ -2656,8 +2811,10 @@ function TransportCard({
                   type="button"
                   onClick={setLoopEndAtPlayhead}
                   disabled={!hasPlayableAudio}
-                  className={`chip ${loopEnd !== null ? 'on' : ''}`}
-                  title="Set loop end"
+                  className={`mono rounded-full px-2.5 py-1 text-[12px] font-semibold transition disabled:opacity-45 ${
+                    loopEnd !== null ? 'bg-[var(--ink)] text-[var(--paper)]' : 'text-[var(--muted)] hover:text-[var(--ink)]'
+                  }`}
+                  title="Set loop end (B)"
                 >
                   B {loopEnd !== null ? formatSeconds(loopEnd) : '--'}
                 </button>
@@ -2665,7 +2822,7 @@ function TransportCard({
                   <button
                     type="button"
                     onClick={clearLoop}
-                    className="grid h-7 w-7 place-items-center rounded-full text-[var(--muted)]"
+                    className="grid h-6 w-6 place-items-center rounded-full text-[var(--muted)] hover:text-[var(--ink)]"
                     aria-label="Clear loop"
                   >
                     <X className="h-3.5 w-3.5" />
@@ -2675,27 +2832,35 @@ function TransportCard({
               <button
                 type="button"
                 onClick={() => setRepeatSong((value) => !value)}
-                className={`flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition ${
-                  repeatSong ? '' : 'bg-[var(--paper-2)] text-[var(--muted)] hover:text-[var(--ink)]'
-                }`}
-                style={repeatSong ? { background: 'var(--ink)', color: 'var(--paper)' } : undefined}
+                className="flex h-8 shrink-0 items-center gap-2 px-1 text-[13px] font-medium text-[var(--muted)] transition hover:text-[var(--ink)]"
                 aria-label="Repeat song"
                 aria-pressed={repeatSong}
                 title={repeatSong ? 'Repeat song: on' : 'Repeat song: off'}
               >
-                <Repeat1 className="h-3.5 w-3.5" />
+                <Repeat className="h-3.5 w-3.5" />
                 Repeat
+                <span className={`relative h-4 w-7 rounded-full transition-colors ${repeatSong ? 'bg-[var(--ink)]' : 'bg-[var(--hair)]'}`}>
+                  <span
+                    className="absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-[var(--shadow-card)] transition-[left]"
+                    style={{ left: repeatSong ? '14px' : '2px' }}
+                  />
+                </span>
               </button>
-              {[0.5, 0.75, 1, 1.5, 1.75, 2].map((speed) => (
-                <button
-                  key={speed}
-                  type="button"
-                  onClick={() => setRate(speed)}
-                  className={`chip ${rate === speed ? 'on' : ''}`}
-                >
-                  {speed}x
-                </button>
-              ))}
+              <div className="flex items-center gap-0.5">
+                <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)]">Speed</span>
+                {[0.5, 0.75, 1, 1.5, 1.75, 2].map((speed) => (
+                  <button
+                    key={speed}
+                    type="button"
+                    onClick={() => setRate(speed)}
+                    className={`rounded-full px-2 py-1 text-[12px] font-semibold transition ${
+                      rate === speed ? 'bg-[var(--ink)] text-[var(--paper)]' : 'text-[var(--muted)] hover:text-[var(--ink)]'
+                    }`}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
                 onClick={() => onMinimizedChange(true)}
