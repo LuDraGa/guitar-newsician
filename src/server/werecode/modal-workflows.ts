@@ -165,12 +165,23 @@ function modalAsyncEnabled(): boolean {
   return value === '1' || value === 'true';
 }
 
+// A processing job that still has no Modal call id this long after it started never
+// got past the gateway dispatch (the POST threw before a call was spawned). It has
+// nothing to poll, so it is reconciled to failed rather than left spinning. Sized
+// well above the sub-second enqueue window so an in-flight enqueue is never failed.
+const STALE_ENQUEUE_MS = 60_000;
+
 // Poll the gateway for a spawned Modal call. Returns the original endpoint's
 // ModalResponse (as `result`) once the call has settled, else `{ status: 'processing' }`.
-async function pollModalJob(callId: string): Promise<{ status: string; result?: ModalResponse }> {
-  return modalFetch<{ status: string; result?: ModalResponse }>(`/jobs/${encodeURIComponent(callId)}`, {
-    method: 'GET',
-  });
+async function pollModalJob(
+  callId: string
+): Promise<{ status: string; result?: ModalResponse; error?: string }> {
+  return modalFetch<{ status: string; result?: ModalResponse; error?: string }>(
+    `/jobs/${encodeURIComponent(callId)}`,
+    {
+      method: 'GET',
+    }
+  );
 }
 
 type FinalizeSpec = {
@@ -247,8 +258,29 @@ export async function finalizeStoredJob(jobId: string) {
   }
 
   const idle = { job, song: null as SongRow | null, assets: [] as AssetRow[] };
-  if (job.status !== 'processing' || !job.modal_call_id) {
+  if (job.status !== 'processing') {
     return idle;
+  }
+
+  // Stranded enqueue: a processing job with no Modal call id never got past the
+  // gateway dispatch, so there is nothing to poll. Once it is clearly past the
+  // enqueue window, reconcile it to failed instead of polling forever.
+  if (!job.modal_call_id) {
+    const startedAt = job.started_at ? Date.parse(job.started_at) : NaN;
+    if (Number.isNaN(startedAt) || Date.now() - startedAt < STALE_ENQUEUE_MS) {
+      return idle;
+    }
+    if (!(await claimJobFinalize(supabase, user.id, job.id))) {
+      return idle;
+    }
+    const failedJob = await updateJob(supabase, user.id, job.id, {
+      status: 'failed',
+      progress: 0,
+      message: 'Modal job failed',
+      error_message: job.error_message ?? 'Modal dispatch never started',
+      completed_at: new Date().toISOString(),
+    });
+    return { job: failedJob, song: null as SongRow | null, assets: [] as AssetRow[] };
   }
 
   const polled = await pollModalJob(job.modal_call_id);
@@ -262,7 +294,13 @@ export async function finalizeStoredJob(jobId: string) {
   }
 
   const spec = parseFinalizeSpec(job.finalize_spec);
-  const modalResult: ModalResponse = polled.result ?? { status: polledStatus };
+  // Carry the gateway's failure reason (poll `error`) into a diagnostic so the
+  // finalized job surfaces *why* it failed instead of a bare "Modal job failed".
+  const modalResult: ModalResponse =
+    polled.result ??
+    (polledStatus === 'failed'
+      ? { status: 'failed', diagnostics: [{ level: 'error', message: polled.error ?? 'Modal job failed' }] }
+      : { status: polledStatus });
 
   return finalizeJobFromModal({
     supabase,
@@ -851,14 +889,31 @@ async function runJobWithModal(options: {
     modal_endpoint: options.endpoint,
   });
 
-  const modal = await modalFetch<ModalResponse>(options.endpoint, {
-    method: 'POST',
-    body: JSON.stringify(options.payload),
-    // Async (Option 2): ask the gateway to spawn the work and return immediately.
-    // When the flag is off the header is absent and the gateway runs synchronously
-    // exactly as today.
-    ...(modalAsyncEnabled() ? { headers: { 'x-werecode-async': '1' } } : {}),
-  });
+  let modal: ModalResponse;
+  try {
+    modal = await modalFetch<ModalResponse>(options.endpoint, {
+      method: 'POST',
+      body: JSON.stringify(options.payload),
+      // Async (Option 2): ask the gateway to spawn the work and return immediately.
+      // When the flag is off the header is absent and the gateway runs synchronously
+      // exactly as today.
+      ...(modalAsyncEnabled() ? { headers: { 'x-werecode-async': '1' } } : {}),
+    });
+  } catch (error) {
+    // The gateway dispatch failed (e.g. a 500 before any call was spawned). The job
+    // was already flipped to 'processing' above and, in async mode, has no call id to
+    // poll — so flip it to failed here instead of leaving the UI spinning, then
+    // rethrow so the route still surfaces the error. Best-effort status write: never
+    // mask the original failure if this update also fails.
+    await updateJob(options.supabase, options.job.owner_id, options.job.id, {
+      status: 'failed',
+      progress: 0,
+      message: 'Modal job failed',
+      error_message: error instanceof Error ? error.message : String(error),
+      completed_at: new Date().toISOString(),
+    }).catch(() => {});
+    throw error;
+  }
 
   return finalizeJobFromModal({
     supabase: options.supabase,
