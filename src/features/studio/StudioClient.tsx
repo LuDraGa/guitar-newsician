@@ -74,6 +74,7 @@ import { ANALYZE_FULL_ANALYZERS, computeStageStatuses } from '@/server/werecode/
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
 import type { AssetSummary, SongSummary, StudioDetail } from '@/types/werecode-client';
 import { MusicXmlPreviewPanel } from './MusicXmlPreviewPanel';
+import { StudioPicker } from './StudioPicker';
 import { fetchJson, formatBytes, signDownloads } from './studio-utils';
 
 type WorkflowResult = {
@@ -853,21 +854,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   return (
     <section className="flex h-full min-h-0 w-full flex-col overflow-visible pb-0 md:overflow-hidden">
       {!song && !loading ? (
-        <div className="surface grid min-h-[420px] place-items-center px-6 py-16 text-center">
-          <div>
-            <Music2 className="mx-auto h-11 w-11 text-[var(--faint)]" />
-            <h1 className="display mt-4 text-3xl">No song selected</h1>
-            <p className="mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
-              Choose a song from the library to open its dedicated Studio workspace.
-            </p>
-            <Link href="/library" className="pill mt-5">
-              <PillIcon>
-                <Music2 className="h-3.5 w-3.5" />
-              </PillIcon>
-              Open library
-            </Link>
-          </div>
-        </div>
+        <StudioPicker />
       ) : (
         <div className="relative flex min-h-0 flex-1 gap-4">
           <div className="flex min-w-0 flex-1 flex-col">

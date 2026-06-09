@@ -19,6 +19,8 @@ import type { Route } from 'next';
 import Link from 'next/link';
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { SignInGate } from '@/components/auth/SignInGate';
+import { useSession } from '@/components/auth/session-context';
 import { CoverArt, PillIcon, ReadinessChips, StatusDot } from '@/components/werecode/WereCodePrimitives';
 import { toJobSummary, toSongSummary, useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
 import { deleteStoredStudioDetail } from '@/lib/client-cache/studio-detail-store';
@@ -56,6 +58,7 @@ type UploadProgressState = {
 };
 
 export function LibraryClient() {
+  const { session } = useSession();
   const songs = useWereCodeDataCache((state) => state.songs);
   const songsLoaded = useWereCodeDataCache((state) => state.songsLoaded);
   const setCachedSongs = useWereCodeDataCache((state) => state.setSongs);
@@ -80,6 +83,8 @@ export function LibraryClient() {
   const [deleteTarget, setDeleteTarget] = useState<SongSummary | null>(null);
   const [deletingSongId, setDeletingSongId] = useState<string | null>(null);
   const localYoutubeEnabled = process.env.NEXT_PUBLIC_ENABLE_LOCAL_YOUTUBE_DOWNLOAD === 'true';
+  const sessionResolved = session !== null;
+  const locked = Boolean(session && session.authEnabled && !session.user);
 
   const filteredSongs = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -118,20 +123,26 @@ export function LibraryClient() {
 
   useEffect(() => {
     const authError = new URLSearchParams(window.location.search).get('authError');
-    if (authError) {
-      window.history.replaceState(null, '', window.location.pathname);
+    if (!authError) {
+      return;
+    }
+
+    window.history.replaceState(null, '', window.location.pathname);
+    const timer = window.setTimeout(() => setError(authError), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!sessionResolved || locked) {
+      return;
     }
 
     const timer = window.setTimeout(() => {
-      void loadLibrary().finally(() => {
-        if (authError) {
-          setError(authError);
-        }
-      });
+      void loadLibrary();
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [loadLibrary]);
+  }, [sessionResolved, locked, loadLibrary]);
 
   async function downloadLocalYoutube(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -361,6 +372,24 @@ export function LibraryClient() {
     } finally {
       setDeletingSongId(null);
     }
+  }
+
+  if (!sessionResolved) {
+    return (
+      <section className="wc-rise mx-auto max-w-[1180px] py-24">
+        <div className="surface grid min-h-[300px] place-items-center">
+          <Loader2 className="h-6 w-6 animate-spin text-[var(--faint)]" />
+        </div>
+      </section>
+    );
+  }
+
+  if (locked) {
+    return (
+      <section className="wc-rise mx-auto max-w-[1180px] py-16">
+        <SignInGate />
+      </section>
+    );
   }
 
   return (

@@ -256,6 +256,67 @@ textarea {
   color: var(--paper);
 }
 
+.wc-avatar {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.wc-avatar:hover {
+  box-shadow: inset 0 0 0 1px var(--hair), var(--shadow-card);
+  transform: translateY(-1px);
+}
+
+.wc-pop {
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-pop);
+  outline: 1px solid var(--line-2);
+  transform-origin: top right;
+  animation: wc-pop-in 0.16s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes wc-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.wc-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.wc-menu-item:hover {
+  background: var(--card-2);
+}
+
+.wc-menu-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .wc-hide-mobile {
   display: none !important;
 }
@@ -500,7 +561,8 @@ a:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .wc-rise,
-  .pulse {
+  .pulse,
+  .wc-pop {
     animation: none;
   }
 }
