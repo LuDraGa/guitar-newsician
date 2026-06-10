@@ -43,4 +43,14 @@ stay identical. The only new state is a remembered mute level.
 - [x] Repeat toggle (icon-only, ink+accent on)
 - [x] Speed slider (stepped snap, ticks, 1× home)
 - [x] Remove now-unused imports (RotateCcw/RotateCw), add VolumeX
-- [ ] typecheck + lint + visual verify
+- [x] typecheck + lint + visual verify
+
+## Verification (2026-06-10)
+
+- `pnpm typecheck` — clean. `pnpm lint` — 0 errors (remaining warnings are pre-existing,
+  in `Newsician/` and `.claude/skills/`, none in touched files).
+- Browser preview (1440×900): loop pill flips to accent-soft + accent ring with the
+  label reading the loop length (`1:09 LOOP`), ink-filled A/B mono timestamps, clear ✕.
+  Repeat on-state = ink fill + accent glyph. Speed slider index→stop mapping confirmed
+  (index 4 → `x1.75`), volume range preserved at 0–150. Circular-arrow skip buttons and
+  50px play render correctly. No console errors.

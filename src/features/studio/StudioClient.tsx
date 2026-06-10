@@ -2532,12 +2532,8 @@ function TransportCard({
   const displayVolume = muted ? 0 : masterVolume;
   const volumeFillPercent = (displayVolume / VOLUME_MAX) * 100;
   const volumeUnityPercent = (100 / VOLUME_MAX) * 100;
-  // Speed: the slider works in index space so the six stops sit at equal notches.
-  const speedIndex = Math.max(0, SPEED_STOPS.indexOf(rate as (typeof SPEED_STOPS)[number]));
-  const speedFillPercent = (speedIndex / (SPEED_STOPS.length - 1)) * 100;
-  const loopLengthLabel =
-    loopStart !== null && loopEnd !== null && loopEnd > loopStart ? `${formatSeconds(loopEnd - loopStart)} loop` : 'A–B';
   const loopActive = loopStart !== null && loopEnd !== null && loopEnd > loopStart;
+  const loopLength = loopActive ? formatSeconds(loopEnd - loopStart) : null;
 
   const progress = duration > 0 ? Math.min(1, Math.max(0, time / duration)) : 0;
   const loopRange =
@@ -2707,231 +2703,229 @@ function TransportCard({
 
   return (
     <section className="surface shrink-0 px-5 py-3">
-      {minimized ? (
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void toggle()}
-            disabled={!hasPlayableAudio}
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
-            aria-label={playButtonLabel}
-          >
-            {preparingPlayback ? <Loader2 className="h-4 w-4 animate-spin" /> : playing ? <Pause className="h-4 w-4" /> : <Play className="h-5 w-5" />}
-          </button>
-          <div className="hidden min-w-[88px] sm:block">
-            <div className="mono text-sm font-bold">{formatSeconds(time)}</div>
-            <div className="text-[11px] text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</div>
-          </div>
-          {renderSeeker('h-11', true, 'ticks')}
-          <button
-            type="button"
-            onClick={() => onMinimizedChange(false)}
-            className="iconbtn h-9 w-9 shrink-0"
-            aria-label="Expand playback"
-            title="Expand playback"
-          >
-            <ChevronUp className="h-4 w-4" />
-          </button>
+      {/* Top line — one source of truth, shown identically whether expanded or collapsed. */}
+      <div className="flex items-center gap-3">
+        <TransportSkipButton dir={-1} seconds={5} disabled={!hasPlayableAudio} onClick={() => nudge(-5)} />
+        <button
+          type="button"
+          onClick={() => void toggle()}
+          disabled={!hasPlayableAudio}
+          className="grid h-[50px] w-[50px] shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
+          aria-label={playButtonLabel}
+        >
+          {preparingPlayback ? <Loader2 className="h-5 w-5 animate-spin" /> : playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+        </button>
+        <TransportSkipButton dir={1} seconds={5} disabled={!hasPlayableAudio} onClick={() => nudge(5)} />
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          {renderSectionRuler()}
+          {renderSeeker('h-8', true, 'gaps')}
         </div>
-      ) : (
-        <>
-          <div className="flex items-center gap-3">
-            <TransportSkipButton dir={-1} seconds={5} disabled={!hasPlayableAudio} onClick={() => nudge(-5)} />
-            <button
-              type="button"
-              onClick={() => void toggle()}
-              disabled={!hasPlayableAudio}
-              className="grid h-[50px] w-[50px] shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
-              aria-label={playButtonLabel}
-            >
-              {preparingPlayback ? <Loader2 className="h-5 w-5 animate-spin" /> : playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-            </button>
-            <TransportSkipButton dir={1} seconds={5} disabled={!hasPlayableAudio} onClick={() => nudge(5)} />
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              {renderSectionRuler()}
-              {renderSeeker('h-8', true, 'gaps')}
-            </div>
-            <div className="flex shrink-0 items-center gap-2.5">
+        <div className="flex shrink-0 items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setMuted((value) => !value)}
+            className="iconbtn h-8 w-8 shrink-0"
+            aria-label={muted ? 'Unmute' : 'Mute'}
+            aria-pressed={muted}
+            title={muted ? 'Unmute' : 'Mute'}
+          >
+            {muted || displayVolume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+          </button>
+          <div className="relative flex h-3.5 w-24 items-center">
+            <input
+              type="range"
+              min={0}
+              max={VOLUME_MAX}
+              step={1}
+              value={displayVolume}
+              onChange={(event) => {
+                setMasterVolume(Number(event.target.value));
+                if (muted) {
+                  setMuted(false);
+                }
+              }}
+              className="transport-range absolute inset-x-0 top-1/2 w-full -translate-y-1/2"
+              style={{
+                background: `linear-gradient(to right, var(--ink) 0 ${volumeFillPercent}%, var(--hair) ${volumeFillPercent}% 100%)`,
+              }}
+              aria-label="Master volume"
+            />
+            {/* unity (100%) detent — a quiet tick under the track so the boost ceiling is findable */}
+            <div
+              className="pointer-events-none absolute bottom-[-3px] h-1.5 w-[2px] -translate-x-1/2 rounded-full bg-[var(--faint)]"
+              style={{ left: `${volumeUnityPercent}%` }}
+              aria-hidden
+            />
+          </div>
+          <span className="mono tnum w-10 text-right text-[11px] font-semibold text-[var(--muted)]">{displayVolume}%</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => onMinimizedChange(!minimized)}
+          className="iconbtn h-9 w-9 shrink-0"
+          aria-label={minimized ? 'Expand playback' : 'Minimize playback'}
+          title={minimized ? 'Expand playback' : 'Minimize playback'}
+        >
+          {minimized ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
+      </div>
+
+      {/* Detail row — position, context, and the practice controls. Hidden when collapsed. */}
+      {!minimized && (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="mono text-sm font-bold">{formatSeconds(time)}</span>
+            <span className="text-xs text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</span>
+            {currentSection ? (
+              <span className="chip accent inline-flex items-center gap-1">
+                <Layers className="h-3 w-3" />
+                {currentSection.name}
+              </span>
+            ) : sections.length === 0 && onRunAnalyze ? (
               <button
                 type="button"
-                onClick={() => setMuted((value) => !value)}
-                className="iconbtn h-8 w-8 shrink-0"
-                aria-label={muted ? 'Unmute' : 'Mute'}
-                aria-pressed={muted}
-                title={muted ? 'Unmute' : 'Mute'}
+                onClick={onRunAnalyze}
+                disabled={analyzing}
+                className="chip accent inline-flex items-center gap-1 disabled:opacity-50"
+                style={{ cursor: analyzing ? 'default' : 'pointer' }}
+                title="Run analysis to detect song sections (verse, chorus, bridge)"
               >
-                {muted || displayVolume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                <Wand2 className="h-3 w-3" />
+                {analyzing ? 'Analyzing…' : 'Run analysis for sections'}
               </button>
-              <div className="relative flex h-3.5 w-24 items-center">
-                <input
-                  type="range"
-                  min={0}
-                  max={VOLUME_MAX}
-                  step={1}
-                  value={displayVolume}
-                  onChange={(event) => {
-                    setMasterVolume(Number(event.target.value));
-                    if (muted) {
-                      setMuted(false);
-                    }
-                  }}
-                  className="transport-range absolute inset-x-0 top-1/2 w-full -translate-y-1/2"
-                  style={{
-                    background: `linear-gradient(to right, var(--ink) 0 ${volumeFillPercent}%, var(--hair) ${volumeFillPercent}% 100%)`,
-                  }}
-                  aria-label="Master volume"
-                />
-                {/* unity (100%) detent — a quiet tick under the track so the boost ceiling is findable */}
-                <div
-                  className="pointer-events-none absolute bottom-[-3px] h-1.5 w-[2px] -translate-x-1/2 rounded-full bg-[var(--faint)]"
-                  style={{ left: `${volumeUnityPercent}%` }}
-                  aria-hidden
-                />
-              </div>
-              <span className="mono tnum w-10 text-right text-[11px] font-semibold text-[var(--muted)]">{displayVolume}%</span>
-            </div>
+            ) : null}
+            <span className={`chip ${hasStemPlayback && engineReady ? 'live' : ''}`}>{playbackModeLabel}</span>
+            {hasPlayableAudio && (
+              <span className="hidden items-center gap-1 text-[11px] text-[var(--faint)] sm:inline-flex">
+                Press
+                <kbd className="rounded-[4px] bg-[var(--paper-2)] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line)]">
+                  space
+                </kbd>
+                to {playing ? 'pause' : 'play'}
+              </span>
+            )}
           </div>
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="mono text-sm font-bold">{formatSeconds(time)}</span>
-              <span className="text-xs text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</span>
-              {currentSection ? (
-                <span className="chip accent inline-flex items-center gap-1">
-                  <Layers className="h-3 w-3" />
-                  {currentSection.name}
-                </span>
-              ) : sections.length === 0 && onRunAnalyze ? (
-                <button
-                  type="button"
-                  onClick={onRunAnalyze}
-                  disabled={analyzing}
-                  className="chip accent inline-flex items-center gap-1 disabled:opacity-50"
-                  style={{ cursor: analyzing ? 'default' : 'pointer' }}
-                  title="Run analysis to detect song sections (verse, chorus, bridge)"
-                >
-                  <Wand2 className="h-3 w-3" />
-                  {analyzing ? 'Analyzing…' : 'Run analysis for sections'}
-                </button>
-              ) : null}
-              <span className={`chip ${hasStemPlayback && engineReady ? 'live' : ''}`}>{playbackModeLabel}</span>
-              {hasPlayableAudio && (
-                <span className="hidden items-center gap-1 text-[11px] text-[var(--faint)] sm:inline-flex">
-                  Press
-                  <kbd className="rounded-[4px] bg-[var(--paper-2)] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line)]">
-                    space
-                  </kbd>
-                  to {playing ? 'pause' : 'play'}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/* A–B loop — accent-soft when both ends are set; length shown quietly, times in clean mono */}
+            <div
+              className="flex items-center gap-0.5 rounded-full px-1.5 py-1 transition-[background,box-shadow] duration-200"
+              style={{
+                background: loopActive ? 'var(--accent-soft)' : 'var(--card-2)',
+                boxShadow: loopActive ? 'inset 0 0 0 1px var(--accent)' : 'inset 0 0 0 1px var(--line-2)',
+              }}
+            >
+              {loopLength && (
+                <span className="mono tnum px-1.5 text-[11px] font-semibold" style={{ color: 'var(--accent-ink)' }}>
+                  {loopLength}
                 </span>
               )}
+              <LoopPointButton
+                marker="A"
+                value={loopStart}
+                disabled={!hasPlayableAudio}
+                onClick={setLoopStartAtPlayhead}
+                title="Set loop start to playhead (A)"
+              />
+              <LoopPointButton
+                marker="B"
+                value={loopEnd}
+                disabled={!hasPlayableAudio}
+                onClick={setLoopEndAtPlayhead}
+                title="Set loop end to playhead (B)"
+              />
+              {hasLoop && (
+                <button
+                  type="button"
+                  onClick={clearLoop}
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[var(--muted)] hover:text-[var(--ink)]"
+                  aria-label="Clear loop"
+                  title="Clear loop"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              {/* A–B loop — accent-soft active pill; the label carries the loop length once both ends are set */}
-              <div
-                className="flex items-center gap-1 rounded-full px-2 py-[3px] transition-[background,box-shadow] duration-200"
-                style={{
-                  background: loopActive ? 'var(--accent-soft)' : 'var(--card-2)',
-                  boxShadow: loopActive ? 'inset 0 0 0 1px var(--accent)' : 'inset 0 0 0 1px var(--line-2)',
-                }}
-              >
-                <span
-                  className="label px-0.5 text-[8.5px]"
-                  style={{ color: loopActive ? 'var(--accent-ink)' : 'var(--faint)' }}
-                >
-                  {loopLengthLabel}
-                </span>
-                <button
-                  type="button"
-                  onClick={setLoopStartAtPlayhead}
-                  disabled={!hasPlayableAudio}
-                  className={`mono tnum rounded-full px-2 py-[3px] text-[11px] font-extrabold transition disabled:opacity-45 ${
-                    loopStart !== null ? 'bg-[var(--ink)] text-[var(--paper)]' : 'text-[var(--muted)] hover:text-[var(--ink)]'
-                  }`}
-                  title="Set loop start to playhead (A)"
-                >
-                  {loopStart !== null ? `A ${formatSeconds(loopStart)}` : 'Set A'}
-                </button>
-                <button
-                  type="button"
-                  onClick={setLoopEndAtPlayhead}
-                  disabled={!hasPlayableAudio}
-                  className={`mono tnum rounded-full px-2 py-[3px] text-[11px] font-extrabold transition disabled:opacity-45 ${
-                    loopEnd !== null ? 'bg-[var(--ink)] text-[var(--paper)]' : 'text-[var(--muted)] hover:text-[var(--ink)]'
-                  }`}
-                  title="Set loop end to playhead (B)"
-                >
-                  {loopEnd !== null ? `B ${formatSeconds(loopEnd)}` : 'Set B'}
-                </button>
-                {hasLoop && (
+            {/* Repeat — icon-only toggle; the fill itself is the on/off signal (ink fill + accent glyph) */}
+            <button
+              type="button"
+              onClick={() => setRepeatSong((value) => !value)}
+              className={`iconbtn h-8 w-8 shrink-0 ${repeatSong ? 'on' : ''}`}
+              aria-label="Repeat song"
+              aria-pressed={repeatSong}
+              title={repeatSong ? 'Repeat song: on' : 'Repeat song: off'}
+            >
+              <Repeat className="h-4 w-4" style={repeatSong ? { color: 'var(--accent)' } : undefined} />
+            </button>
+            {/* Speed — segmented control, matching the Analysis depth toggle above for consistency */}
+            <div
+              className="flex items-center gap-0.5 rounded-full px-1.5 py-1 transition-[background,box-shadow] duration-200"
+              role="group"
+              aria-label="Playback speed"
+              style={{ background: 'var(--card-2)', boxShadow: 'inset 0 0 0 1px var(--line-2)' }}
+            >
+              {SPEED_STOPS.map((stop) => {
+                const active = rate === stop;
+                return (
                   <button
+                    key={stop}
                     type="button"
-                    onClick={clearLoop}
-                    className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[var(--muted)] hover:text-[var(--ink)]"
-                    aria-label="Clear loop"
-                    title="Clear loop"
+                    aria-pressed={active}
+                    onClick={() => setRate(stop)}
+                    className={`flex items-center rounded-full px-2 py-1 transition ${
+                      active ? 'text-[11px] font-semibold' : 'text-[10px] font-medium'
+                    }`}
+                    style={
+                      active
+                        ? { background: 'var(--ink)', color: 'var(--paper)' }
+                        : { color: 'var(--muted)' }
+                    }
                   >
-                    <X className="h-3.5 w-3.5" />
+                    {stop % 1 === 0 ? stop.toFixed(1) : String(stop)}
+                    {/* Swapped to opacity-55 to perfectly match the Loop A/B marker */}
+                    <span className="opacity-55 font-semibold">×</span>
                   </button>
-                )}
-              </div>
-              {/* Repeat — icon-only toggle; the look itself is the on/off signal (ink fill + accent glyph) */}
-              <button
-                type="button"
-                onClick={() => setRepeatSong((value) => !value)}
-                className={`iconbtn h-8 w-8 shrink-0 ${repeatSong ? 'on' : ''}`}
-                aria-label="Repeat song"
-                aria-pressed={repeatSong}
-                title={repeatSong ? 'Repeat song: on' : 'Repeat song: off'}
-              >
-                <Repeat className="h-4 w-4" style={repeatSong ? { color: 'var(--accent)' } : undefined} />
-              </button>
-              {/* Speed — stepped snap slider over SPEED_STOPS; 1× sits centred as the home detent */}
-              <div className="flex items-center gap-2">
-                <span className="label text-[8.5px]">Speed</span>
-                <div className="relative flex h-3.5 w-[104px] items-center">
-                  <input
-                    type="range"
-                    min={0}
-                    max={SPEED_STOPS.length - 1}
-                    step={1}
-                    value={speedIndex}
-                    onChange={(event) => setRate(SPEED_STOPS[Number(event.target.value)])}
-                    className="transport-range absolute inset-x-0 top-1/2 w-full -translate-y-1/2"
-                    style={{
-                      background: `linear-gradient(to right, var(--ink) 0 ${speedFillPercent}%, var(--hair) ${speedFillPercent}% 100%)`,
-                    }}
-                    aria-label="Playback speed"
-                    aria-valuetext={`${rate}x`}
-                  />
-                  {SPEED_STOPS.map((stop, index) => {
-                    const isHome = stop === 1;
-                    return (
-                      <div
-                        key={stop}
-                        className={`pointer-events-none absolute bottom-[-3px] w-[2px] -translate-x-1/2 rounded-full ${
-                          isHome ? 'h-2 bg-[var(--muted)]' : 'h-1.5 bg-[var(--faint)]'
-                        }`}
-                        style={{ left: `${(index / (SPEED_STOPS.length - 1)) * 100}%` }}
-                        aria-hidden
-                      />
-                    );
-                  })}
-                </div>
-                <span className="mono tnum w-9 text-[11px] font-semibold text-[var(--muted)]">x{rate % 1 === 0 ? rate.toFixed(1) : String(rate)}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => onMinimizedChange(true)}
-                className="iconbtn h-8 w-8"
-                aria-label="Minimize playback"
-                title="Minimize playback"
-              >
-                <ChevronDown className="h-4 w-4" />
-              </button>
+                );
+              })}
             </div>
           </div>
-        </>
+        </div>
       )}
     </section>
+  );
+}
+
+// Single A/B loop-point button: a faint marker letter beside a clean mono timestamp,
+// or a quiet "Set A/B" prompt when the point isn't placed yet.
+function LoopPointButton({
+  marker,
+  value,
+  disabled,
+  onClick,
+  title,
+}: {
+  marker: 'A' | 'B';
+  value: number | null;
+  disabled?: boolean;
+  onClick: () => void;
+  title: string;
+}) {
+  const set = value !== null;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="flex items-center gap-1 rounded-full px-2 py-1 transition disabled:opacity-45"
+      style={set ? { background: 'var(--ink)', color: 'var(--paper)' } : { color: 'var(--muted)' }}
+    >
+      <span className="text-[10px] font-semibold opacity-55">{marker}</span>
+      {set ? (
+        <span className="mono tnum text-[11px] font-semibold">{formatSeconds(value)}</span>
+      ) : (
+        <span className="text-[11px] font-medium">Set</span>
+      )}
+    </button>
   );
 }
 

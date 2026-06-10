@@ -51,7 +51,8 @@ export const BRAND: Brand = {
   name: 'Octave',
   domain: 'octave.studio',
   tagline: 'Take any song to the woodshed.',
-  email: 'hello@octave.studio',
+  // email: 'hello@octave.studio',
+  email: 'abhirooprasad@gmail.com',
 };
 
 /* ---------- value props (the "why") ---------- */

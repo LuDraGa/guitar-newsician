@@ -41,5 +41,6 @@ test_mps.py
 # Local Supabase CLI state
 supabase/.temp/
 
+Newsician/
 newsician 2/
 .claude/

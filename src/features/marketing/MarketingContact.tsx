@@ -172,14 +172,14 @@ export function Contact() {
               label="Book a call"
               title="15 minutes, founder to player"
               sub="Grab a slot on Calendly."
-              action={{ href: 'https://calendly.com', ext: true }}
+              action={{ href: 'https://cal.com/abhiroop-prasad/30min', ext: true }}
             />
             <ContactCard
               icon="sheet"
               label="Support form"
               title="Log a bug or request"
               sub="Structured form for the detailed stuff."
-              action={{ href: 'https://forms.gle', ext: true }}
+              action={{ href: 'https://forms.gle/haicRh8Yt4t4xSDK6', ext: true }}
             />
           </Reveal>
         </div>
