@@ -8,7 +8,7 @@ export default function PipelinePage() {
   // Dev-only surface: hidden from the nav and unreachable by URL unless the flag
   // is on (local dev, or NEXT_PUBLIC_ENABLE_PIPELINE=true).
   if (!isPipelineEnabled()) {
-    redirect('/library');
+    redirect('/app/library');
   }
 
   return (

@@ -1,5 +1,9 @@
 @import url("https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800;900&family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
-@import "tailwindcss";
+/* Scope Tailwind's automatic class detection to the app source only. Without this,
+   v4 scans the whole project root — including markdown execution docs that quote
+   arbitrary-value utilities, which can JIT-compile to invalid CSS and crash the
+   Turbopack dev server. source("..") resolves to src/ relative to this file. */
+@import "tailwindcss" source("..");
 
 @theme inline {
   --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
@@ -25,6 +29,7 @@
   --accent-strong: var(--accent-ink);
   --live: oklch(0.62 0.12 165);
   --live-soft: oklch(0.62 0.12 165 / 0.14);
+  --live-ink: oklch(0.42 0.1 165);
   --warn: oklch(0.62 0.15 40);
   --danger: oklch(0.55 0.16 28);
   --background: var(--paper);
@@ -254,6 +259,47 @@ textarea {
 .iconbtn.on {
   background: var(--ink);
   color: var(--paper);
+}
+
+/* Shared transport slider (volume + speed). Track fill is applied inline via a
+   gradient on the element; this only owns the reset and the custom thumb, since
+   the thumb pseudo-elements can't be reached by Tailwind utilities. */
+.transport-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--hair);
+  cursor: pointer;
+  outline: none;
+}
+.transport-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 99px;
+  background: var(--ink);
+  box-shadow: 0 0 0 3px var(--card), 0 1px 3px oklch(0.2 0.01 60 / 0.35);
+  cursor: pointer;
+}
+.transport-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 99px;
+  background: var(--ink);
+  box-shadow: 0 0 0 3px var(--card), 0 1px 3px oklch(0.2 0.01 60 / 0.35);
+  cursor: pointer;
+}
+.transport-range::-moz-range-track {
+  height: 6px;
+  border-radius: 99px;
+  background: transparent;
+}
+.transport-range:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .wc-avatar {

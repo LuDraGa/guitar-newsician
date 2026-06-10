@@ -12,13 +12,13 @@ export async function GET(request: NextRequest) {
   const errorDescription = requestUrl.searchParams.get("error_description");
 
   if (error) {
-    const redirectUrl = new URL("/library", requestUrl.origin);
+    const redirectUrl = new URL("/app/library", requestUrl.origin);
     redirectUrl.searchParams.set("authError", errorDescription ?? error);
     return NextResponse.redirect(redirectUrl);
   }
 
   if (!code) {
-    const redirectUrl = new URL("/library", requestUrl.origin);
+    const redirectUrl = new URL("/app/library", requestUrl.origin);
     redirectUrl.searchParams.set("authError", "Missing OAuth code");
     return NextResponse.redirect(redirectUrl);
   }
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
 
     await provisionWereCodeUser(data.user);
   } catch (exchangeError) {
-    const redirectUrl = new URL("/library", requestUrl.origin);
+    const redirectUrl = new URL("/app/library", requestUrl.origin);
     redirectUrl.searchParams.set(
       "authError",
       exchangeError instanceof Error ? exchangeError.message : "Could not complete Google sign in",
@@ -45,5 +45,5 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  return NextResponse.redirect(new URL("/library", requestUrl.origin));
+  return NextResponse.redirect(new URL("/app/library", requestUrl.origin));
 }

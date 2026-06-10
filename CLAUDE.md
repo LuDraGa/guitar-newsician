@@ -43,3 +43,31 @@ GET  /health
 Do not reintroduce Python APIs for product CRUD, analysis, stems, lyrics
 alignment, MIDI, AI editing, storage, or auth. Those belong in Next/Supabase or
 Modal.
+
+## Design Context
+
+Design work is grounded in two root files (created via `/impeccable init`):
+
+- `PRODUCT.md` — strategic: register (`product`), users, purpose, brand
+  personality, anti-references, and design principles. The *why*.
+- `DESIGN.md` — visual: the committed design system (the "Luthier's Bench"
+  palette, Schibsted/Hanken Grotesk + JetBrains Mono, pill/chip/segment
+  primitives, elevation, do's and don'ts). The *how it looks*. Token source of
+  truth is `src/app/globals.css`; `.impeccable/design.json` is the
+  machine-readable sidecar.
+
+Read PRODUCT.md and DESIGN.md before designing or restyling any surface.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as markdown files under `.scratch/<feature>/` in this repo. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical role strings: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at repo root. See `docs/agents/domain.md`.

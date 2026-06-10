@@ -11,7 +11,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-  Diamond,
   DownloadCloud,
   FileMusic,
   Flag,
@@ -26,8 +25,6 @@ import {
   Play,
   Repeat,
   RefreshCw,
-  RotateCcw,
-  RotateCw,
   Save,
   Scissors,
   Send,
@@ -38,6 +35,7 @@ import {
   Type,
   Upload,
   Volume2,
+  VolumeX,
   Wand2,
   X,
 } from 'lucide-react';
@@ -138,6 +136,10 @@ const guitarModes = [
   ['tab', 'Tab', Guitar],
   ['sheet', 'Sheet', Sheet],
 ] as const;
+// Even-spaced playback-speed stops. The speed slider maps its 0..N-1 index onto
+// these values, so the stops sit at equal notches and 1× lands dead-centre as home.
+const SPEED_STOPS = [0.5, 0.75, 1, 1.5, 1.75, 2] as const;
+const VOLUME_MAX = 150;
 
 export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const upsertCachedJob = useWereCodeDataCache((state) => state.upsertJob);
@@ -1006,7 +1008,7 @@ function SongHeader({
   return (
     <div className="mb-3 grid gap-3 lg:grid-cols-[minmax(300px,1fr)_auto] lg:items-center">
       <div className="flex min-w-0 items-center gap-4">
-        <Link href="/library" className="iconbtn shrink-0" title="Back to library">
+        <Link href="/app/library" className="iconbtn shrink-0" title="Back to library">
           <ArrowLeft className="h-5 w-5" />
         </Link>
         <CoverArt id={song?.id ?? songId} size={52} />
@@ -2198,41 +2200,49 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
   };
 }
 
-const SECTION_ABBREVIATIONS: Record<string, string> = {
-  intro: 'In',
-  outro: 'Out',
-  verse: 'V',
-  chorus: 'C',
-  bridge: 'Br',
-  section: 'S',
-  pre: 'Pre',
-  prechorus: 'PC',
-  'pre-chorus': 'PC',
-  postchorus: 'PoC',
-  'post-chorus': 'PoC',
-  instrumental: 'Inst',
-  interlude: 'Int',
-  intermezzo: 'Int',
-  solo: 'Solo',
-  hook: 'Hk',
-  refrain: 'Ref',
-  breakdown: 'Bd',
-  drop: 'Drop',
-  build: 'Bld',
-  buildup: 'Bld',
-  ending: 'End',
-  coda: 'Coda',
-};
-
-/** Compact a section name so it survives a narrow ruler segment ("Chorus 4" → "C4"). */
-function abbreviateSection(name: string): string {
-  const trimmed = name.trim();
-  const match = trimmed.match(/^(.*?[A-Za-z])[\s-]*(\d+)?$/);
-  const word = (match?.[1] ?? trimmed).trim();
-  const num = match?.[2] ?? '';
-  const known = SECTION_ABBREVIATIONS[word.toLowerCase()];
-  const base = known ?? (word ? word.slice(0, 2).replace(/^./, (c) => c.toUpperCase()) : trimmed.slice(0, 2));
-  return `${base}${num}`;
+// Circular-arrow skip button with the jump amount baked into the centre of the
+// glyph (matches the reference transport). Tap = ±5s; hold-to-scrub is handled by
+// the global arrow-key handler, not this button.
+function TransportSkipButton({
+  dir,
+  seconds,
+  disabled,
+  onClick,
+}: {
+  dir: 1 | -1;
+  seconds: number;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  const back = dir < 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="iconbtn shrink-0 disabled:opacity-45"
+      style={{ width: 42, height: 42 }}
+      aria-label={`${back ? 'Back' : 'Forward'} ${seconds} seconds`}
+      title={`${back ? 'Back' : 'Forward'} ${seconds}s (${back ? '←' : '→'} tap, hold to scrub)`}
+    >
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        {back ? (
+          <>
+            <path d="M3.5 12a8.5 8.5 0 1 0 2.7-6.2" />
+            <path d="M3 4.2V9h4.8" />
+          </>
+        ) : (
+          <>
+            <path d="M20.5 12a8.5 8.5 0 1 1-2.7-6.2" />
+            <path d="M21 4.2V9h-4.8" />
+          </>
+        )}
+        <text x="12" y="15.4" fontSize="8.2" fontWeight="700" textAnchor="middle" fill="currentColor" stroke="none" style={{ fontFamily: 'var(--font-mono)' }}>
+          {seconds}
+        </text>
+      </svg>
+    </button>
+  );
 }
 
 function TransportCard({
@@ -2296,6 +2306,7 @@ function TransportCard({
   const handledPlaybackCommandIdRef = useRef<number | null>(null);
   const [rate, setRate] = useState(1);
   const [masterVolume, setMasterVolume] = useState(80);
+  const [muted, setMuted] = useState(false);
   const [loopStart, setLoopStart] = useState<number | null>(null);
   const [loopEnd, setLoopEnd] = useState<number | null>(null);
   const [repeatSong, setRepeatSong] = useState(false);
@@ -2346,8 +2357,10 @@ function TransportCard({
   }, [rate, setEngineRate]);
 
   useEffect(() => {
-    setEngineMasterVolume(masterVolume / 100);
-  }, [masterVolume, setEngineMasterVolume]);
+    // Mute drives the engine to silence but leaves `masterVolume` intact, so a second
+    // click restores the exact level the user had dialled in.
+    setEngineMasterVolume((muted ? 0 : masterVolume) / 100);
+  }, [masterVolume, muted, setEngineMasterVolume]);
 
   useEffect(() => {
     setEngineLoop(effectiveLoop);
@@ -2513,6 +2526,19 @@ function TransportCard({
     setLoopEnd(null);
   }
 
+  // Volume: muting drops the displayed fill to 0 without forgetting the dialled
+  // level. The track gradient and the 100% detent both scale against VOLUME_MAX so
+  // the above-unity boost headroom stays reachable.
+  const displayVolume = muted ? 0 : masterVolume;
+  const volumeFillPercent = (displayVolume / VOLUME_MAX) * 100;
+  const volumeUnityPercent = (100 / VOLUME_MAX) * 100;
+  // Speed: the slider works in index space so the six stops sit at equal notches.
+  const speedIndex = Math.max(0, SPEED_STOPS.indexOf(rate as (typeof SPEED_STOPS)[number]));
+  const speedFillPercent = (speedIndex / (SPEED_STOPS.length - 1)) * 100;
+  const loopLengthLabel =
+    loopStart !== null && loopEnd !== null && loopEnd > loopStart ? `${formatSeconds(loopEnd - loopStart)} loop` : 'A–B';
+  const loopActive = loopStart !== null && loopEnd !== null && loopEnd > loopStart;
+
   const progress = duration > 0 ? Math.min(1, Math.max(0, time / duration)) : 0;
   const loopRange =
     loopStart !== null && loopEnd !== null && loopEnd > loopStart && duration > 0
@@ -2528,7 +2554,7 @@ function TransportCard({
       return null;
     }
     return (
-      <div className="relative h-8 w-full">
+      <div className="relative h-4 w-full">
         {sections.map((section, index) => {
           const left = Math.min(100, Math.max(0, (section.start / duration) * 100));
           const width = Math.min(100 - left, Math.max(0, ((section.end - section.start) / duration) * 100));
@@ -2542,14 +2568,27 @@ function TransportCard({
               type="button"
               onClick={() => seek(section.start)}
               title={`${section.name} · ${formatSeconds(section.start)}`}
-              className={`absolute inset-y-0 flex items-center justify-center overflow-hidden rounded-[7px] px-1.5 text-[12px] leading-none transition ${
+              className={`absolute inset-y-0 flex items-center justify-center overflow-hidden rounded-[5px] px-1 transition ${
                 active
-                  ? 'bg-[var(--card)] font-semibold text-[var(--accent-ink)] shadow-[inset_0_0_0_1.5px_var(--accent)]'
-                  : 'bg-[var(--paper-2)] font-medium text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line-2)] hover:bg-[var(--card)] hover:text-[var(--ink)]'
+                  ? 'shadow-[inset_0_0_0_1px_var(--accent)]'
+                  : 'shadow-[inset_0_0_0_1px_var(--line-2)]'
               }`}
-              style={{ left: `${left}%`, width: `calc(${width}% - 3px)` }}
+              // Background is set inline, not via a `bg-[...]` utility: globals.css has an
+              // unlayered `button { background: none }` reset that, per the cascade-layer
+              // rules, overrides any layered Tailwind background utility on a <button>.
+              style={{
+                left: `${left}%`,
+                width: `calc(${width}% - 2px)`,
+                background: active ? 'var(--accent-soft)' : 'var(--card-2)',
+              }}
             >
-              <span className="truncate">{abbreviateSection(section.name)}</span>
+              <span
+                className={`truncate text-[8.5px] font-bold leading-none tracking-[0.02em] ${
+                  active ? 'text-[var(--accent-ink)]' : 'text-[var(--faint)]'
+                }`}
+              >
+                {section.name}
+              </span>
             </button>
           );
         })}
@@ -2697,54 +2736,59 @@ function TransportCard({
       ) : (
         <>
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => nudge(-5)}
-              disabled={!hasPlayableAudio}
-              className="flex h-9 shrink-0 items-center gap-1 rounded-[12px] px-2.5 text-[var(--muted)] transition hover:bg-[var(--card)] hover:text-[var(--ink)] disabled:opacity-45"
-              aria-label="Back 5 seconds"
-              title="Back 5s (← tap, hold to scrub)"
-            >
-              <RotateCcw className="h-4 w-4" />
-              <span className="mono text-[11px] font-bold leading-none">5</span>
-            </button>
+            <TransportSkipButton dir={-1} seconds={5} disabled={!hasPlayableAudio} onClick={() => nudge(-5)} />
             <button
               type="button"
               onClick={() => void toggle()}
               disabled={!hasPlayableAudio}
-              className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
+              className="grid h-[50px] w-[50px] shrink-0 place-items-center rounded-full bg-[var(--ink)] text-[var(--paper)] shadow-[var(--shadow-card)] disabled:opacity-45"
               aria-label={playButtonLabel}
             >
               {preparingPlayback ? <Loader2 className="h-5 w-5 animate-spin" /> : playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
             </button>
-            <button
-              type="button"
-              onClick={() => nudge(5)}
-              disabled={!hasPlayableAudio}
-              className="flex h-9 shrink-0 items-center gap-1 rounded-[12px] px-2.5 text-[var(--muted)] transition hover:bg-[var(--card)] hover:text-[var(--ink)] disabled:opacity-45"
-              aria-label="Forward 5 seconds"
-              title="Forward 5s (→ tap, hold to scrub)"
-            >
-              <span className="mono text-[11px] font-bold leading-none">5</span>
-              <RotateCw className="h-4 w-4" />
-            </button>
+            <TransportSkipButton dir={1} seconds={5} disabled={!hasPlayableAudio} onClick={() => nudge(5)} />
             <div className="flex min-w-0 flex-1 flex-col gap-1.5">
               {renderSectionRuler()}
               {renderSeeker('h-8', true, 'gaps')}
             </div>
-            <div className="flex shrink-0 items-center gap-2" title={`Master volume ${masterVolume}%`}>
-              <Volume2 className="h-4 w-4 text-[var(--muted)]" />
-              <input
-                type="range"
-                min={0}
-                max={150}
-                step={1}
-                value={masterVolume}
-                onChange={(event) => setMasterVolume(Number(event.target.value))}
-                className="h-1 w-24 cursor-pointer accent-[var(--ink)]"
-                aria-label="Master volume"
-              />
-              <span className="mono w-9 text-right text-[11px] text-[var(--muted)]">{masterVolume}%</span>
+            <div className="flex shrink-0 items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setMuted((value) => !value)}
+                className="iconbtn h-8 w-8 shrink-0"
+                aria-label={muted ? 'Unmute' : 'Mute'}
+                aria-pressed={muted}
+                title={muted ? 'Unmute' : 'Mute'}
+              >
+                {muted || displayVolume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+              </button>
+              <div className="relative flex h-3.5 w-24 items-center">
+                <input
+                  type="range"
+                  min={0}
+                  max={VOLUME_MAX}
+                  step={1}
+                  value={displayVolume}
+                  onChange={(event) => {
+                    setMasterVolume(Number(event.target.value));
+                    if (muted) {
+                      setMuted(false);
+                    }
+                  }}
+                  className="transport-range absolute inset-x-0 top-1/2 w-full -translate-y-1/2"
+                  style={{
+                    background: `linear-gradient(to right, var(--ink) 0 ${volumeFillPercent}%, var(--hair) ${volumeFillPercent}% 100%)`,
+                  }}
+                  aria-label="Master volume"
+                />
+                {/* unity (100%) detent — a quiet tick under the track so the boost ceiling is findable */}
+                <div
+                  className="pointer-events-none absolute bottom-[-3px] h-1.5 w-[2px] -translate-x-1/2 rounded-full bg-[var(--faint)]"
+                  style={{ left: `${volumeUnityPercent}%` }}
+                  aria-hidden
+                />
+              </div>
+              <span className="mono tnum w-10 text-right text-[11px] font-semibold text-[var(--muted)]">{displayVolume}%</span>
             </div>
           </div>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
@@ -2753,7 +2797,7 @@ function TransportCard({
               <span className="text-xs text-[var(--faint)]">/ {formatSeconds(duration || song?.duration_sec || 0)}</span>
               {currentSection ? (
                 <span className="chip accent inline-flex items-center gap-1">
-                  <Diamond className="h-3 w-3" />
+                  <Layers className="h-3 w-3" />
                   {currentSection.name}
                 </span>
               ) : sections.length === 0 && onRunAnalyze ? (
@@ -2780,73 +2824,99 @@ function TransportCard({
                 </span>
               )}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <div className="flex items-center gap-1 rounded-full bg-[var(--paper-2)] p-1">
-                <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)]">A-B</span>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {/* A–B loop — accent-soft active pill; the label carries the loop length once both ends are set */}
+              <div
+                className="flex items-center gap-1 rounded-full px-2 py-[3px] transition-[background,box-shadow] duration-200"
+                style={{
+                  background: loopActive ? 'var(--accent-soft)' : 'var(--card-2)',
+                  boxShadow: loopActive ? 'inset 0 0 0 1px var(--accent)' : 'inset 0 0 0 1px var(--line-2)',
+                }}
+              >
+                <span
+                  className="label px-0.5 text-[8.5px]"
+                  style={{ color: loopActive ? 'var(--accent-ink)' : 'var(--faint)' }}
+                >
+                  {loopLengthLabel}
+                </span>
                 <button
                   type="button"
                   onClick={setLoopStartAtPlayhead}
                   disabled={!hasPlayableAudio}
-                  className={`mono rounded-full px-2.5 py-1 text-[12px] font-semibold transition disabled:opacity-45 ${
+                  className={`mono tnum rounded-full px-2 py-[3px] text-[11px] font-extrabold transition disabled:opacity-45 ${
                     loopStart !== null ? 'bg-[var(--ink)] text-[var(--paper)]' : 'text-[var(--muted)] hover:text-[var(--ink)]'
                   }`}
-                  title="Set loop start (A)"
+                  title="Set loop start to playhead (A)"
                 >
-                  A {loopStart !== null ? formatSeconds(loopStart) : '--'}
+                  {loopStart !== null ? `A ${formatSeconds(loopStart)}` : 'Set A'}
                 </button>
                 <button
                   type="button"
                   onClick={setLoopEndAtPlayhead}
                   disabled={!hasPlayableAudio}
-                  className={`mono rounded-full px-2.5 py-1 text-[12px] font-semibold transition disabled:opacity-45 ${
+                  className={`mono tnum rounded-full px-2 py-[3px] text-[11px] font-extrabold transition disabled:opacity-45 ${
                     loopEnd !== null ? 'bg-[var(--ink)] text-[var(--paper)]' : 'text-[var(--muted)] hover:text-[var(--ink)]'
                   }`}
-                  title="Set loop end (B)"
+                  title="Set loop end to playhead (B)"
                 >
-                  B {loopEnd !== null ? formatSeconds(loopEnd) : '--'}
+                  {loopEnd !== null ? `B ${formatSeconds(loopEnd)}` : 'Set B'}
                 </button>
                 {hasLoop && (
                   <button
                     type="button"
                     onClick={clearLoop}
-                    className="grid h-6 w-6 place-items-center rounded-full text-[var(--muted)] hover:text-[var(--ink)]"
+                    className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[var(--muted)] hover:text-[var(--ink)]"
                     aria-label="Clear loop"
+                    title="Clear loop"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
+              {/* Repeat — icon-only toggle; the look itself is the on/off signal (ink fill + accent glyph) */}
               <button
                 type="button"
                 onClick={() => setRepeatSong((value) => !value)}
-                className="flex h-8 shrink-0 items-center gap-2 px-1 text-[13px] font-medium text-[var(--muted)] transition hover:text-[var(--ink)]"
+                className={`iconbtn h-8 w-8 shrink-0 ${repeatSong ? 'on' : ''}`}
                 aria-label="Repeat song"
                 aria-pressed={repeatSong}
                 title={repeatSong ? 'Repeat song: on' : 'Repeat song: off'}
               >
-                <Repeat className="h-3.5 w-3.5" />
-                Repeat
-                <span className={`relative h-4 w-7 rounded-full transition-colors ${repeatSong ? 'bg-[var(--ink)]' : 'bg-[var(--hair)]'}`}>
-                  <span
-                    className="absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-[var(--shadow-card)] transition-[left]"
-                    style={{ left: repeatSong ? '14px' : '2px' }}
-                  />
-                </span>
+                <Repeat className="h-4 w-4" style={repeatSong ? { color: 'var(--accent)' } : undefined} />
               </button>
-              <div className="flex items-center gap-0.5">
-                <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)]">Speed</span>
-                {[0.5, 0.75, 1, 1.5, 1.75, 2].map((speed) => (
-                  <button
-                    key={speed}
-                    type="button"
-                    onClick={() => setRate(speed)}
-                    className={`rounded-full px-2 py-1 text-[12px] font-semibold transition ${
-                      rate === speed ? 'bg-[var(--ink)] text-[var(--paper)]' : 'text-[var(--muted)] hover:text-[var(--ink)]'
-                    }`}
-                  >
-                    {speed}x
-                  </button>
-                ))}
+              {/* Speed — stepped snap slider over SPEED_STOPS; 1× sits centred as the home detent */}
+              <div className="flex items-center gap-2">
+                <span className="label text-[8.5px]">Speed</span>
+                <div className="relative flex h-3.5 w-[104px] items-center">
+                  <input
+                    type="range"
+                    min={0}
+                    max={SPEED_STOPS.length - 1}
+                    step={1}
+                    value={speedIndex}
+                    onChange={(event) => setRate(SPEED_STOPS[Number(event.target.value)])}
+                    className="transport-range absolute inset-x-0 top-1/2 w-full -translate-y-1/2"
+                    style={{
+                      background: `linear-gradient(to right, var(--ink) 0 ${speedFillPercent}%, var(--hair) ${speedFillPercent}% 100%)`,
+                    }}
+                    aria-label="Playback speed"
+                    aria-valuetext={`${rate}x`}
+                  />
+                  {SPEED_STOPS.map((stop, index) => {
+                    const isHome = stop === 1;
+                    return (
+                      <div
+                        key={stop}
+                        className={`pointer-events-none absolute bottom-[-3px] w-[2px] -translate-x-1/2 rounded-full ${
+                          isHome ? 'h-2 bg-[var(--muted)]' : 'h-1.5 bg-[var(--faint)]'
+                        }`}
+                        style={{ left: `${(index / (SPEED_STOPS.length - 1)) * 100}%` }}
+                        aria-hidden
+                      />
+                    );
+                  })}
+                </div>
+                <span className="mono tnum w-9 text-[11px] font-semibold text-[var(--muted)]">x{rate % 1 === 0 ? rate.toFixed(1) : String(rate)}</span>
               </div>
               <button
                 type="button"

@@ -19,7 +19,6 @@ import type { Route } from 'next';
 import Link from 'next/link';
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { SignInGate } from '@/components/auth/SignInGate';
 import { useSession } from '@/components/auth/session-context';
 import { CoverArt, PillIcon, ReadinessChips, StatusDot } from '@/components/werecode/WereCodePrimitives';
 import { toJobSummary, toSongSummary, useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
@@ -384,14 +383,6 @@ export function LibraryClient() {
     );
   }
 
-  if (locked) {
-    return (
-      <section className="wc-rise mx-auto max-w-[1180px] py-16">
-        <SignInGate />
-      </section>
-    );
-  }
-
   return (
     <>
       <section className="wc-rise mx-auto max-w-[1180px] pb-16">
@@ -608,7 +599,7 @@ function SongCard({ song, onRequestDelete }: { song: SongSummary; onRequestDelet
 
   return (
     <article className="surface group relative flex min-h-[206px] flex-col text-left transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-pop)]">
-      <Link href={`/studio/${song.id}` as Route} className="flex flex-1 flex-col gap-4 p-[18px] pr-14">
+      <Link href={`/app/studio/${song.id}` as Route} className="flex flex-1 flex-col gap-4 p-[18px] pr-14">
         <div className="flex items-center gap-3">
           <CoverArt id={song.id} size={58} />
           <div className="min-w-0">
@@ -663,7 +654,7 @@ function SongListRow({
       }`}
     >
       <Link
-        href={`/studio/${song.id}` as Route}
+        href={`/app/studio/${song.id}` as Route}
         className="grid min-w-0 items-center gap-4 md:grid-cols-[auto_minmax(0,1.4fr)_minmax(220px,1fr)_auto_auto]"
       >
         <CoverArt id={song.id} size={44} />

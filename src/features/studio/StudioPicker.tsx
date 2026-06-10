@@ -5,7 +5,6 @@ import type { Route } from 'next';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
-import { SignInGate } from '@/components/auth/SignInGate';
 import { useSession } from '@/components/auth/session-context';
 import { CoverArt, ReadinessChips, StatusDot } from '@/components/werecode/WereCodePrimitives';
 import { useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
@@ -68,19 +67,6 @@ export function StudioPicker() {
     );
   }
 
-  if (locked) {
-    return (
-      <div className="min-h-0 w-full flex-1 overflow-y-auto">
-        <section className="wc-rise mx-auto max-w-[1180px] py-12">
-          <SignInGate
-            title="Open a song in the Studio"
-            description="Sign in to reach your songs and take one to the bench."
-          />
-        </section>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-0 w-full flex-1 overflow-y-auto">
       <section className="wc-rise mx-auto max-w-[1180px] pb-16">
@@ -108,7 +94,7 @@ export function StudioPicker() {
               <p className="mt-2 max-w-sm text-sm leading-6 text-[var(--muted)]">
                 Import a song in your Library, then bring it to the bench.
               </p>
-              <Link href="/library" className="pill mt-5">
+              <Link href="/app/library" className="pill mt-5">
                 <span className="dot">
                   <Music2 className="h-3.5 w-3.5" />
                 </span>
@@ -131,7 +117,7 @@ export function StudioPicker() {
 function PickerCard({ song }: { song: SongSummary }) {
   return (
     <Link
-      href={`/studio/${song.id}` as Route}
+      href={`/app/studio/${song.id}` as Route}
       className="surface group flex min-h-[160px] flex-col gap-4 p-[18px] text-left transition hover:-translate-y-0.5 hover:shadow-[var(--shadow-pop)]"
     >
       <div className="flex items-center gap-3">

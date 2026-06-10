@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-08T00:00:00Z",
+  "title": "Design System: WereCode",
+  "extensions": {
+    "colorMeta": {
+      "rosin": { "role": "primary", "displayName": "Rosin", "canonical": "oklch(0.63 0.135 55)", "tonalRamp": ["oklch(0.16 0.05 55)", "oklch(0.27 0.08 54)", "oklch(0.38 0.11 53)", "oklch(0.49 0.13 53)", "oklch(0.60 0.135 54)", "oklch(0.71 0.12 56)", "oklch(0.83 0.09 60)", "oklch(0.94 0.05 70)"] },
+      "rosin-aged": { "role": "primary", "displayName": "Aged Rosin", "canonical": "oklch(0.42 0.12 50)" },
+      "verdigris": { "role": "secondary", "displayName": "Verdigris", "canonical": "oklch(0.62 0.12 165)", "tonalRamp": ["oklch(0.16 0.05 168)", "oklch(0.27 0.07 167)", "oklch(0.38 0.09 166)", "oklch(0.49 0.11 166)", "oklch(0.60 0.12 165)", "oklch(0.71 0.11 164)", "oklch(0.83 0.08 162)", "oklch(0.94 0.04 160)"] },
+      "ember": { "role": "tertiary", "displayName": "Ember", "canonical": "oklch(0.62 0.15 40)", "tonalRamp": ["oklch(0.16 0.06 38)", "oklch(0.27 0.09 39)", "oklch(0.38 0.12 39)", "oklch(0.49 0.14 40)", "oklch(0.60 0.15 40)", "oklch(0.71 0.13 42)", "oklch(0.83 0.10 46)", "oklch(0.94 0.05 55)"] },
+      "cinnabar": { "role": "tertiary", "displayName": "Cinnabar", "canonical": "oklch(0.55 0.16 28)", "tonalRamp": ["oklch(0.16 0.07 27)", "oklch(0.27 0.10 27)", "oklch(0.38 0.13 28)", "oklch(0.49 0.15 28)", "oklch(0.55 0.16 28)", "oklch(0.66 0.15 29)", "oklch(0.80 0.11 31)", "oklch(0.93 0.05 36)"] },
+      "ebony": { "role": "neutral", "displayName": "Ebony", "canonical": "oklch(0.205 0.006 60)", "tonalRamp": ["oklch(0.16 0.008 62)", "oklch(0.27 0.008 62)", "oklch(0.38 0.008 64)", "oklch(0.49 0.008 66)", "oklch(0.60 0.008 68)", "oklch(0.72 0.007 72)", "oklch(0.86 0.006 76)", "oklch(0.96 0.005 80)"] },
+      "rosewood": { "role": "neutral", "displayName": "Rosewood", "canonical": "oklch(0.27 0.008 60)" },
+      "graphite": { "role": "neutral", "displayName": "Graphite", "canonical": "oklch(0.52 0.008 65)" },
+      "ash": { "role": "neutral", "displayName": "Ash", "canonical": "oklch(0.66 0.008 70)" },
+      "spruce": { "role": "neutral", "displayName": "Spruce", "canonical": "oklch(0.945 0.006 75)" },
+      "spruce-deep": { "role": "neutral", "displayName": "Spruce Deep", "canonical": "oklch(0.925 0.007 72)" },
+      "maple": { "role": "neutral", "displayName": "Maple", "canonical": "oklch(0.985 0.004 80)" },
+      "maple-shade": { "role": "neutral", "displayName": "Maple Shade", "canonical": "oklch(0.965 0.005 78)" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Schibsted Grotesk 800. Product name, page titles, boldest headings. Tight leading, never above ~6rem." },
+      "body": { "displayName": "Body", "purpose": "Hanken Grotesk 400-500. All reading copy, 65-75ch, Ebony or Graphite only." },
+      "label": { "displayName": "Label", "purpose": "Hanken Grotesk 650, 11px, 0.12em uppercase. Metadata keys and control-group labels, one per cluster." },
+      "mono": { "displayName": "Mono", "purpose": "JetBrains Mono 500 with tabular figures. Every time, tempo, bar:beat, count, and timecode." }
+    },
+    "shadows": [
+      { "name": "resting", "value": "0 1px 2px oklch(0.2 0.01 60 / 0.05), 0 8px 24px oklch(0.2 0.01 60 / 0.06)", "purpose": "Default elevation for raised cards and panels (.surface). Warm-tinted, low contrast." },
+      { "name": "lifted", "value": "0 12px 40px oklch(0.2 0.01 60 / 0.16), 0 2px 8px oklch(0.2 0.01 60 / 0.08)", "purpose": "Hover / active / popovers. Earned by interaction, never default." },
+      { "name": "inset-hairline", "value": "inset 0 0 0 1px oklch(0.205 0.006 60 / 0.06)", "purpose": "Flat nested surfaces (.surface-flat); edge without elevation." }
+    ],
+    "motion": [
+      { "name": "ease-out-quart", "value": "cubic-bezier(0.2, 0.7, 0.2, 1)", "purpose": "Entrance/reveal easing (the wc-rise rise-in over 0.45s)." },
+      { "name": "ease-standard", "value": "ease", "purpose": "Control state transitions: transform 0.15s, background/box-shadow 0.2s." },
+      { "name": "pulse", "value": "wc-pulse 1.6s ease-in-out infinite", "purpose": "In-progress status (Processing/Importing) opacity pulse on the StatusDot." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "mobile-max", "value": "760px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Pill",
+      "kind": "button",
+      "refersTo": "pill-primary",
+      "description": "The default action button: Ebony fill, Spruce text, optional inset icon dot. Lifts on hover.",
+      "html": "<button class=\"ds-pill-primary\"><span class=\"ds-dot\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polygon points=\"6 3 20 12 6 21 6 3\"></polygon></svg></span>Open in Studio</button>",
+      "css": ".ds-pill-primary{display:inline-flex;height:44px;align-items:center;gap:9px;border:0;border-radius:999px;background:var(--ink,#2a2926);color:var(--paper,#f0ece4);padding:0 20px 0 16px;font:600 14px/1 'Hanken Grotesk',sans-serif;cursor:pointer;transition:transform .15s ease,box-shadow .2s ease}.ds-pill-primary:hover{transform:translateY(-1px);box-shadow:0 12px 40px rgba(40,38,33,.16),0 2px 8px rgba(40,38,33,.08)}.ds-pill-primary:active{transform:translateY(0)}.ds-pill-primary:focus-visible{outline:2px solid var(--accent,#c2773a);outline-offset:2px}.ds-pill-primary .ds-dot{display:grid;width:26px;height:26px;place-items:center;border-radius:999px;background:rgba(255,255,255,.12)}"
+    },
+    {
+      "name": "Accent Pill",
+      "kind": "button",
+      "refersTo": "pill-accent",
+      "description": "The single primary action per surface. Rosin fill, near-white text. Use sparingly (The Rosin Rule).",
+      "html": "<button class=\"ds-pill-accent\">Analyze song</button>",
+      "css": ".ds-pill-accent{display:inline-flex;height:44px;align-items:center;justify-content:center;border:0;border-radius:999px;background:var(--accent,#c2773a);color:#fffaf3;padding:0 22px;font:600 14px/1 'Hanken Grotesk',sans-serif;cursor:pointer;transition:transform .15s ease,box-shadow .2s ease}.ds-pill-accent:hover{transform:translateY(-1px);box-shadow:0 12px 40px rgba(40,38,33,.16),0 2px 8px rgba(40,38,33,.08)}.ds-pill-accent:focus-visible{outline:2px solid var(--accent,#c2773a);outline-offset:2px}"
+    },
+    {
+      "name": "Ghost Pill",
+      "kind": "button",
+      "refersTo": "pill-ghost",
+      "description": "Secondary action: transparent with a hairline inset border, Ebony text. Gains a Maple background on hover.",
+      "html": "<button class=\"ds-pill-ghost\">Ask coach</button>",
+      "css": ".ds-pill-ghost{display:inline-flex;height:44px;align-items:center;justify-content:center;border:0;border-radius:999px;background:transparent;color:var(--ink,#2a2926);box-shadow:inset 0 0 0 1.5px rgba(42,41,38,.16);padding:0 20px;font:600 14px/1 'Hanken Grotesk',sans-serif;cursor:pointer;transition:background .2s ease,box-shadow .2s ease}.ds-pill-ghost:hover{background:var(--card,#fbf9f5);box-shadow:inset 0 0 0 1.5px rgba(42,41,38,.16),0 1px 2px rgba(40,38,33,.05),0 8px 24px rgba(40,38,33,.06)}.ds-pill-ghost:focus-visible{outline:2px solid var(--accent,#c2773a);outline-offset:2px}"
+    },
+    {
+      "name": "Status (label + dot)",
+      "kind": "custom",
+      "refersTo": "status",
+      "description": "The signature status readout: a colored dot ALWAYS paired with its text label. In-progress states pulse. Color is never shown alone.",
+      "html": "<span class=\"ds-status\"><span class=\"ds-status-dot ds-pulse\"></span>Processing</span>",
+      "css": ".ds-status{display:inline-flex;align-items:center;gap:7px;color:var(--muted,#76716a);font:650 12.5px/1 'Hanken Grotesk',sans-serif}.ds-status-dot{width:7px;height:7px;border-radius:999px;background:var(--accent,#c2773a)}.ds-pulse{animation:ds-pulse 1.6s ease-in-out infinite}@keyframes ds-pulse{0%,100%{opacity:1}50%{opacity:.45}}@media (prefers-reduced-motion:reduce){.ds-pulse{animation:none}}"
+    },
+    {
+      "name": "Live Chip",
+      "kind": "chip",
+      "refersTo": "chip-live",
+      "description": "Verdigris-tinted chip marking a ready/live state. Pairs with a text label.",
+      "html": "<span class=\"ds-chip-live\">Stems ready</span>",
+      "css": ".ds-chip-live{display:inline-flex;min-height:26px;align-items:center;gap:6px;border-radius:999px;background:oklch(0.62 0.12 165 / 0.14);color:oklch(0.42 0.1 165);padding:4px 10px;font:600 12px/1 'Hanken Grotesk',sans-serif}"
+    },
+    {
+      "name": "Segmented Nav",
+      "kind": "nav",
+      "refersTo": "segment",
+      "description": "The primary nav control: an Ebony track holding pill segments; the active one is a Spruce pill.",
+      "html": "<nav class=\"ds-segment\" aria-label=\"Primary\"><a class=\"ds-seg-on\">Library</a><a>Studio</a><a>Pipeline</a></nav>",
+      "css": ".ds-segment{display:inline-flex;align-items:center;gap:2px;border-radius:999px;background:var(--ink,#2a2926);padding:5px}.ds-segment a{display:inline-flex;height:34px;align-items:center;justify-content:center;border-radius:999px;padding:0 18px;color:rgba(255,255,255,.62);font:600 13.5px/1 'Hanken Grotesk',sans-serif;cursor:pointer;transition:color .15s ease,background .2s ease}.ds-segment a:hover{color:rgba(255,255,255,.9)}.ds-segment a.ds-seg-on{background:var(--paper,#f0ece4);color:var(--ink,#2a2926)}"
+    },
+    {
+      "name": "Surface Card",
+      "kind": "card",
+      "refersTo": "surface",
+      "description": "A raised Maple panel on the Spruce field, resting elevation, 14px radius. No border; the shadow carries the edge.",
+      "html": "<div class=\"ds-surface\"><div class=\"ds-surface-title\">Song structure</div><div class=\"ds-surface-body\">Intro · Verse · Chorus · Bridge · Outro</div></div>",
+      "css": ".ds-surface{border-radius:14px;background:var(--card,#fbf9f5);box-shadow:0 1px 2px rgba(40,38,33,.05),0 8px 24px rgba(40,38,33,.06);padding:20px 22px;max-width:360px}.ds-surface-title{font:800 16px/1 'Schibsted Grotesk',sans-serif;color:var(--ink,#2a2926)}.ds-surface-body{margin-top:8px;font:400 14px/1.5 'Hanken Grotesk',sans-serif;color:var(--muted,#76716a)}"
+    },
+    {
+      "name": "Search Input",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "Pill-shaped Maple field with a hairline inset and a leading icon. Rosin focus ring; Ash placeholder.",
+      "html": "<label class=\"ds-input-wrap\"><svg class=\"ds-input-icon\" width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"11\" cy=\"11\" r=\"8\"></circle><path d=\"m21 21-4.3-4.3\"></path></svg><input class=\"ds-input\" placeholder=\"Search songs\" /></label>",
+      "css": ".ds-input-wrap{display:inline-flex;align-items:center;gap:10px;width:280px;border-radius:999px;background:var(--card,#fbf9f5);box-shadow:inset 0 0 0 1.5px rgba(42,41,38,.1);padding:0 18px;height:44px}.ds-input-icon{color:var(--muted,#76716a);flex-shrink:0}.ds-input{flex:1;min-width:0;border:0;background:transparent;color:var(--ink,#2a2926);font:500 14px/1 'Hanken Grotesk',sans-serif;outline:none}.ds-input::placeholder{color:var(--faint,#a39c92)}.ds-input-wrap:focus-within{outline:2px solid var(--accent,#c2773a);outline-offset:2px}"
+    },
+    {
+      "name": "Cover Art",
+      "kind": "custom",
+      "refersTo": "cover",
+      "description": "Signature procedural cover: deterministic concentric rings over a dark gradient, hue driven by a hash of the song id. Stable, distinct, on-brand placeholder.",
+      "html": "<span class=\"ds-cover\" style=\"--cover-hue:55\"></span>",
+      "css": ".ds-cover{position:relative;display:block;width:64px;height:64px;flex-shrink:0;overflow:hidden;border-radius:12px;background:radial-gradient(circle at 50% 50%, oklch(0.74 0.11 var(--cover-hue,55)) 0 7%, transparent 7.5%),repeating-radial-gradient(circle at 50% 50%, transparent 0 18%, oklch(0.75 0.06 var(--cover-hue,55) / 0.18) 18.5% 19.5%, transparent 20% 25%),linear-gradient(145deg, oklch(0.3 0.04 var(--cover-hue,55)), oklch(0.18 0.02 var(--cover-hue,55)))}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Luthier's Bench",
+    "overview": "WereCode looks and feels like a stringed-instrument maker's bench: a warm, pale work surface with exact tools laid out, lit by a low lamp, where the craft is taken seriously and the noise is kept out. The page is planed Spruce, faintly grained with a 4px dotted texture so it reads as a real surface rather than a flat screen. Type is set in confident grotesk; numbers are cut in monospace with tabular figures so a ticking transport never jitters. The single warm accent is Rosin amber, used the way a luthier reaches for one varnish: sparingly, for the thing that matters right now. A second signal, Verdigris, the blue-green patina of aged brass tuning pegs, means live / ready / playing. The tension the system lives on is precision against warmth: the mono transport and hairline-exact panels earn a musician's trust, while the paper grain, soft warm shadows, and rounded hand-sized pill controls lower the intimidation of pulling a song apart.",
+    "keyCharacteristics": [
+      "Light, warm Spruce field with a faint dotted-paper grain; never dark mode, never stark white.",
+      "One rare warm accent (Rosin), one live signal (Verdigris), everything else neutral wood tones.",
+      "Monospace, tabular figures for every time / tempo / count.",
+      "Tactile, rounded controls that lift softly on touch; never flat, never industrial.",
+      "Status is always color plus a text label, never color alone."
+    ],
+    "rules": [
+      { "name": "The Rosin Rule", "body": "Rosin is varnish, not paint. It appears on the single most important action on a surface, on focus, and on in-progress state, and nowhere else. If two things on screen are Rosin, one of them is wrong. Large Rosin fills are forbidden.", "section": "colors" },
+      { "name": "The Two-Signal Rule", "body": "Rosin means 'your move / in progress.' Verdigris means 'live / ready / playing.' They are never swapped and never used decoratively.", "section": "colors" },
+      { "name": "The Tabular Transport Rule", "body": "Every digit that can change while playing, the playhead time, tempo, bar:beat, counts, is JetBrains Mono with tabular figures. The readout must not reflow as it ticks.", "section": "typography" },
+      { "name": "The Quiet-Eyebrow Rule", "body": "The uppercase label is a metadata key and a control-group label, not a decorative kicker stacked above every section. One per cluster.", "section": "typography" },
+      { "name": "The Lift-on-Touch Rule", "body": "A surface sits at Resting elevation and only climbs to Lifted as a response to interaction. Elevation is feedback, not decoration. Nested surfaces use the inset hairline and cast no shadow.", "section": "elevation" },
+      { "name": "The Labeled-Status Rule", "body": "Status is never color alone; a StatusDot always carries its text label, and motion (pulse) reinforces in-progress.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep the page on the warm Spruce field with its faint dotted grain. Light mode is the doctrine.",
+      "Do spend Rosin like varnish: one primary action, focus, and in-progress only.",
+      "Do keep the Two-Signal contract: Rosin = your move / in progress, Verdigris = live / ready / playing.",
+      "Do set every time, tempo, and count in JetBrains Mono with tabular figures.",
+      "Do pair every status color with a text label and use pulse for in-progress.",
+      "Do keep body text at Ebony or Graphite; treat Ash as placeholder-only.",
+      "Do let surfaces rest flat-ish and lift softly on touch; warm-tinted shadows only."
+    ],
+    "donts": [
+      "Don't build a cluttered legacy DAW: no wall-of-knobs density, no gray engineer-only panels.",
+      "Don't make it a toy / gamified app: no badges, confetti, cartoon mascots, or streak theater.",
+      "Don't drift to generic AI SaaS: no purple gradients, no glass cards, no hero-metric template, no 'supercharge / seamless' copy.",
+      "Don't go sterile corporate: no cold navy-and-gray data grids.",
+      "Don't rely on color alone to carry meaning; always add label, shape, or position.",
+      "Don't use gradient text, colored side-stripe borders, or decorative glassmorphism.",
+      "Don't put proportional numerals in the transport, or let a ticking readout reflow.",
+      "Don't flip to dark mode or a stark #fff background; the warmth is the brand.",
+      "Don't nest a shadowed card inside another shadowed card; use the inset-hairline flat surface."
+    ]
+  }
+}

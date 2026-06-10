@@ -10,6 +10,7 @@ const eslintConfig = [
       "backend/**",
       "downloads/**",
       "newsician 2/**",
+      "Newsician/**",
     ],
   },
 ];

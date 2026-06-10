@@ -1,0 +1,258 @@
+/* ============================================================
+   Marketing landing — scoped styles NOT already in globals.css.
+   Tokens (paper/ink/accent/live, fonts, radii, shadows) and the
+   shared .pill / .chip / .surface / .label primitives all come from
+   globals.css. This file only adds the landing-specific primitives
+   (eyebrow, annot, field, choices, reveal) and its responsive layout
+   helpers. Every selector is scoped under .marketing so these generic
+   class names never leak into the app shell.
+   ============================================================ */
+
+.marketing .wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+
+.marketing .section {
+  padding: 96px 0;
+}
+
+@media (max-width: 720px) {
+  .marketing .section {
+    padding: 64px 0;
+  }
+  .marketing .wrap {
+    padding: 0 18px;
+  }
+}
+
+/* eyebrow tag with leading dot */
+.marketing .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.marketing .eyebrow::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--accent);
+}
+
+.marketing .eyebrow.live::before {
+  background: var(--live);
+}
+
+/* faint annotation pill (luthier-bench motif) */
+.marketing .annot {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 33px;
+  padding: 0 14px;
+  border-radius: 99px;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: oklch(1 0 0 / 0.62);
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    0 6px 18px oklch(0.2 0.01 60 / 0.07);
+  backdrop-filter: blur(6px);
+}
+
+/* form fields */
+.marketing .field {
+  width: 100%;
+  height: 50px;
+  border-radius: 99px;
+  border: none;
+  box-shadow: inset 0 0 0 1.5px var(--hair);
+  background: var(--card);
+  padding: 0 18px;
+  font-size: 15px;
+  color: var(--ink);
+  transition: box-shadow 0.15s;
+}
+
+.marketing .field::placeholder {
+  color: var(--faint);
+}
+
+.marketing .field:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.marketing textarea.field {
+  height: auto;
+  border-radius: 16px;
+  padding: 14px 18px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* ghost pill leading dot — tinted accent over the design's neutral default */
+.marketing .pill.ghost .dot {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* segmented chooser (instrument, skill level, etc.) */
+.marketing .choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.marketing .choice {
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 99px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1.5px var(--hair);
+  transition: all 0.15s;
+}
+
+.marketing .choice:hover {
+  color: var(--ink);
+}
+
+.marketing .choice.on {
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: none;
+}
+
+/* reveal on scroll (transform only; resting state always visible) */
+.marketing .reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 0.6s ease,
+    transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.marketing .reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketing .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+@media print {
+  .marketing .reveal {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* responsive layout helpers */
+.marketing .nav-links a {
+  white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+  .marketing .hero-grid {
+    grid-template-columns: 1fr !important;
+    gap: 36px !important;
+  }
+  .marketing .hero-art {
+    margin-top: 8px;
+  }
+  .marketing .vp-row {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .marketing .nav-links {
+    display: none !important;
+  }
+  .marketing .footer-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .marketing .footer-brand {
+    grid-column: 1 / -1;
+  }
+}
+
+/* waitlist modal + concierge panel entrance + typing dots */
+@keyframes marketing-wl-pop {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes marketing-concierge-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes concierge-typing {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+.marketing .wl-pop {
+  animation: marketing-wl-pop 0.32s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.marketing .concierge-panel {
+  animation: marketing-concierge-in 0.26s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketing .wl-pop,
+  .marketing .concierge-panel {
+    animation: none !important;
+  }
+}
+
+/* smooth anchor scroll only while the landing is mounted */
+html:has(.marketing) {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:has(.marketing) {
+    scroll-behavior: auto;
+  }
+}
