@@ -12,11 +12,12 @@ import { useCallback, useState } from 'react';
 
 import './marketing.css';
 
+import { TheBench } from './BenchScene';
 import { Concierge } from './Concierge';
 import { FinalCTA, Footer } from './MarketingContact';
 import { MarketingHero } from './MarketingHero';
 import { MarketingNav } from './MarketingNav';
-import { FitAndFaq, MaestroScene, TheBench } from './MarketingSections';
+import { FitAndFaq, MaestroScene } from './MarketingSections';
 import { WaitlistModal } from './WaitlistModal';
 
 export function MarketingLanding() {

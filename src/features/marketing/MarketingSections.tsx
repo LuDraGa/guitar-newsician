@@ -1,90 +1,18 @@
 'use client';
 
 /* ============================================================
-   Marketing landing — the three middle scenes:
-   2. TheBench  — how it works + what's on the bench (one scene;
-      Phase 2 turns this into the pinned scroll sequence).
+   Marketing landing — middle scenes 3 and 4 (scene 2, TheBench,
+   lives in BenchScene.tsx with its pinned scroll sequence):
    3. MaestroScene — the coach, shown as a real exchange, with the
       mid-page capture moment.
    4. FitAndFaq — who it's for + five questions.
    ============================================================ */
 import { useState } from 'react';
 
-import { BENCH_MOVES, CAPABILITIES, FAQS, MAESTRO, MAESTRO_EXCHANGE, WHO } from './marketing-content';
+import { FAQS, MAESTRO, MAESTRO_EXCHANGE, WHO } from './marketing-content';
 import { Icon } from './MarketingIcon';
 import { EmailCapture, Reveal, SectionHead } from './MarketingPrimitives';
 import { OPEN_CONCIERGE_EVENT } from './marketing-events';
-
-/* ---------- scene 2: the bench ---------- */
-export function TheBench() {
-  return (
-    <section id="bench" className="section">
-      <div className="wrap">
-        <SectionHead
-          title="The song comes apart."
-          intro="Three steps between hearing it and playing it."
-        />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 28 }}>
-          {BENCH_MOVES.map((s, i) => (
-            <Reveal key={s.n} delay={i * 70}>
-              <div style={{ borderTop: '1px solid var(--line)', paddingTop: 18, height: '100%' }}>
-                <span className="mono" style={{ fontSize: 13, fontWeight: 500, letterSpacing: '0.06em', color: 'var(--accent-ink)' }}>
-                  {s.n}
-                </span>
-                <h3 style={{ margin: '10px 0 0', fontSize: 21, fontWeight: 700, letterSpacing: '-0.02em' }}>{s.title}</h3>
-                <p style={{ margin: '10px 0 0', fontSize: 16, lineHeight: 1.6, color: 'var(--muted)' }}>{s.body}</p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-
-        {/* what's on the bench — compact, one line per tool */}
-        <div
-          style={{
-            marginTop: 56,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: 12,
-          }}
-        >
-          {CAPABILITIES.map((c, i) => (
-            <Reveal key={c.tag} delay={(i % 3) * 60}>
-              <div
-                className="surface-flat"
-                style={{ padding: '16px 18px', height: '100%', display: 'flex', alignItems: 'flex-start', gap: 14 }}
-              >
-                <span
-                  style={{
-                    width: 38,
-                    height: 38,
-                    borderRadius: 11,
-                    flexShrink: 0,
-                    display: 'grid',
-                    placeItems: 'center',
-                    background: 'var(--card-2)',
-                    color: 'var(--accent-ink)',
-                  }}
-                >
-                  <Icon name={c.icon} size={18} strokeWidth={1.8} />
-                </span>
-                <span style={{ minWidth: 0 }}>
-                  <span className="label" style={{ display: 'block' }}>
-                    {c.tag}
-                  </span>
-                  <span style={{ display: 'block', marginTop: 5, fontSize: 15, lineHeight: 1.5, color: 'var(--muted)' }}>
-                    {c.line}
-                  </span>
-                </span>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-
-        {/* product film slot — the HeyGen Studio capture lands here (Phase 2+) */}
-      </div>
-    </section>
-  );
-}
 
 /* ---------- scene 3: maestro ---------- */
 function MaestroBubble({ role, text, delay }: { role: 'you' | 'maestro'; text: string; delay: number }) {

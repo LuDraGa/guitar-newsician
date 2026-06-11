@@ -1,7 +1,7 @@
 # Landing Page Immersive Rebuild — Execution Doc
 
 **Date:** 2026-06-11
-**Status:** PHASE 1 COMPLETE (user-verified in browser) — Phase 2 in progress
+**Status:** PHASE 2 CODE COMPLETE (footage = user curation pending) — Phase 3 not started
 **Scope:** `src/features/marketing/*` only. The app (Library/Studio) keeps the light Luthier's Bench system untouched.
 
 ## Problem statement (from review)
@@ -54,11 +54,13 @@ The current landing page has the right ideas conceptually but fails on four fron
 - [x] Slot reserved for future HeyGen product film (comment in TheBench)
 - [x] Page metadata updated to the new register
 
-### Phase 2 — it moves  `[ ] not started`
-- [ ] GSAP + ScrollTrigger scene system (pinned, scrubbed bench scene; in-view reveals elsewhere)
-- [ ] Curate + license 3–5 stock clips; unify with one aggressive grade; poster-frame/muted-loop mobile variants
-- [ ] Live-feeling micro-detail layer (ticking mono transport, status chips) consistent with the two-signal rule
-- [ ] `gsap.matchMedia` tiers: desktop full / mobile lighter / reduced-motion static
+### Phase 2 — it moves  `[x] code DONE 2026-06-11 — footage pending user`
+- [x] GSAP (`gsap` + `@gsap/react`) with one shared entry (`gsap.ts`); ScrollTrigger registered SSR-safe
+- [x] Pinned, scrubbed bench scene (`BenchScene.tsx`): the section pins for ~1700px while the three moves highlight in turn and the stage acts them out — full mix recedes → four stems fan out (vocals/guitar/bass/drums with per-part waveforms) → transport appears, vocals mute, guitar solos with a verdigris ring. All initial states applied inside the GSAP desktop branch only, so mobile / reduced-motion / no-JS render the finished bench statically (in-view `Reveal` everywhere else)
+- [x] Live micro-detail layer: StudioGlimpse transport now ticks — timecode 1:28→1:43 with a glowing playhead looping the passage the "Loop · Verse 1" chip points at; hero annotation pills drift on slow sine floats
+- [x] `gsap.matchMedia` tiers: desktop+motion = pin/scrub + film; <861px = static scenes, film hidden (CSS); `prefers-reduced-motion` = fully static, film hidden, no ticking
+- [x] Film infrastructure: `FilmLayer.tsx` (muted/loop/playsInline, hard grade via CSS filter + `.film-grade` vignette toward warm-lamplight-on-near-black, self-hides via `onError` when no clip exists) wired behind the hero; `public/marketing/film/README.md` holds the clip spec
+- [ ] **User curation:** pick + license 3–5 stock clips per the README spec, drop `hero.mp4` in `public/marketing/film/`
 
 ### Phase 3 — it sounds  `[ ] not started`
 - [ ] Produce the song: owned recording → Octave pipeline → stems exported
@@ -87,3 +89,4 @@ The current landing page has the right ideas conceptually but fails on four fron
 
 - 2026-06-11 — Grill session complete; 15 decisions locked; doc created. Awaiting approval to begin Phase 1.
 - 2026-06-11 — Phase 1 shipped and user-verified in the browser: dark lamplit theme, 5-scene restructure, full copy rewrite, Octavia demoted, waitlist persisted end-to-end. NOTE: the Supabase SQL file must be run manually in the SQL editor before production signups will save. Disk hit 100% mid-work (one write failed); freed ~2.2GB by deleting the project's `.next`. Typecheck + lint clean. Phase 2 begun.
+- 2026-06-11 — Phase 2 code complete (commit follows Phase 1's `6d6b30b`): pinned bench sequence, ticking transport, floating annotations, matchMedia tiers, film-layer infra with clip spec. Typecheck, lint, and production build clean (`/` static, `/api/waitlist` dynamic). Remaining Phase 2 item is user-side: license and drop the stock clips. Phase 3 (sound) blocked on the user's own recording run through Octave for stems.

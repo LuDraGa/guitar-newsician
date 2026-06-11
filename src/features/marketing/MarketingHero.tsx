@@ -3,19 +3,47 @@
 /* ============================================================
    Marketing landing — Hero (scene 1: the gap). Problem-first:
    the headline names the pain, the sub resolves it, one field
-   converts. The Studio glimpse sits alongside as quiet proof.
+   converts. The Studio glimpse sits alongside as quiet proof,
+   its annotations drifting gently; the atmosphere film (when a
+   licensed clip exists) plays graded behind the whole scene.
    ============================================================ */
+import { useRef } from 'react';
+
 import { HERO } from './marketing-content';
 import { EmailCapture, HeroAnnot, Reveal } from './MarketingPrimitives';
+import { FilmLayer } from './FilmLayer';
 import { Icon } from './MarketingIcon';
 import { StudioGlimpse } from './StudioGlimpse';
+import { gsap, useGSAP } from './gsap';
 
 export function MarketingHero({ onJoined }: { onJoined: (email: string) => void }) {
+  const scope = useRef<HTMLElement>(null);
+
+  useGSAP(
+    () => {
+      const mm = gsap.matchMedia();
+      mm.add('(prefers-reduced-motion: no-preference)', () => {
+        gsap.to('.annot-float', {
+          y: -6,
+          duration: (i) => 2.8 + i * 0.7,
+          ease: 'sine.inOut',
+          yoyo: true,
+          repeat: -1,
+          stagger: { each: 0.45 },
+        });
+      });
+    },
+    { scope },
+  );
+
   return (
-    <section className="section" style={{ paddingTop: 56, paddingBottom: 72 }}>
+    <section ref={scope} className="section" style={{ position: 'relative', paddingTop: 56, paddingBottom: 72 }}>
+      <FilmLayer src="/marketing/film/hero.mp4" opacity={0.4} />
       <div
         className="wrap hero-grid"
         style={{
+          position: 'relative',
+          zIndex: 1,
           display: 'grid',
           gridTemplateColumns: 'minmax(0, 1.05fr) minmax(0, 0.95fr)',
           gap: 56,
@@ -50,13 +78,13 @@ export function MarketingHero({ onJoined }: { onJoined: (email: string) => void 
 
         <Reveal delay={140} className="hero-art" style={{ position: 'relative' }}>
           <StudioGlimpse />
-          <div style={{ position: 'absolute', top: -16, right: -10 }}>
+          <div className="annot-float" style={{ position: 'absolute', top: -16, right: -10 }}>
             <HeroAnnot live>Stems ready</HeroAnnot>
           </div>
-          <div style={{ position: 'absolute', bottom: 64, left: -34 }}>
+          <div className="annot-float" style={{ position: 'absolute', bottom: 64, left: -34 }}>
             <HeroAnnot>Loop the hard bar</HeroAnnot>
           </div>
-          <div style={{ position: 'absolute', bottom: -16, right: 22 }}>
+          <div className="annot-float" style={{ position: 'absolute', bottom: -16, right: 22 }}>
             <HeroAnnot>Ask Maestro</HeroAnnot>
           </div>
         </Reveal>

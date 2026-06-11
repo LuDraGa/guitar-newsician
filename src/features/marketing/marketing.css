@@ -230,6 +230,65 @@ html:has(.marketing) {
   }
 }
 
+/* bench scene (scene 2) — pinned + scrubbed on desktop, stacked on mobile */
+.marketing .bench-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 56px;
+  align-items: center;
+}
+
+@media (min-width: 861px) {
+  .marketing .bench-pin {
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 48px 0;
+  }
+}
+
+@media (max-width: 860px) {
+  .marketing .bench-pin {
+    padding: 64px 0 0;
+  }
+  .marketing .bench-grid {
+    grid-template-columns: 1fr;
+    gap: 36px;
+  }
+}
+
+/* atmosphere film layer — graded toward warm-lamplight-on-near-black.
+   Hidden on small screens (bandwidth) and under reduced motion. */
+.marketing .film-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.marketing .film-layer video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.5) saturate(0.8) contrast(1.1) sepia(0.22);
+}
+
+.marketing .film-layer .film-grade {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 90% at 20% 0%, transparent 30%, oklch(0.14 0.01 55 / 0.88) 78%),
+    linear-gradient(oklch(0.14 0.01 55 / 0.45), oklch(0.14 0.01 55 / 0.92));
+}
+
+@media (max-width: 860px), (prefers-reduced-motion: reduce) {
+  .marketing .film-layer {
+    display: none;
+  }
+}
+
 /* responsive layout helpers */
 .marketing .nav-links a {
   white-space: nowrap;

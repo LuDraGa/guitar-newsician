@@ -1,13 +1,26 @@
 'use client';
 
 /* ============================================================
-   StudioGlimpse — a faithful, static mini-mock of the in-product
-   Studio, reused as hero imagery. Self-contained.
+   StudioGlimpse — a faithful mini-mock of the in-product Studio,
+   reused as hero imagery. The transport ticks (timecode + playhead
+   looping over a 15s passage) when motion is allowed, so the bench
+   reads as live rather than a screenshot. Self-contained.
    ============================================================ */
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 
 import { Icon } from './MarketingIcon';
 import { CoverArt, waveBars } from './MarketingPrimitives';
+import { gsap, useGSAP } from './gsap';
+
+const SONG_LENGTH = 289; // 4:49
+const LOOP_FROM = 88; // 1:28
+const LOOP_TO = 103; // 1:43 — the looped passage the chip points at
+
+function formatTime(t: number) {
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 
 function MiniStem({
   name,
@@ -90,8 +103,33 @@ export function StudioGlimpse({ compact = false }: { compact?: boolean }) {
   const sections = ['Intro', 'Verse 1', 'Pre', 'Chorus', 'Verse 2', 'Bridge', 'Outro'];
   const active = 1;
   const bars = useMemo(() => waveBars(42, compact ? 56 : 76), [compact]);
+  const scope = useRef<HTMLDivElement>(null);
+  const timeRef = useRef<HTMLSpanElement>(null);
+  const headRef = useRef<HTMLSpanElement>(null);
+
+  useGSAP(
+    () => {
+      const mm = gsap.matchMedia();
+      mm.add('(prefers-reduced-motion: no-preference)', () => {
+        const clock = { t: LOOP_FROM };
+        gsap.to(clock, {
+          t: LOOP_TO,
+          duration: LOOP_TO - LOOP_FROM,
+          ease: 'none',
+          repeat: -1,
+          onUpdate: () => {
+            if (timeRef.current) timeRef.current.textContent = formatTime(clock.t);
+            if (headRef.current) headRef.current.style.left = `${((clock.t / SONG_LENGTH) * 100).toFixed(3)}%`;
+          },
+        });
+      });
+    },
+    { scope },
+  );
+
   return (
     <div
+      ref={scope}
       className="surface"
       style={{ padding: compact ? 16 : 20, display: 'flex', flexDirection: 'column', gap: 14, fontFamily: 'var(--font-sans)' }}
     >
@@ -161,9 +199,9 @@ export function StudioGlimpse({ compact = false }: { compact?: boolean }) {
       </div>
 
       {/* waveform + transport */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 46 }}>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: 2, height: 46 }}>
         {bars.map((b, i) => {
-          const played = i / bars.length < 0.31;
+          const played = i / bars.length < LOOP_FROM / SONG_LENGTH;
           // Round to a fixed precision: the browser rounds long-float style
           // values when it reflects them, which would otherwise read as an
           // SSR/client hydration mismatch on every bar.
@@ -174,6 +212,20 @@ export function StudioGlimpse({ compact = false }: { compact?: boolean }) {
             />
           );
         })}
+        <span
+          ref={headRef}
+          aria-hidden
+          style={{
+            position: 'absolute',
+            top: -2,
+            bottom: -2,
+            left: `${((LOOP_FROM / SONG_LENGTH) * 100).toFixed(3)}%`,
+            width: 2,
+            borderRadius: 2,
+            background: 'var(--accent)',
+            boxShadow: '0 0 10px oklch(0.7 0.14 58 / 0.5)',
+          }}
+        />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
         <span
@@ -190,7 +242,8 @@ export function StudioGlimpse({ compact = false }: { compact?: boolean }) {
           <Icon name="play" size={17} />
         </span>
         <span className="mono tnum" style={{ fontSize: 14, fontWeight: 700 }}>
-          1:28<span style={{ color: 'var(--faint)' }}> / 4:49</span>
+          <span ref={timeRef}>1:28</span>
+          <span style={{ color: 'var(--faint)' }}> / 4:49</span>
         </span>
         <span style={{ flex: 1 }} />
         <span className="chip" style={{ height: 27 }}>
