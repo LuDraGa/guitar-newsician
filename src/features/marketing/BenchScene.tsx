@@ -2,19 +2,21 @@
 
 /* ============================================================
    Scene 2 — TheBench. Desktop with motion allowed: the scene pins
-   and a scrubbed timeline walks the three moves while the stage
-   acts them out — the full mix recedes, stems fan out, then the
-   transport appears and one part solos. Mobile / reduced-motion /
-   no-JS: nothing is ever hidden by CSS — every "initial" state is
-   applied inside the GSAP desktop branch only, so the static page
-   simply shows the finished bench.
+   and scroll picks one of three beats — full mix, stems apart,
+   transport + solo. The timeline then plays to that beat at its
+   own pace (tweenTo), so a fast flick can never smear or skip the
+   in-between states; it just changes the destination. Scroll snaps
+   to the beat positions so the scene always comes to rest composed.
+   Mobile / reduced-motion / no-JS: nothing is ever hidden by CSS —
+   every "initial" state is applied inside the GSAP desktop branch
+   only, so the static page simply shows the finished bench.
    ============================================================ */
 import { useRef } from 'react';
 
 import { BENCH_MOVES, CAPABILITIES } from './marketing-content';
 import { Icon } from './MarketingIcon';
 import { Reveal, SectionHead, waveBars } from './MarketingPrimitives';
-import { gsap, useGSAP } from './gsap';
+import { ScrollTrigger, gsap, useGSAP } from './gsap';
 
 /* ---------- stage pieces ---------- */
 function MiniWave({ seed, n, color, height = 26 }: { seed: number; n: number; color: string; height?: number }) {
@@ -169,35 +171,64 @@ export function TheBench() {
         gsap.set('.stage-meta', { opacity: 0, y: 6 });
         gsap.set('.stage-transport', { opacity: 0, y: 10 });
 
-        const tl = gsap.timeline({
-          scrollTrigger: {
-            trigger: '.bench-pin',
-            start: 'top top',
-            end: '+=1700',
-            pin: true,
-            scrub: 0.6,
-            anticipatePin: 1,
+        // Scroll no longer scrubs properties directly — it only chooses
+        // a beat, and tweenTo plays the paused timeline to that label at
+        // its own pace. A trackpad flick changes the destination, never
+        // the path, so intermediate states can't be skipped or smeared.
+        const tl = gsap.timeline({ paused: true, defaults: { ease: 'power2.inOut' } });
+
+        // beat 0 → 1: it comes apart
+        tl.addLabel('mix')
+          .to(moves[0], { opacity: 0.35, duration: 0.3 }, 0)
+          .to(moves[1], { opacity: 1, duration: 0.3 }, 0)
+          .to('.stage-mix', { opacity: 0.35, duration: 0.45 }, 0)
+          .to('.stem-lane', { opacity: 1, y: 0, scaleY: 1, stagger: 0.12, duration: 0.5 }, 0.05)
+          .to('.stage-meta', { opacity: 1, y: 0, duration: 0.3 }, 0.45)
+          .addLabel('apart');
+
+        // beat 1 → 2: play it in
+        tl.to(moves[1], { opacity: 0.35, duration: 0.3 }, 'apart')
+          .to(moves[2], { opacity: 1, duration: 0.3 }, 'apart')
+          .to('.lane-vocals', { opacity: 0.38, duration: 0.35 }, 'apart')
+          .to('.lane-ring', { opacity: 1, duration: 0.35 }, 'apart+=0.1')
+          .to('.stage-transport', { opacity: 1, y: 0, duration: 0.4 }, 'apart+=0.15')
+          .addLabel('play');
+
+        const beats = ['mix', 'apart', 'play'] as const;
+        let beat = 0;
+        let beatTween: ReturnType<typeof tl.tweenTo> | null = null;
+
+        const goTo = (next: number) => {
+          if (next === beat) return;
+          beat = next;
+          beatTween?.kill();
+          beatTween = tl.tweenTo(beats[next], { ease: 'power2.inOut' });
+        };
+
+        const st = ScrollTrigger.create({
+          trigger: '.bench-pin',
+          start: 'top top',
+          end: '+=1700',
+          pin: true,
+          anticipatePin: 1,
+          // rest only on a beat, so stopping mid-scroll still composes
+          snap: {
+            snapTo: [0, 0.5, 1],
+            duration: { min: 0.2, max: 0.5 },
+            delay: 0.1,
+            ease: 'power1.inOut',
           },
+          onUpdate: (self) => goTo(self.progress < 0.25 ? 0 : self.progress < 0.75 ? 1 : 2),
+          onLeave: () => goTo(2),
+          onLeaveBack: () => goTo(0),
         });
 
-        // beat 1 → 2: it comes apart
-        tl.to({}, { duration: 0.3 }) // hold on "bring a song"
-          .addLabel('apart')
-          .to(moves[0], { opacity: 0.35, duration: 0.2 }, 'apart')
-          .to(moves[1], { opacity: 1, duration: 0.2 }, 'apart')
-          .to('.stage-mix', { opacity: 0.35, duration: 0.35 }, 'apart')
-          .to('.stem-lane', { opacity: 1, y: 0, scaleY: 1, stagger: 0.12, duration: 0.5 }, 'apart+=0.05')
-          .to('.stage-meta', { opacity: 1, y: 0, duration: 0.3 }, 'apart+=0.45')
-          .to({}, { duration: 0.3 }); // hold on the fanned stems
-
-        // beat 2 → 3: play it in
-        tl.addLabel('play')
-          .to(moves[1], { opacity: 0.35, duration: 0.2 }, 'play')
-          .to(moves[2], { opacity: 1, duration: 0.2 }, 'play')
-          .to('.lane-vocals', { opacity: 0.38, duration: 0.3 }, 'play')
-          .to('.lane-ring', { opacity: 1, duration: 0.3 }, 'play+=0.1')
-          .to('.stage-transport', { opacity: 1, y: 0, duration: 0.35 }, 'play+=0.15')
-          .to({}, { duration: 0.4 }); // hold the finished bench before unpinning
+        // page may load (or resize into this breakpoint) already past the
+        // scene — jump straight to the right beat instead of animating
+        if (st.progress > 0) {
+          beat = st.progress < 0.25 ? 0 : st.progress < 0.75 ? 1 : 2;
+          tl.seek(beats[beat]);
+        }
       });
     },
     { scope },
