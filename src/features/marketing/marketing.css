@@ -374,6 +374,61 @@ html:has(.marketing) {
   }
 }
 
+/* maestro chat player (scene 3) — turns enter in place; thinking dots
+   reuse the concierge-typing keyframes */
+@keyframes maestro-turn-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.marketing .maestro-turn {
+  animation: maestro-turn-in 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.marketing .maestro-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.marketing .maestro-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 99px;
+  background: currentColor;
+  animation: concierge-typing 1.1s ease-in-out infinite;
+}
+
+.marketing .maestro-dots span:nth-child(2) {
+  animation-delay: 0.14s;
+}
+
+.marketing .maestro-dots span:nth-child(3) {
+  animation-delay: 0.28s;
+}
+
+.marketing .maestro-cta {
+  transition: transform 0.14s ease;
+}
+
+.marketing .maestro-cta.pressing {
+  transform: scale(0.93);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketing .maestro-turn {
+    animation: none;
+  }
+  .marketing .maestro-dots span {
+    animation: none;
+  }
+}
+
 /* smooth anchor scroll only while the landing is mounted */
 html:has(.marketing) {
   scroll-behavior: smooth;

@@ -104,14 +104,14 @@ function answerFor(query: string): Message {
   if (isOutOfGuardrails(q))
     return {
       role: 'bot',
-      text: "Octave is for learning from music you own — so I can't help with pirating, ripping to redistribute, or reselling recordings. If you own the audio and want to take it apart and actually play it, that's exactly what it's built for.",
+      text: "Octave is for learning from music you own, so I can't help with pirating, ripping to redistribute, or reselling recordings. If you own the audio and want to take it apart and actually play it, that's exactly what it's built for.",
       sources: [],
     };
 
   if (/^(hi|hey|hello|yo|sup|howdy|gm|good (morning|evening|afternoon))\b/.test(q))
     return {
       role: 'bot',
-      text: "Hey. Ask me how Octave works, what it transcribes, who it's for, what it'll cost — or anything music-side (theory, transcription, the analysis under the hood).",
+      text: "Hey. Ask me how Octave works, what it transcribes, who it's for, what it'll cost, or anything music-side (theory, transcription, the analysis under the hood).",
       sources: [],
     };
   if (/(thank|thanks|cheers|appreciate|ty)\b/.test(q))
@@ -121,7 +121,7 @@ function answerFor(query: string): Message {
   if (wantsHuman(q))
     return {
       role: 'bot',
-      text: `Of course — the team's the right people for that. They read everything during the soft launch; reach them through the links in the footer, or at ${BRAND.email}.`,
+      text: `Of course. The team's the right people for that. They read everything during the soft launch; reach them through the links in the footer, or at ${BRAND.email}.`,
       sources: [],
       cta: 'contact',
     };
@@ -141,7 +141,7 @@ function answerFor(query: string): Message {
   if (onTopic)
     return {
       role: 'bot',
-      text: `That's a fair question, but it's past what I can answer confidently — I'd rather not guess. The team can give you a straight answer; reach them through the links in the footer, or at ${BRAND.email}.`,
+      text: `That's a fair question, but it's past what I can answer confidently, and I'd rather not guess. The team can give you a straight answer; reach them through the links in the footer, or at ${BRAND.email}.`,
       sources: [],
       cta: 'contact',
     };
@@ -222,7 +222,7 @@ export function Concierge() {
   const [msgs, setMsgs] = useState<Message[]>([
     {
       role: 'bot',
-      text: "Hey — ask me anything about Octave: how it works, what it transcribes, who it's for, what it'll cost. What do you want to know?",
+      text: "Hey. Ask me anything about Octave: how it works, what it transcribes, who it's for, what it'll cost. What do you want to know?",
       sources: [],
     },
   ]);

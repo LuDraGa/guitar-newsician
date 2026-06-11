@@ -3,43 +3,18 @@
 /* ============================================================
    Marketing landing — middle scenes 3 and 4 (scene 2, TheBench,
    lives in BenchScene.tsx with its pinned scroll sequence):
-   3. MaestroScene — the coach, shown as a real exchange, with the
+   3. MaestroScene — the coach, shown as a living chat (seven
+      conversations that play out in MaestroChat.tsx), with the
       mid-page capture moment.
    4. FitAndFaq — who it's for + five questions.
    ============================================================ */
 import { useState } from 'react';
 
-import { FAQS, MAESTRO, MAESTRO_EXCHANGE, WHO } from './marketing-content';
+import { FAQS, MAESTRO, WHO } from './marketing-content';
 import { Icon } from './MarketingIcon';
+import { MaestroChatPlayer } from './MaestroChat';
 import { EmailCapture, Reveal, SectionHead } from './MarketingPrimitives';
 import { OPEN_CONCIERGE_EVENT } from './marketing-events';
-
-/* ---------- scene 3: maestro ---------- */
-function MaestroBubble({ role, text, delay }: { role: 'you' | 'maestro'; text: string; delay: number }) {
-  const isCoach = role === 'maestro';
-  return (
-    <Reveal delay={delay}>
-      <div style={{ display: 'flex', justifyContent: isCoach ? 'flex-start' : 'flex-end' }}>
-        <div
-          style={{
-            maxWidth: '86%',
-            padding: '12px 15px',
-            borderRadius: 16,
-            borderBottomLeftRadius: isCoach ? 5 : 16,
-            borderBottomRightRadius: isCoach ? 16 : 5,
-            fontSize: 15,
-            lineHeight: 1.5,
-            background: isCoach ? 'var(--card-2)' : 'var(--ink)',
-            color: isCoach ? 'var(--ink)' : 'var(--paper)',
-            boxShadow: isCoach ? 'inset 0 0 0 1px var(--line-2)' : 'none',
-          }}
-        >
-          {text}
-        </div>
-      </div>
-    </Reveal>
-  );
-}
 
 export function MaestroScene({ onJoined }: { onJoined: (email: string) => void }) {
   return (
@@ -88,22 +63,7 @@ export function MaestroScene({ onJoined }: { onJoined: (email: string) => void }
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>In the Studio, next to the transport</div>
               </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {MAESTRO_EXCHANGE.map((t, i) => (
-                <MaestroBubble key={i} role={t.role} text={t.text} delay={140 + i * 90} />
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', paddingTop: 4 }}>
-              <span className="chip" style={{ height: 26 }}>
-                <Icon name="gauge" size={12} /> 0.5×
-              </span>
-              <span className="chip accent" style={{ height: 26 }}>
-                <Icon name="loop" size={12} /> Chorus
-              </span>
-              <span className="chip live" style={{ height: 26 }}>
-                Key of C · Capo 2
-              </span>
-            </div>
+            <MaestroChatPlayer />
           </div>
         </Reveal>
       </div>
@@ -161,56 +121,29 @@ function FAQItem({ item, open, onToggle }: { item: { q: string; a: string }; ope
 }
 
 export function FitAndFaq() {
-  const [open, setOpen] = useState(0);
+  const [open, setOpen] = useState(-1);
   return (
     <section id="fit" className="section">
       <div className="wrap">
         <SectionHead title="Is it for you?" />
         <div className="fit-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
           <Reveal className="surface" style={{ padding: 28 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-              <span
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 99,
-                  background: 'var(--live-soft)',
-                  color: 'var(--live-ink)',
-                  display: 'grid',
-                  placeItems: 'center',
-                }}
-              >
-                <Icon name="check" size={17} />
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18, paddingLeft:28}}>
               <span className="label" style={{ color: 'var(--live-ink)' }}>
                 Yes, if
               </span>
             </div>
             <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
               {WHO.forYou.map((x, i) => (
-                <li key={i} style={{ display: 'flex', gap: 11, fontSize: 16, lineHeight: 1.5 }}>
-                  <Icon name="check" size={18} style={{ color: 'var(--live)', flexShrink: 0, marginTop: 2 }} />
+                <li key={i} style={{ display: 'flex', gap: 11, fontSize: 16, lineHeight: 1.5}}>
+                  <Icon name="check" size={17} style={{ color: 'var(--live)', flexShrink: 0, marginTop: 2 }} />
                   <span>{x}</span>
                 </li>
               ))}
             </ul>
           </Reveal>
           <Reveal delay={80} className="surface-flat" style={{ padding: 28 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-              <span
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 99,
-                  background: 'var(--card-2)',
-                  color: 'var(--faint)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  boxShadow: 'inset 0 0 0 1px var(--line-2)',
-                }}
-              >
-                <Icon name="x" size={15} />
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18, paddingLeft:28}}>
               <span className="label">Not yet, if</span>
             </div>
             <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -226,7 +159,7 @@ export function FitAndFaq() {
 
         {/* five questions, same scene */}
         <div id="faq" style={{ marginTop: 72 }}>
-          <SectionHead title="Questions" />
+          <SectionHead title="FAQ" />
           <div style={{ borderBottom: '1px solid var(--line)' }}>
             {FAQS.map((f, i) => (
               <FAQItem key={i} item={f} open={open === i} onToggle={() => setOpen(open === i ? -1 : i)} />

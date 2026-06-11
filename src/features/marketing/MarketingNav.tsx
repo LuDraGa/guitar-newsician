@@ -3,7 +3,6 @@
 /* ============================================================
    Marketing landing — top nav (sticky, frosts on scroll).
    ============================================================ */
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { Logo, Pill } from './MarketingPrimitives';
@@ -66,30 +65,6 @@ export function MarketingNav({ onJoin }: { onJoin: () => void }) {
           ))}
         </nav>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Link
-            href="/app/library"
-            className="wc-hide-mobile"
-            aria-label="Open the app"
-            style={{
-              padding: '9px 14px',
-              borderRadius: 99,
-              fontSize: 14,
-              fontWeight: 600,
-              color: 'var(--muted)',
-              whiteSpace: 'nowrap',
-              transition: 'color 0.15s, background 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'var(--ink)';
-              e.currentTarget.style.background = 'var(--card)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--muted)';
-              e.currentTarget.style.background = 'transparent';
-            }}
-          >
-            Open the app
-          </Link>
           <Pill icon="arrowR" variant="accent" className="sm" onClick={onJoin}>
             Join the waitlist
           </Pill>

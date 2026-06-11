@@ -39,7 +39,7 @@ function Labeled({ label, children }: { label: string; children: React.ReactNode
 function ErrorNote() {
   return (
     <span role="alert" style={{ fontSize: 13.5, color: 'oklch(0.75 0.13 40)' }}>
-      That didn’t save — give it another try in a moment.
+      That didn’t save. Give it another try in a moment.
     </span>
   );
 }
@@ -169,7 +169,7 @@ export function WaitlistModal({
 
             <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
               <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)', lineHeight: 1.5 }}>
-                Want your first session tailored? Tap what fits — every field is optional.
+                Want your first session tailored? Tap what fits. Every field is optional.
               </p>
               <Labeled label="Main instrument">
                 <ChoiceRow options={INSTRUMENTS} value={d.instrument} onChange={set('instrument')} />
@@ -189,7 +189,7 @@ export function WaitlistModal({
               {detailsSaved ? (
                 <>
                   <span className="chip live" style={{ height: 34, fontSize: 13.5 }}>
-                    <Icon name="check" size={14} /> Saved — see you at the bench.
+                    <Icon name="check" size={14} /> Saved. See you at the bench.
                   </span>
                   <Pill variant="ghost" className="sm" type="button" onClick={onClose}>
                     Done

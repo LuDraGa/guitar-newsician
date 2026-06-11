@@ -13,7 +13,7 @@
    ============================================================ */
 import { useRef } from 'react';
 
-import { BENCH_MOVES, CAPABILITIES } from './marketing-content';
+import { BENCH_MOVES, CAPABILITIES, JOURNEY } from './marketing-content';
 import { Icon } from './MarketingIcon';
 import { Reveal, SectionHead, waveBars } from './MarketingPrimitives';
 import { ScrollTrigger, gsap, useGSAP } from './gsap';
@@ -258,6 +258,36 @@ export function TheBench() {
 
       {/* what's on the bench — compact, one line per tool */}
       <div className="wrap section" style={{ paddingTop: 56 }}>
+        {/* the ladder — how deep one recording goes */}
+        <Reveal>
+          <div
+            className="surface-flat"
+            style={{
+              padding: '16px 20px',
+              marginBottom: 14,
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 10,
+            }}
+          >
+            <span className="label">{JOURNEY.label}</span>
+            {JOURNEY.steps.map((step, i) => (
+              <span key={step} style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                {i > 0 && (
+                  <span aria-hidden style={{ display: 'inline-flex', color: 'var(--faint)' }}>
+                    <Icon name="arrowR" size={13} />
+                  </span>
+                )}
+                <span className="chip" style={{ height: 28, fontSize: 13 }}>
+                  {step}
+                </span>
+              </span>
+            ))}
+            <span style={{ fontSize: 14, color: 'var(--muted)' }}>{JOURNEY.coda}</span>
+          </div>
+        </Reveal>
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
           {CAPABILITIES.map((c, i) => (
             <Reveal key={c.tag} delay={(i % 3) * 60}>

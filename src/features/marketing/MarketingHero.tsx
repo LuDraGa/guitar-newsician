@@ -55,10 +55,10 @@ export function MarketingHero({ onJoined }: { onJoined: (email: string) => void 
             <span className="eyebrow">{HERO.eyebrow}</span>
           </Reveal>
           <Reveal delay={60}>
-            <h1 className="display" style={{ fontSize: 'clamp(42px, 5.8vw, 76px)', margin: '20px 0 0', maxWidth: 640 }}>
-              You can play.
+            <h1 className="display" style={{ fontSize: 'clamp(36px, 5.8vw, 64px)', margin: '20px 0 0', maxWidth: 640 }}>
+              Get that song out of your head and
               <br />
-              So why can’t you play <span style={{ color: 'var(--accent-ink)', whiteSpace: 'nowrap' }}>that song?</span>
+              <span style={{ color: 'var(--accent-ink)' }}>onto your guitar.</span>
             </h1>
           </Reveal>
           <Reveal delay={120}>

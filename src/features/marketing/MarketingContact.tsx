@@ -63,7 +63,7 @@ export function Footer({ onJoin }: { onJoin: () => void }) {
             {BRAND.tagline} A bench for players who already play.
           </p>
           <p style={{ marginTop: 10, fontSize: 13.5, color: 'var(--faint)', maxWidth: 280, lineHeight: 1.5 }}>
-            During the soft launch you’re talking straight to the makers — we read everything.
+            During the soft launch you’re talking straight to the makers. We read everything.
           </p>
           <button className="pill ghost sm" style={{ marginTop: 18 }} onClick={onJoin}>
             <span className="dot">

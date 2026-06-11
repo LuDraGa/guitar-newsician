@@ -263,7 +263,7 @@ export function EmailCapture({
       </Pill>
       {failed && (
         <span role="alert" style={{ flexBasis: '100%', fontSize: 13.5, color: 'oklch(0.75 0.13 40)' }}>
-          That didn’t save — give it another try in a moment.
+          That didn’t save. Give it another try in a moment.
         </span>
       )}
     </form>
