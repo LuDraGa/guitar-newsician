@@ -1,10 +1,13 @@
 'use client';
 
 /* ============================================================
-   Marketing landing — floating Concierge widget (Octavia).
+   Marketing landing — floating Concierge widget.
    Buyer/customer-facing: it answers "what is this, is it for me,
    what does it cost" for a prospect who hasn't signed up. This is
    NOT the in-product Studio coach — it's a concierge for the site.
+   Unnamed in marketing (Maestro is the only agent the page sells);
+   it introduces itself as Octavia only if a visitor asks who it is
+   (kb/concierge).
 
    Retrieval is a deterministic keyword scorer over the local KB
    (a stand-in for embeddings) — no LLM, no backend, so it can only
@@ -108,7 +111,7 @@ function answerFor(query: string): Message {
   if (/^(hi|hey|hello|yo|sup|howdy|gm|good (morning|evening|afternoon))\b/.test(q))
     return {
       role: 'bot',
-      text: "Hey — I'm Octavia, the Octave concierge. Ask me how the product works, what it transcribes, who it's for, what it'll cost, or anything music-side (theory, transcription, the analysis under the hood).",
+      text: "Hey. Ask me how Octave works, what it transcribes, who it's for, what it'll cost — or anything music-side (theory, transcription, the analysis under the hood).",
       sources: [],
     };
   if (/(thank|thanks|cheers|appreciate|ty)\b/.test(q))
@@ -118,7 +121,7 @@ function answerFor(query: string): Message {
   if (wantsHuman(q))
     return {
       role: 'bot',
-      text: `Of course — the team's the right people for that. They read everything during the soft launch; reach them in the Contact section just below, or at ${BRAND.email}.`,
+      text: `Of course — the team's the right people for that. They read everything during the soft launch; reach them through the links in the footer, or at ${BRAND.email}.`,
       sources: [],
       cta: 'contact',
     };
@@ -138,7 +141,7 @@ function answerFor(query: string): Message {
   if (onTopic)
     return {
       role: 'bot',
-      text: `That's a fair question, but it's past what I can answer confidently — I'd rather not guess. The team can give you a straight answer; reach them in the Contact section below, or at ${BRAND.email}.`,
+      text: `That's a fair question, but it's past what I can answer confidently — I'd rather not guess. The team can give you a straight answer; reach them through the links in the footer, or at ${BRAND.email}.`,
       sources: [],
       cta: 'contact',
     };
@@ -146,7 +149,7 @@ function answerFor(query: string): Message {
   // Off-topic and harmless → say what I actually cover.
   return {
     role: 'bot',
-    text: "I'm Octavia, the Octave concierge — I stick to the product and the music side of it: how it works, what it transcribes, who it's for, pricing, and the analysis under the hood. Ask me anything there and I've got you.",
+    text: "I stick to Octave and the music side of it: how it works, what it transcribes, who it's for, pricing, and the analysis under the hood. Ask me anything there and I've got you.",
     sources: [],
   };
 }
@@ -219,7 +222,7 @@ export function Concierge() {
   const [msgs, setMsgs] = useState<Message[]>([
     {
       role: 'bot',
-      text: "Hey — I'm Octavia, the Octave concierge. Ask me how it works, what it transcribes, who it's for, or what it'll cost. What do you want to know?",
+      text: "Hey — ask me anything about Octave: how it works, what it transcribes, who it's for, what it'll cost. What do you want to know?",
       sources: [],
     },
   ]);
@@ -264,7 +267,7 @@ export function Concierge() {
       {/* launcher (ink, not accent — the waitlist owns the one accent action) */}
       <button
         onClick={() => setOpen((o) => !o)}
-        aria-label="Ask Octavia"
+        aria-label="Ask about Octave"
         style={{
           position: 'fixed',
           right: 'clamp(16px, 3vw, 28px)',
@@ -287,7 +290,7 @@ export function Concierge() {
         }}
       >
         <Icon name={open ? 'x' : 'sparkles'} size={20} strokeWidth={2} />
-        {!open && <span>Ask Octavia</span>}
+        {!open && <span>Ask about Octave</span>}
       </button>
 
       {open && (
@@ -325,8 +328,8 @@ export function Concierge() {
               />
             </span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 15.5, fontWeight: 700, letterSpacing: '-0.01em' }}>Octavia</div>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Octave concierge</div>
+              <div style={{ fontSize: 15.5, fontWeight: 700, letterSpacing: '-0.01em' }}>Ask Octave</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>Product questions, answered</div>
             </div>
             <button className="iconbtn" onClick={() => setOpen(false)} aria-label="Close" style={{ width: 34, height: 34 }}>
               <Icon name="chevD" size={18} />
@@ -394,7 +397,7 @@ export function Concierge() {
             }}
             style={{ padding: 12, borderTop: '1px solid var(--line-2)', display: 'flex', gap: 8, alignItems: 'center' }}
           >
-            <input ref={inRef} value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask Octavia…" className="field" style={{ height: 44, flex: 1 }} />
+            <input ref={inRef} value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask about Octave…" className="field" style={{ height: 44, flex: 1 }} />
             <button
               type="submit"
               disabled={!input.trim() || typing}

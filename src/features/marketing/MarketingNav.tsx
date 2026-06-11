@@ -6,17 +6,16 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-import { Icon } from './MarketingIcon';
 import { Logo, Pill } from './MarketingPrimitives';
 
 const LINKS: [string, string][] = [
-  ['#features', 'Features'],
-  ['#who', "Who it's for"],
+  ['#bench', 'How it works'],
+  ['#maestro', 'Maestro'],
+  ['#fit', "Who it's for"],
   ['#faq', 'FAQ'],
-  ['#contact', 'Contact'],
 ];
 
-export function MarketingNav({ onJoin }: { onJoin: (email: string) => void }) {
+export function MarketingNav({ onJoin }: { onJoin: () => void }) {
   const [solid, setSolid] = useState(false);
   useEffect(() => {
     const onScroll = () => setSolid(window.scrollY > 24);
@@ -30,7 +29,7 @@ export function MarketingNav({ onJoin }: { onJoin: (email: string) => void }) {
         position: 'sticky',
         top: 0,
         zIndex: 50,
-        background: solid ? 'oklch(0.945 0.006 75 / 0.82)' : 'transparent',
+        background: solid ? 'oklch(0.15 0.01 56 / 0.85)' : 'transparent',
         backdropFilter: solid ? 'blur(10px)' : 'none',
         boxShadow: solid ? '0 1px 0 var(--line-2)' : 'none',
         transition: 'background 0.25s, box-shadow 0.25s',
@@ -67,13 +66,31 @@ export function MarketingNav({ onJoin }: { onJoin: (email: string) => void }) {
           ))}
         </nav>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Link href="/app/library" className="pill ghost sm wc-hide-mobile" aria-label="Open the app">
-            <span className="dot">
-              <Icon name="arrowR" size={13} strokeWidth={2.1} />
-            </span>
+          <Link
+            href="/app/library"
+            className="wc-hide-mobile"
+            aria-label="Open the app"
+            style={{
+              padding: '9px 14px',
+              borderRadius: 99,
+              fontSize: 14,
+              fontWeight: 600,
+              color: 'var(--muted)',
+              whiteSpace: 'nowrap',
+              transition: 'color 0.15s, background 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = 'var(--ink)';
+              e.currentTarget.style.background = 'var(--card)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = 'var(--muted)';
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
             Open the app
           </Link>
-          <Pill icon="arrowR" variant="accent" className="sm" onClick={() => onJoin('')}>
+          <Pill icon="arrowR" variant="accent" className="sm" onClick={onJoin}>
             Join the waitlist
           </Pill>
         </div>

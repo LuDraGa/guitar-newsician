@@ -1,14 +1,16 @@
 'use client';
 
 /* ============================================================
-   Marketing landing — Hero ("The Bench": editorial, type-forward,
-   the Studio glimpse alongside). The committed hero direction.
+   Marketing landing — Hero (scene 1: the gap). Problem-first:
+   the headline names the pain, the sub resolves it, one field
+   converts. The Studio glimpse sits alongside as quiet proof.
    ============================================================ */
+import { HERO } from './marketing-content';
 import { EmailCapture, HeroAnnot, Reveal } from './MarketingPrimitives';
 import { Icon } from './MarketingIcon';
 import { StudioGlimpse } from './StudioGlimpse';
 
-export function MarketingHero({ onJoin }: { onJoin: (email: string) => void }) {
+export function MarketingHero({ onJoined }: { onJoined: (email: string) => void }) {
   return (
     <section className="section" style={{ paddingTop: 56, paddingBottom: 72 }}>
       <div
@@ -22,29 +24,26 @@ export function MarketingHero({ onJoin }: { onJoin: (email: string) => void }) {
       >
         <div>
           <Reveal>
-            <span className="eyebrow">For players past the basics</span>
+            <span className="eyebrow">{HERO.eyebrow}</span>
           </Reveal>
           <Reveal delay={60}>
-            <h1 className="display" style={{ fontSize: 'clamp(46px, 6.4vw, 84px)', margin: '20px 0 0', maxWidth: 620 }}>
-              Take any song
+            <h1 className="display" style={{ fontSize: 'clamp(42px, 5.8vw, 76px)', margin: '20px 0 0', maxWidth: 640 }}>
+              You can play.
               <br />
-              to the <span style={{ color: 'var(--accent-ink)' }}>woodshed.</span>
+              So why can’t you play <span style={{ color: 'var(--accent-ink)', whiteSpace: 'nowrap' }}>that song?</span>
             </h1>
           </Reveal>
           <Reveal delay={120}>
-            <p style={{ marginTop: 22, fontSize: 18.5, lineHeight: 1.55, color: 'var(--muted)', maxWidth: 480 }}>
-              You can already play. Octave pulls any recording apart — isolated stems, chords, tab, and sheet — with
-              Maestro, an agent that talks you through the hard parts in plain language. Learn the song, not just the
-              notes.
+            <p style={{ marginTop: 22, fontSize: 18.5, lineHeight: 1.55, color: 'var(--muted)', maxWidth: 470 }}>
+              {HERO.sub}
             </p>
           </Reveal>
           <Reveal delay={180} style={{ marginTop: 30 }}>
-            <EmailCapture onJoin={onJoin} />
+            <EmailCapture onJoined={onJoined} source="hero" />
             <div
               style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 9, fontSize: 13, color: 'var(--faint)' }}
             >
-              <Icon name="check" size={15} style={{ color: 'var(--live)' }} /> Soft launch · early seats opening · no
-              spam, just your invite.
+              <Icon name="check" size={15} style={{ color: 'var(--live)' }} /> {HERO.reassure}
             </div>
           </Reveal>
         </div>

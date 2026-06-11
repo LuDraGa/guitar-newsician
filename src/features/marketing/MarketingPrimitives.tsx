@@ -17,6 +17,7 @@ import {
 
 import { BRAND } from './marketing-content';
 import { Icon, type IconName } from './MarketingIcon';
+import { joinWaitlist, type WaitlistSource } from './waitlist-client';
 
 /* ---------- Pill ---------- */
 export function Pill({
@@ -201,18 +202,37 @@ export function CoverArt({ hue = 55, size = 56 }: { hue?: number; size?: number 
   );
 }
 
-/* ---------- low-friction email entry — hands off to the full waitlist ---------- */
+/* ---------- low-friction email entry ----------
+   Submitting joins the waitlist immediately (one field, one POST); the
+   optional profile questions only appear afterwards, on the success state
+   of the modal the parent opens via onJoined. */
 export function EmailCapture({
-  onJoin,
+  onJoined,
+  source,
   align = 'left',
 }: {
-  onJoin: (email: string) => void;
+  onJoined: (email: string) => void;
+  source: WaitlistSource;
   align?: 'left' | 'center';
 }) {
   const [email, setEmail] = useState('');
-  const submit = (e: React.FormEvent) => {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onJoin(email.trim());
+    const value = email.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setFailed(false);
+    try {
+      await joinWaitlist({ email: value, source });
+      onJoined(value);
+      setEmail('');
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
   };
   return (
     <form
@@ -235,11 +255,17 @@ export function EmailCapture({
         placeholder="you@email.com"
         aria-label="Email address"
         className="field"
+        disabled={busy}
         style={{ flex: '1 1 220px', minWidth: 0 }}
       />
-      <Pill icon="arrowR" variant="accent" type="submit">
-        Join the waitlist
+      <Pill icon="arrowR" variant="accent" type="submit" disabled={busy}>
+        {busy ? 'Joining…' : 'Join the waitlist'}
       </Pill>
+      {failed && (
+        <span role="alert" style={{ flexBasis: '100%', fontSize: 13.5, color: 'oklch(0.75 0.13 40)' }}>
+          That didn’t save — give it another try in a moment.
+        </span>
+      )}
     </form>
   );
 }

@@ -1,15 +1,19 @@
 'use client';
 
 /* ============================================================
-   Marketing landing — waitlist modal (low friction, progressive).
-   Email is the only required field; everything else is optional.
-   Submission is UI-only this pass (see TODO below).
+   Marketing landing — waitlist modal.
+   Two phases: "email" (only when opened from nav/footer; one
+   required field, submitting joins immediately) and "joined"
+   (the success state, where the optional profile questions live
+   as a one-tap follow-up). Inline captures elsewhere on the page
+   join first and open this modal directly on "joined".
    ============================================================ */
 import { useEffect, useRef, useState } from 'react';
 
 import { HEARD, INSTRUMENTS, SKILL_LEVELS } from './marketing-content';
 import { Icon } from './MarketingIcon';
 import { Pill } from './MarketingPrimitives';
+import { joinWaitlist } from './waitlist-client';
 
 function ChoiceRow({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
   return (
@@ -23,31 +27,40 @@ function ChoiceRow({ options, value, onChange }: { options: string[]; value: str
   );
 }
 
-function Labeled({ label, optional, children }: { label: string; optional?: boolean; children: React.ReactNode }) {
+function Labeled({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 14, fontWeight: 650, whiteSpace: 'nowrap' }}>{label}</span>
-        {optional && (
-          <span className="mono" style={{ fontSize: 10.5, color: 'var(--faint)', letterSpacing: '0.04em' }}>
-            optional
-          </span>
-        )}
-      </span>
+      <span style={{ fontSize: 14, fontWeight: 650, whiteSpace: 'nowrap' }}>{label}</span>
       {children}
     </div>
   );
 }
 
+function ErrorNote() {
+  return (
+    <span role="alert" style={{ fontSize: 13.5, color: 'oklch(0.75 0.13 40)' }}>
+      That didn’t save — give it another try in a moment.
+    </span>
+  );
+}
+
 /* Mounted only while open (the parent conditionally renders it), so initial
-   state comes straight from props and the entrance animation runs on mount —
-   no reset effect, no setState-in-effect. */
-export function WaitlistModal({ prefillEmail, onClose }: { prefillEmail: string; onClose: () => void }) {
+   state comes straight from props and the entrance animation runs on mount. */
+export function WaitlistModal({
+  prefillEmail,
+  startJoined,
+  onClose,
+}: {
+  prefillEmail: string;
+  startJoined: boolean;
+  onClose: () => void;
+}) {
+  const [phase, setPhase] = useState<'email' | 'joined'>(startJoined ? 'joined' : 'email');
   const [email, setEmail] = useState(prefillEmail);
   const [d, setD] = useState({ name: '', instrument: '', skill: '', song: '', heard: '' });
-  const [sent, setSent] = useState(false);
-  const [showOptional, setShowOptional] = useState(false);
-  const [pos] = useState(() => 1100 + Math.floor(Math.random() * 700));
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [detailsSaved, setDetailsSaved] = useState(false);
   const firstRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -66,6 +79,43 @@ export function WaitlistModal({ prefillEmail, onClose }: { prefillEmail: string;
 
   const set = (k: keyof typeof d) => (v: string) => setD((s) => ({ ...s, [k]: v }));
 
+  const submitEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const value = email.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setFailed(false);
+    try {
+      await joinWaitlist({ email: value, source: 'modal' });
+      setEmail(value);
+      setPhase('joined');
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitDetails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy || detailsSaved) return;
+    const hasAny = Object.values(d).some((v) => v.trim());
+    if (!hasAny) {
+      onClose();
+      return;
+    }
+    setBusy(true);
+    setFailed(false);
+    try {
+      await joinWaitlist({ email, ...d });
+      setDetailsSaved(true);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div
       onClick={onClose}
@@ -73,7 +123,7 @@ export function WaitlistModal({ prefillEmail, onClose }: { prefillEmail: string;
         position: 'fixed',
         inset: 0,
         zIndex: 90,
-        background: 'oklch(0.2 0.01 60 / 0.42)',
+        background: 'oklch(0.07 0.01 60 / 0.64)',
         backdropFilter: 'blur(4px)',
         display: 'flex',
         alignItems: 'flex-start',
@@ -90,64 +140,76 @@ export function WaitlistModal({ prefillEmail, onClose }: { prefillEmail: string;
         aria-label="Join the waitlist"
         style={{ width: '100%', maxWidth: 540, padding: 0, overflow: 'hidden' }}
       >
-        {sent ? (
-          <div style={{ padding: 36, textAlign: 'center' }}>
-            <span
-              style={{
-                width: 60,
-                height: 60,
-                borderRadius: 99,
-                background: 'var(--live-soft)',
-                color: 'var(--live-ink)',
-                display: 'grid',
-                placeItems: 'center',
-                margin: '0 auto',
-              }}
-            >
-              <Icon name="check" size={30} strokeWidth={2.2} />
-            </span>
-            <h2 className="display" style={{ fontSize: 30, margin: '20px 0 0' }}>
-              {"You're on the list."}
-            </h2>
-            <p style={{ margin: '14px auto 0', fontSize: 16, color: 'var(--muted)', maxWidth: 360, lineHeight: 1.55 }}>
-              {"We'll email "}
-              <strong style={{ color: 'var(--ink)' }}>{email}</strong>
-              {' the moment your seat opens. Early invitees help shape where the product — and pricing — lands.'}
-            </p>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 10,
-                margin: '24px 0 4px',
-                padding: '10px 18px',
-                borderRadius: 99,
-                background: 'var(--paper-2)',
-                boxShadow: 'inset 0 0 0 1px var(--line-2)',
-              }}
-            >
-              <span className="label" style={{ fontSize: 9.5 }}>
-                Your spot
+        {phase === 'joined' ? (
+          <form onSubmit={submitDetails}>
+            <div style={{ padding: '30px 28px 22px', textAlign: 'center', borderBottom: '1px solid var(--line-2)' }}>
+              <span
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 99,
+                  background: 'var(--live-soft)',
+                  color: 'var(--live-ink)',
+                  display: 'grid',
+                  placeItems: 'center',
+                  margin: '0 auto',
+                }}
+              >
+                <Icon name="check" size={28} strokeWidth={2.2} />
               </span>
-              <span className="mono tnum" style={{ fontSize: 18, fontWeight: 700 }}>
-                #{pos.toLocaleString()}
-              </span>
+              <h2 className="display" style={{ fontSize: 28, margin: '16px 0 0' }}>
+                {"You're on the list."}
+              </h2>
+              <p style={{ margin: '10px auto 0', fontSize: 15, color: 'var(--muted)', maxWidth: 380, lineHeight: 1.55 }}>
+                {"We'll email "}
+                <strong style={{ color: 'var(--ink)' }}>{email}</strong>
+                {' when your seat opens. Invites go out in order, through the soft launch.'}
+              </p>
             </div>
-            <div>
-              <Pill variant="ghost" className="sm" onClick={onClose} style={{ marginTop: 16 }}>
-                Back to the site
-              </Pill>
+
+            <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)', lineHeight: 1.5 }}>
+                Want your first session tailored? Tap what fits — every field is optional.
+              </p>
+              <Labeled label="Main instrument">
+                <ChoiceRow options={INSTRUMENTS} value={d.instrument} onChange={set('instrument')} />
+              </Labeled>
+              <Labeled label="Where you're at">
+                <ChoiceRow options={SKILL_LEVELS} value={d.skill} onChange={set('skill')} />
+              </Labeled>
+              <Labeled label="First song you'd bring">
+                <input className="field" value={d.song} onChange={(e) => set('song')(e.target.value)} placeholder="The one you've always wanted to nail" />
+              </Labeled>
+              <Labeled label="How'd you hear about us">
+                <ChoiceRow options={HEARD} value={d.heard} onChange={set('heard')} />
+              </Labeled>
             </div>
-          </div>
+
+            <div style={{ padding: '18px 24px 24px', borderTop: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              {detailsSaved ? (
+                <>
+                  <span className="chip live" style={{ height: 34, fontSize: 13.5 }}>
+                    <Icon name="check" size={14} /> Saved — see you at the bench.
+                  </span>
+                  <Pill variant="ghost" className="sm" type="button" onClick={onClose}>
+                    Done
+                  </Pill>
+                </>
+              ) : (
+                <>
+                  <Pill icon="check" variant="accent" type="submit" disabled={busy}>
+                    {busy ? 'Saving…' : 'Save details'}
+                  </Pill>
+                  <Pill variant="ghost" className="sm" type="button" onClick={onClose}>
+                    Skip
+                  </Pill>
+                  {failed && <ErrorNote />}
+                </>
+              )}
+            </div>
+          </form>
         ) : (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              // TODO(marketing): persist the waitlist signup (email + optional
-              // profile) once a Supabase table / API route exists. UI-only this pass.
-              setSent(true);
-            }}
-          >
+          <form onSubmit={submitEmail}>
             <div style={{ padding: '26px 28px 18px', display: 'flex', alignItems: 'flex-start', gap: 14, borderBottom: '1px solid var(--line-2)' }}>
               <div style={{ flex: 1 }}>
                 <span className="eyebrow live">Soft launch</span>
@@ -155,7 +217,7 @@ export function WaitlistModal({ prefillEmail, onClose }: { prefillEmail: string;
                   Save your spot.
                 </h2>
                 <p style={{ margin: '8px 0 0', fontSize: 14.5, color: 'var(--muted)', lineHeight: 1.5 }}>
-                  One field gets you on the list. The rest just helps us tailor your first session — skip anything.
+                  One field. You can tell us more after, or never.
                 </p>
               </div>
               <button type="button" className="iconbtn" onClick={onClose} aria-label="Close" style={{ marginTop: -4 }}>
@@ -163,7 +225,7 @@ export function WaitlistModal({ prefillEmail, onClose }: { prefillEmail: string;
               </button>
             </div>
 
-            <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div style={{ padding: 24 }}>
               <Labeled label="Email">
                 <input
                   ref={firstRef}
@@ -175,66 +237,13 @@ export function WaitlistModal({ prefillEmail, onClose }: { prefillEmail: string;
                   placeholder="you@email.com"
                 />
               </Labeled>
-
-              <button
-                type="button"
-                onClick={() => setShowOptional(!showOptional)}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0' }}
-              >
-                <span style={{ height: 1, flex: 1, background: 'var(--line)' }} />
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '4px 10px',
-                    borderRadius: 99,
-                    background: 'var(--card-2)',
-                    boxShadow: 'inset 0 0 0 1px var(--line-2)',
-                    transition: 'box-shadow 0.15s',
-                  }}
-                >
-                  <span
-                    className="mono"
-                    style={{ fontSize: 10.5, color: 'var(--faint)', letterSpacing: '0.08em', whiteSpace: 'nowrap', fontWeight: 500 }}
-                  >
-                    OPTIONAL · TAILORS YOUR FIRST SESSION
-                  </span>
-                  <Icon
-                    name="chevD"
-                    size={12}
-                    style={{ color: 'var(--faint)', flexShrink: 0, transform: showOptional ? 'rotate(180deg)' : 'none', transition: 'transform 0.22s' }}
-                  />
-                </span>
-                <span style={{ height: 1, flex: 1, background: 'var(--line)' }} />
-              </button>
-
-              {showOptional && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                  <Labeled label="Your name" optional>
-                    <input className="field" value={d.name} onChange={(e) => set('name')(e.target.value)} placeholder="What should we call you?" />
-                  </Labeled>
-                  <Labeled label="Main instrument" optional>
-                    <ChoiceRow options={INSTRUMENTS} value={d.instrument} onChange={set('instrument')} />
-                  </Labeled>
-                  <Labeled label="Where you're at" optional>
-                    <ChoiceRow options={SKILL_LEVELS} value={d.skill} onChange={set('skill')} />
-                  </Labeled>
-                  <Labeled label="First song you'd bring" optional>
-                    <input className="field" value={d.song} onChange={(e) => set('song')(e.target.value)} placeholder="The one you've always wanted to nail" />
-                  </Labeled>
-                  <Labeled label="How'd you hear about us" optional>
-                    <ChoiceRow options={HEARD} value={d.heard} onChange={set('heard')} />
-                  </Labeled>
-                </div>
-              )}
             </div>
 
             <div style={{ padding: '18px 24px 24px', borderTop: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-              <Pill icon="arrowR" variant="accent" type="submit">
-                Join the waitlist
+              <Pill icon="arrowR" variant="accent" type="submit" disabled={busy}>
+                {busy ? 'Joining…' : 'Join the waitlist'}
               </Pill>
-              <span style={{ fontSize: 13, color: 'var(--faint)' }}>No spam. Just your invite when a seat opens.</span>
+              {failed ? <ErrorNote /> : <span style={{ fontSize: 13, color: 'var(--faint)' }}>No spam. Just your invite when a seat opens.</span>}
             </div>
           </form>
         )}

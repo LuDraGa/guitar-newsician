@@ -1,189 +1,189 @@
 'use client';
 
 /* ============================================================
-   Marketing landing — value props, features, who-it's-for, FAQ.
+   Marketing landing — the three middle scenes:
+   2. TheBench  — how it works + what's on the bench (one scene;
+      Phase 2 turns this into the pinned scroll sequence).
+   3. MaestroScene — the coach, shown as a real exchange, with the
+      mid-page capture moment.
+   4. FitAndFaq — who it's for + five questions.
    ============================================================ */
 import { useState } from 'react';
 
-import { FAQS, FEATURES, VALUE_PROPS, WHO, type Feature } from './marketing-content';
+import { BENCH_MOVES, CAPABILITIES, FAQS, MAESTRO, MAESTRO_EXCHANGE, WHO } from './marketing-content';
 import { Icon } from './MarketingIcon';
-import { Reveal, SectionHead } from './MarketingPrimitives';
+import { EmailCapture, Reveal, SectionHead } from './MarketingPrimitives';
 import { OPEN_CONCIERGE_EVENT } from './marketing-events';
 
-/* ---------- value props ---------- */
-export function ValueProps() {
+/* ---------- scene 2: the bench ---------- */
+export function TheBench() {
   return (
-    <section className="section" style={{ background: 'var(--paper-2)' }}>
+    <section id="bench" className="section">
       <div className="wrap">
         <SectionHead
-          title="The gap isn't talent. It's the slog of taking a song apart."
-          intro="You've put in the hours. What slows you down is everything between hearing a song and playing it. Octave does that part."
+          title="The song comes apart."
+          intro="Three steps between hearing it and playing it."
         />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {VALUE_PROPS.map((v, i) => (
-            <Reveal key={v.k} delay={i * 50}>
-              <div
-                className="vp-row"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.1fr)',
-                  gap: 32,
-                  alignItems: 'start',
-                  padding: '24px 0',
-                  borderTop: '1px solid var(--line)',
-                }}
-              >
-                <h3
-                  style={{
-                    margin: 0,
-                    fontSize: 'clamp(20px, 2.4vw, 27px)',
-                    fontWeight: 700,
-                    letterSpacing: '-0.02em',
-                    lineHeight: 1.15,
-                  }}
-                >
-                  {v.q}
-                </h3>
-                <p style={{ margin: 0, fontSize: 16.5, lineHeight: 1.6, color: 'var(--muted)', paddingTop: 4 }}>{v.a}</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 28 }}>
+          {BENCH_MOVES.map((s, i) => (
+            <Reveal key={s.n} delay={i * 70}>
+              <div style={{ borderTop: '1px solid var(--line)', paddingTop: 18, height: '100%' }}>
+                <span className="mono" style={{ fontSize: 13, fontWeight: 500, letterSpacing: '0.06em', color: 'var(--accent-ink)' }}>
+                  {s.n}
+                </span>
+                <h3 style={{ margin: '10px 0 0', fontSize: 21, fontWeight: 700, letterSpacing: '-0.02em' }}>{s.title}</h3>
+                <p style={{ margin: '10px 0 0', fontSize: 16, lineHeight: 1.6, color: 'var(--muted)' }}>{s.body}</p>
               </div>
             </Reveal>
           ))}
         </div>
+
+        {/* what's on the bench — compact, one line per tool */}
+        <div
+          style={{
+            marginTop: 56,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: 12,
+          }}
+        >
+          {CAPABILITIES.map((c, i) => (
+            <Reveal key={c.tag} delay={(i % 3) * 60}>
+              <div
+                className="surface-flat"
+                style={{ padding: '16px 18px', height: '100%', display: 'flex', alignItems: 'flex-start', gap: 14 }}
+              >
+                <span
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 11,
+                    flexShrink: 0,
+                    display: 'grid',
+                    placeItems: 'center',
+                    background: 'var(--card-2)',
+                    color: 'var(--accent-ink)',
+                  }}
+                >
+                  <Icon name={c.icon} size={18} strokeWidth={1.8} />
+                </span>
+                <span style={{ minWidth: 0 }}>
+                  <span className="label" style={{ display: 'block' }}>
+                    {c.tag}
+                  </span>
+                  <span style={{ display: 'block', marginTop: 5, fontSize: 15, lineHeight: 1.5, color: 'var(--muted)' }}>
+                    {c.line}
+                  </span>
+                </span>
+              </div>
+            </Reveal>
+          ))}
+        </div>
+
+        {/* product film slot — the HeyGen Studio capture lands here (Phase 2+) */}
       </div>
     </section>
   );
 }
 
-/* ---------- features ---------- */
-function FeatureCard({ f, i }: { f: Feature; i: number }) {
-  const flag = f.flagship;
+/* ---------- scene 3: maestro ---------- */
+function MaestroBubble({ role, text, delay }: { role: 'you' | 'maestro'; text: string; delay: number }) {
+  const isCoach = role === 'maestro';
   return (
-    <Reveal delay={(i % 3) * 60}>
-      <div
-        className="surface"
-        style={{
-          padding: 24,
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 14,
-          boxShadow: flag ? 'inset 0 0 0 1.5px var(--accent-soft), var(--shadow-card)' : 'var(--shadow-card)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              display: 'grid',
-              placeItems: 'center',
-              background: flag ? 'var(--accent)' : 'var(--ink)',
-              color: flag ? 'oklch(0.99 0.01 80)' : 'var(--paper)',
-            }}
-          >
-            <Icon name={f.icon} size={21} strokeWidth={1.8} />
-          </span>
-          <span className={`chip ${flag ? 'accent' : ''}`.trim()}>
-            {f.tag}
-            {flag && ' · flagship'}
-          </span>
+    <Reveal delay={delay}>
+      <div style={{ display: 'flex', justifyContent: isCoach ? 'flex-start' : 'flex-end' }}>
+        <div
+          style={{
+            maxWidth: '86%',
+            padding: '12px 15px',
+            borderRadius: 16,
+            borderBottomLeftRadius: isCoach ? 5 : 16,
+            borderBottomRightRadius: isCoach ? 16 : 5,
+            fontSize: 15,
+            lineHeight: 1.5,
+            background: isCoach ? 'var(--card-2)' : 'var(--ink)',
+            color: isCoach ? 'var(--ink)' : 'var(--paper)',
+            boxShadow: isCoach ? 'inset 0 0 0 1px var(--line-2)' : 'none',
+          }}
+        >
+          {text}
         </div>
-        <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>{f.title}</h3>
-        <p style={{ margin: 0, fontSize: 15, lineHeight: 1.55, color: 'var(--muted)' }}>{f.body}</p>
       </div>
     </Reveal>
   );
 }
 
-export function Features() {
+export function MaestroScene({ onJoined }: { onJoined: (email: string) => void }) {
   return (
-    <section id="features" className="section">
-      <div className="wrap">
-        <SectionHead
-          eyebrow="Tools"
-          title="One song, taken all the way apart."
-          intro="Everything you need to learn a track lives in one Studio — laid out like tools on a bench, not buried in menus."
-        />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-          {FEATURES.map((f, i) => (
-            <FeatureCard key={f.tag} f={f} i={i} />
-          ))}
+    <section id="maestro" className="section" style={{ background: 'var(--paper-2)' }}>
+      <div
+        className="wrap maestro-grid"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+          gap: 56,
+          alignItems: 'center',
+        }}
+      >
+        <div>
+          <SectionHead title={MAESTRO.title} intro={MAESTRO.intro} />
+          <Reveal delay={80} style={{ marginTop: -8 }}>
+            <EmailCapture onJoined={onJoined} source="maestro" />
+            <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 9, fontSize: 13, color: 'var(--faint)' }}>
+              <Icon name="sparkles" size={15} style={{ color: 'var(--accent-ink)' }} /> {MAESTRO.capture}
+            </div>
+          </Reveal>
         </div>
+
+        <Reveal delay={120}>
+          <div className="surface" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 11, paddingBottom: 14, borderBottom: '1px solid var(--line-2)' }}>
+              <span
+                style={{
+                  position: 'relative',
+                  width: 36,
+                  height: 36,
+                  borderRadius: 99,
+                  background: 'var(--ink)',
+                  color: 'var(--paper)',
+                  display: 'grid',
+                  placeItems: 'center',
+                }}
+              >
+                <Icon name="sparkles" size={17} />
+                <span
+                  style={{ position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: 99, background: 'var(--live)', boxShadow: '0 0 0 2.5px var(--card)' }}
+                />
+              </span>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>Maestro</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>In the Studio, next to the transport</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              {MAESTRO_EXCHANGE.map((t, i) => (
+                <MaestroBubble key={i} role={t.role} text={t.text} delay={140 + i * 90} />
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', paddingTop: 4 }}>
+              <span className="chip" style={{ height: 26 }}>
+                <Icon name="gauge" size={12} /> 0.5×
+              </span>
+              <span className="chip accent" style={{ height: 26 }}>
+                <Icon name="loop" size={12} /> Chorus
+              </span>
+              <span className="chip live" style={{ height: 26 }}>
+                Key of C · Capo 2
+              </span>
+            </div>
+          </div>
+        </Reveal>
       </div>
     </section>
   );
 }
 
-/* ---------- who it's for ---------- */
-export function WhoFor() {
-  return (
-    <section id="who" className="section" style={{ background: 'var(--paper-2)' }}>
-      <div className="wrap">
-        <SectionHead eyebrow="Your fit" title="Built for players, not for day one." />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
-          <Reveal className="surface" style={{ padding: 28 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-              <span
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 99,
-                  background: 'var(--live-soft)',
-                  color: 'var(--live-ink)',
-                  display: 'grid',
-                  placeItems: 'center',
-                }}
-              >
-                <Icon name="check" size={17} />
-              </span>
-              <span className="label" style={{ color: 'var(--live-ink)' }}>
-                Octave is for you if
-              </span>
-            </div>
-            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {WHO.forYou.map((x, i) => (
-                <li key={i} style={{ display: 'flex', gap: 11, fontSize: 16, lineHeight: 1.5 }}>
-                  <Icon name="check" size={18} style={{ color: 'var(--live)', flexShrink: 0, marginTop: 2 }} />
-                  <span>{x}</span>
-                </li>
-              ))}
-            </ul>
-          </Reveal>
-          <Reveal delay={80} className="surface-flat" style={{ padding: 28, background: 'var(--card)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-              <span
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 99,
-                  background: 'var(--card-2)',
-                  color: 'var(--faint)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  boxShadow: 'inset 0 0 0 1px var(--line-2)',
-                }}
-              >
-                <Icon name="x" size={15} />
-              </span>
-              <span className="label">Maybe not yet, if</span>
-            </div>
-            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {WHO.notYet.map((x, i) => (
-                <li key={i} style={{ display: 'flex', gap: 11, fontSize: 16, lineHeight: 1.5, color: 'var(--muted)' }}>
-                  <Icon name="x" size={17} style={{ color: 'var(--faint)', flexShrink: 0, marginTop: 3 }} />
-                  <span>{x}</span>
-                </li>
-              ))}
-            </ul>
-          </Reveal>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ---------- FAQ ---------- */
+/* ---------- scene 4: who it's for + FAQ ---------- */
 function FAQItem({ item, open, onToggle }: { item: { q: string; a: string }; open: boolean; onToggle: () => void }) {
   return (
     <div style={{ borderTop: '1px solid var(--line)' }}>
@@ -232,27 +232,89 @@ function FAQItem({ item, open, onToggle }: { item: { q: string; a: string }; ope
   );
 }
 
-export function FAQ() {
+export function FitAndFaq() {
   const [open, setOpen] = useState(0);
   return (
-    <section id="faq" className="section" style={{ background: 'var(--paper-2)' }}>
+    <section id="fit" className="section">
       <div className="wrap">
-        <SectionHead eyebrow="FAQ" title="The things people ask first." />
-        <div style={{ borderBottom: '1px solid var(--line)' }}>
-          {FAQS.map((f, i) => (
-            <FAQItem key={i} item={f} open={open === i} onToggle={() => setOpen(open === i ? -1 : i)} />
-          ))}
+        <SectionHead title="Is it for you?" />
+        <div className="fit-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+          <Reveal className="surface" style={{ padding: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+              <span
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 99,
+                  background: 'var(--live-soft)',
+                  color: 'var(--live-ink)',
+                  display: 'grid',
+                  placeItems: 'center',
+                }}
+              >
+                <Icon name="check" size={17} />
+              </span>
+              <span className="label" style={{ color: 'var(--live-ink)' }}>
+                Yes, if
+              </span>
+            </div>
+            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {WHO.forYou.map((x, i) => (
+                <li key={i} style={{ display: 'flex', gap: 11, fontSize: 16, lineHeight: 1.5 }}>
+                  <Icon name="check" size={18} style={{ color: 'var(--live)', flexShrink: 0, marginTop: 2 }} />
+                  <span>{x}</span>
+                </li>
+              ))}
+            </ul>
+          </Reveal>
+          <Reveal delay={80} className="surface-flat" style={{ padding: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+              <span
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 99,
+                  background: 'var(--card-2)',
+                  color: 'var(--faint)',
+                  display: 'grid',
+                  placeItems: 'center',
+                  boxShadow: 'inset 0 0 0 1px var(--line-2)',
+                }}
+              >
+                <Icon name="x" size={15} />
+              </span>
+              <span className="label">Not yet, if</span>
+            </div>
+            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {WHO.notYet.map((x, i) => (
+                <li key={i} style={{ display: 'flex', gap: 11, fontSize: 16, lineHeight: 1.5, color: 'var(--muted)' }}>
+                  <Icon name="x" size={17} style={{ color: 'var(--faint)', flexShrink: 0, marginTop: 3 }} />
+                  <span>{x}</span>
+                </li>
+              ))}
+            </ul>
+          </Reveal>
         </div>
-        <Reveal style={{ marginTop: 28, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 15.5, color: 'var(--muted)' }}>Still wondering something?</span>
-          <button
-            className="chip accent"
-            style={{ height: 34, fontSize: 13.5, cursor: 'pointer' }}
-            onClick={() => window.dispatchEvent(new CustomEvent(OPEN_CONCIERGE_EVENT))}
-          >
-            <Icon name="sparkles" size={14} /> Ask Octavia
-          </button>
-        </Reveal>
+
+        {/* five questions, same scene */}
+        <div id="faq" style={{ marginTop: 72 }}>
+          <SectionHead title="Questions" />
+          <div style={{ borderBottom: '1px solid var(--line)' }}>
+            {FAQS.map((f, i) => (
+              <FAQItem key={i} item={f} open={open === i} onToggle={() => setOpen(open === i ? -1 : i)} />
+            ))}
+          </div>
+          <Reveal style={{ marginTop: 28, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 15.5, color: 'var(--muted)' }}>Something else?</span>
+            <button
+              className="chip accent"
+              style={{ height: 34, fontSize: 13.5, cursor: 'pointer' }}
+              onClick={() => window.dispatchEvent(new CustomEvent(OPEN_CONCIERGE_EVENT))}
+            >
+              <Icon name="sparkles" size={14} /> Ask a question
+            </button>
+          </Reveal>
+        </div>
       </div>
     </section>
   );

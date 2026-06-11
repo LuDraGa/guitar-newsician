@@ -1,12 +1,78 @@
 /* ============================================================
    Marketing landing — scoped styles NOT already in globals.css.
-   Tokens (paper/ink/accent/live, fonts, radii, shadows) and the
-   shared .pill / .chip / .surface / .label primitives all come from
-   globals.css. This file only adds the landing-specific primitives
-   (eyebrow, annot, field, choices, reveal) and its responsive layout
-   helpers. Every selector is scoped under .marketing so these generic
-   class names never leak into the app shell.
+
+   THE LAMPLIT BENCH (landing-only theme): the same luthier's bench
+   as the app, after dark. The landing re-declares the shared design
+   tokens under `.marketing`, so every token-driven primitive from
+   globals.css (.pill / .chip / .surface / .label / fields) re-themes
+   itself without forking the system. The app keeps daylight; the
+   front door is the workshop at night — Rosin reads as lamplight,
+   Verdigris as patina glow. Deliberate, documented exception to the
+   "never dark mode" app doctrine (see execution doc 2026-06-11).
+
+   Every selector is scoped under .marketing so nothing leaks into
+   the app shell.
    ============================================================ */
+
+.marketing {
+  /* field: near-black warm ebony, two depths */
+  --paper: oklch(0.16 0.01 55);
+  --paper-2: oklch(0.14 0.01 55);
+  /* raised wood surfaces */
+  --card: oklch(0.205 0.012 58);
+  --card-2: oklch(0.245 0.014 60);
+  /* text: pale spruce inks */
+  --ink: oklch(0.95 0.008 80);
+  --ink-2: oklch(0.89 0.01 78);
+  --muted: oklch(0.74 0.014 72);
+  --faint: oklch(0.57 0.014 68);
+  /* light-derived hairlines */
+  --line: oklch(0.95 0.01 80 / 0.13);
+  --line-2: oklch(0.95 0.01 80 / 0.08);
+  --hair: oklch(0.95 0.01 80 / 0.17);
+  /* rosin as lamplight */
+  --accent: oklch(0.7 0.14 58);
+  --accent-soft: oklch(0.7 0.14 58 / 0.16);
+  --accent-ink: oklch(0.8 0.12 68);
+  --accent-strong: oklch(0.8 0.12 68);
+  /* verdigris glow */
+  --live: oklch(0.72 0.11 168);
+  --live-soft: oklch(0.72 0.11 168 / 0.16);
+  --live-ink: oklch(0.8 0.09 168);
+  /* deeper, still warm-tinted shadows for the dark field */
+  --shadow-card: 0 1px 2px oklch(0.07 0.01 60 / 0.5), 0 10px 30px oklch(0.07 0.01 60 / 0.42);
+  --shadow-pop: 0 16px 48px oklch(0.05 0.01 60 / 0.58), 0 2px 10px oklch(0.05 0.01 60 / 0.46);
+
+  color: var(--ink);
+  color-scheme: dark;
+  min-height: 100vh;
+  /* the room: a faint grain over two pools of light — the lamp (rosin,
+     upper left) and a whisper of patina (verdigris, upper right) */
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(oklch(0.96 0.02 80 / 0.022) 1px, transparent 1.4px),
+    radial-gradient(1100px 720px at 16% -6%, oklch(0.27 0.04 58 / 0.55), transparent 62%),
+    radial-gradient(1000px 640px at 88% 2%, oklch(0.23 0.03 168 / 0.28), transparent 58%);
+  background-size:
+    22px 22px,
+    auto,
+    auto;
+}
+
+/* overscroll / rubber-band shows the same night field, not the app's daylight */
+html:has(.marketing) {
+  background: oklch(0.14 0.01 55);
+}
+
+/* the accent pill carries dark ink on lamplight amber (the light theme's
+   near-white text would sit at ~3:1 here) */
+.marketing .pill.accent {
+  color: oklch(0.17 0.03 60);
+}
+
+.marketing .pill.accent .dot {
+  background: oklch(0.1 0.02 60 / 0.14);
+}
 
 .marketing .wrap {
   max-width: 1120px;
@@ -51,7 +117,7 @@
   background: var(--live);
 }
 
-/* faint annotation pill (luthier-bench motif) */
+/* faint annotation pill (luthier-bench motif) — dark glass under the lamp */
 .marketing .annot {
   display: inline-flex;
   align-items: center;
@@ -61,11 +127,11 @@
   border-radius: 99px;
   font-size: 12.5px;
   font-weight: 600;
-  background: oklch(1 0 0 / 0.62);
+  background: oklch(0.24 0.015 60 / 0.78);
   color: var(--ink);
   box-shadow:
     inset 0 0 0 1px var(--line),
-    0 6px 18px oklch(0.2 0.01 60 / 0.07);
+    0 6px 18px oklch(0.06 0.01 60 / 0.4);
   backdrop-filter: blur(6px);
 }
 
@@ -177,9 +243,12 @@
   .marketing .hero-art {
     margin-top: 8px;
   }
-  .marketing .vp-row {
+  .marketing .maestro-grid {
     grid-template-columns: 1fr !important;
-    gap: 10px !important;
+    gap: 36px !important;
+  }
+  .marketing .fit-grid {
+    grid-template-columns: 1fr !important;
   }
 }
 

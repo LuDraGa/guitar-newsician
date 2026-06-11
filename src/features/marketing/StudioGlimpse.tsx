@@ -136,8 +136,8 @@ export function StudioGlimpse({ compact = false }: { compact?: boolean }) {
         </div>
         <MiniStem name="Vocals" color="var(--accent)" level={62} />
         <MiniStem name="Guitar" color="var(--live)" level={84} />
-        <MiniStem name="Bass" color="oklch(0.5 0.07 250)" level={48} on={false} />
-        <MiniStem name="Drums" color="oklch(0.55 0.04 30)" level={55} />
+        <MiniStem name="Bass" color="oklch(0.66 0.09 250)" level={48} on={false} />
+        <MiniStem name="Drums" color="oklch(0.7 0.05 40)" level={55} />
       </div>
 
       {/* structure ribbon */}

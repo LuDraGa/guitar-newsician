@@ -1,10 +1,11 @@
 /* ============================================================
    Marketing landing — site content + Concierge knowledge base.
-   Voice: a knowledgeable musician friend. Plainspoken, no hype.
-   Copy is from the Claude-designed source. Two distinct agents are
-   named: Octavia (the site concierge) and Maestro (the in-product
-   Studio coach). In-product coaching references say "Maestro";
-   "Octavia" is the concierge only.
+   Voice: plain words, musician warmth. Grade 6–8 reading level,
+   short sentences, one idea per line. Headers either say the
+   thing or label the section — never an eyebrow + witty sentence.
+   Maestro (the in-Studio coach) is the only agent named in page
+   copy; the site concierge is unnamed in marketing and only
+   introduces herself (Octavia) if a visitor asks who she is.
    ============================================================ */
 import type { IconName } from './MarketingIcon';
 
@@ -15,23 +16,21 @@ export interface Brand {
   email: string;
 }
 
-export interface ValueProp {
-  k: string;
-  q: string;
-  a: string;
-}
-
-export interface Feature {
-  icon: IconName;
-  tag: string;
+export interface BenchMove {
+  n: string;
   title: string;
   body: string;
-  flagship?: boolean;
 }
 
-export interface AntiPositioning {
-  not: string;
+export interface Capability {
+  icon: IconName;
+  tag: string;
   line: string;
+}
+
+export interface MaestroTurn {
+  role: 'you' | 'maestro';
+  text: string;
 }
 
 export interface Faq {
@@ -55,149 +54,129 @@ export const BRAND: Brand = {
   email: 'abhirooprasad@gmail.com',
 };
 
-/* ---------- value props (the "why") ---------- */
-export const VALUE_PROPS: ValueProp[] = [
+/* ---------- hero (scene 1: the gap) ---------- */
+export const HERO = {
+  eyebrow: 'For players past the basics',
+  // headline is composed in the component so "that song" can carry the accent
+  sub: 'Drop in a recording you own. Octave pulls out the parts, the chords, and the words — so you learn it piece by piece, and actually play it.',
+  reassure: 'Soft launch — no spam, just your invite.',
+};
+
+/* ---------- the bench (scene 2: three moves) ---------- */
+export const BENCH_MOVES: BenchMove[] = [
   {
-    k: 'play-in-front',
-    q: "Been playing a while, but freeze when it's time to actually play a song front to back?",
-    a: "Octave breaks the recording down so you can learn it the way it's built — section by section, part by part — until it's under your fingers.",
+    n: '01',
+    title: 'Bring a song',
+    body: 'Upload a recording you own. That’s the whole setup.',
   },
   {
-    k: 'hear-it-play-it',
-    q: 'Hear something great and wish you could just play it?',
-    a: 'Drop the track in. You get isolated stems, chords, tab, and notation for the part you care about — not a wall of theory.',
+    n: '02',
+    title: 'It comes apart',
+    body: 'Stems split out. Chords, words, and structure show up on screen. Minutes, not weekends.',
   },
   {
-    k: 'cant-read',
-    q: "Can't read tab or sheet music fluently?",
-    a: 'Ask Maestro. It walks you through the notation in plain language and points at exactly where you are in the bar.',
-  },
-  {
-    k: 'patterns',
-    q: 'Struggle to spot the patterns that make a song click?',
-    a: 'Maestro names the shape — the turnaround, the repeated riff, the key change — so the next song comes faster than the last.',
-  },
-  {
-    k: 'transpose',
-    q: 'Want it in a different key, or a different feel?',
-    a: 'Tell Maestro. Transpose to fit your voice or your capo, simplify a busy part, or change the mood — without leaving the bench.',
+    n: '03',
+    title: 'Play it in',
+    body: 'Solo your part. Slow the hard bar. Loop it until it sits. Then bring the band back in.',
   },
 ];
 
-/* ---------- feature highlights ---------- */
-export const FEATURES: Feature[] = [
+/* ---------- the bench (scene 2: what's on it) ---------- */
+export const CAPABILITIES: Capability[] = [
   {
     icon: 'scissors',
     tag: 'Stems',
-    title: "Solo the part you're learning",
-    body: "Mute the singer, pull the bass forward, isolate the rhythm guitar. Hear exactly the line you're working on, nothing else.",
-  },
-  {
-    icon: 'type',
-    tag: 'Lyrics sync',
-    title: 'Words locked to the waveform',
-    body: 'Lyrics scroll in time with the track, so you always know where you are — verse, pre, chorus, bridge — without hunting.',
+    line: 'Mute the singer. Pull the bass forward. Hear only your part.',
   },
   {
     icon: 'guitar',
     tag: 'Chords + tab',
-    title: 'Auto-transcribed, where you need it',
-    body: 'Chords over the bars and tab for the part that matters. Fingerings you can actually read, not a dump of every note in the mix.',
+    line: 'Written out over the bars, right where you need them.',
+  },
+  {
+    icon: 'type',
+    tag: 'Lyrics',
+    line: 'Words locked to the music, so you never lose your place.',
   },
   {
     icon: 'sheet',
     tag: 'Notation',
-    title: 'Readable sheet, one instrument at a time',
-    body: 'Single-instrument notation you can follow — or hand to a student — instead of a dense orchestral score nobody asked for.',
+    line: 'Clean sheet music, one instrument at a time.',
   },
   {
     icon: 'gauge',
-    tag: 'Transport',
-    title: 'Slow it down, loop the hard bar',
-    body: 'Drop the tempo without dropping the pitch, loop the two bars that keep fighting you, and shift the key — exact, tabular, never jittery.',
+    tag: 'Speed + loop',
+    line: 'Slow it down without changing pitch. Loop the bars that fight you.',
   },
   {
-    icon: 'sparkles',
-    tag: 'Maestro',
-    flagship: true,
-    title: 'An agent that talks like a musician',
-    body: 'Stuck on a voicing or a rhythm? Ask in plain language. Maestro explains the part, names the pattern, and can transpose or change the feel on request.',
+    icon: 'loop',
+    tag: 'Key',
+    line: 'Move it to fit your voice or your capo.',
   },
 ];
 
-/* ---------- who it's for ---------- */
+/* ---------- maestro (scene 3: the coach) ---------- */
+export const MAESTRO = {
+  title: 'Stuck? Ask Maestro.',
+  intro:
+    'Maestro is the coach inside the Studio. Ask in plain words. It answers like a musician — and sets up the bench for you.',
+  capture: 'Maestro comes with every seat.',
+};
+
+export const MAESTRO_EXCHANGE: MaestroTurn[] = [
+  { role: 'you', text: 'What’s happening in the chorus?' },
+  {
+    role: 'maestro',
+    text: 'Same four chords as the verse — G, D, Em, C. The lift comes from the strumming, not new chords. Want it looped at half speed?',
+  },
+  { role: 'you', text: 'Put it in a key I can sing.' },
+  { role: 'maestro', text: 'Moved it to C. Capo 2 keeps your open shapes.' },
+];
+
+/* ---------- who it's for (scene 4) ---------- */
 export const WHO: { forYou: string[]; notYet: string[] } = {
   forYou: [
-    "You can already play — you're past day one and want to learn real songs faster.",
-    'You learn by ear or by tab and want both lined up against the actual recording.',
-    'You teach, and want clean per-instrument parts to hand to a student.',
-    'You write, and want to lift a progression or a feel and make it your own.',
+    'You can play open chords and a scale or two.',
+    'You learn by ear or by tab, and want both lined up with the recording.',
+    'You teach, and want clean parts to hand to a student.',
+    'You write, and want to lift a feel or a progression.',
   ],
   notYet: [
-    "You've literally never held the instrument — start with fundamentals first, then come back.",
-    "You want a karaoke party app or a streak-and-badges game. That's not this.",
+    'You’ve never held the instrument. Learn the basics first — we’ll be here.',
+    'You want karaoke or a streaks game. That’s not this.',
   ],
 };
 
-/* ---------- anti-DAW positioning ---------- */
-export const ANTI: AntiPositioning[] = [
-  {
-    not: 'A legacy DAW',
-    line: 'No wall of knobs, no engineer-only panels. Depth shows up when you reach for it, not before.',
-  },
-  {
-    not: 'A toy',
-    line: "No badges, no confetti, no cartoon mascot trivializing the craft. It respects that you're doing real work.",
-  },
-  {
-    not: 'Generic AI software',
-    line: "No purple gradients, no 'supercharge your workflow.' One tool, used precisely, on a warm bench.",
-  },
-];
-
-/* ---------- FAQ ---------- */
+/* ---------- FAQ (scene 4, five questions) ---------- */
 export const FAQS: Faq[] = [
   {
-    q: 'What does Octave actually do?',
-    a: 'You give it a recording. It separates the stems, detects key/tempo/structure, aligns the lyrics, and transcribes chords, tab, and notation — then brings it all into one Studio where you can isolate parts, slow things down, loop a bar, and play along. Maestro is there whenever a part needs explaining.',
+    q: 'What does Octave do?',
+    a: 'You give it a recording you own. It splits out the parts, finds the key and tempo, syncs the words, and writes out chords, tab, and notation. Then you learn the song piece by piece — and play along.',
   },
   {
-    q: 'Is this for beginners?',
-    a: "Not really. Octave assumes you can already play and want to learn songs faster. If you're on day one with the instrument, build your fundamentals first — Octave will be waiting when you want to take real songs apart.",
+    q: 'Is it for beginners?',
+    a: 'Not yet. If you can change between open chords and play a simple scale, you’re in. If it’s day one, learn the basics first — Octave will be here.',
   },
   {
-    q: 'Do I need to read sheet music or tab?',
-    a: "No. You'll move faster if you read a little, but Maestro explains any part in plain language and shows you exactly where you are. Reading better is a side effect, not a prerequisite.",
+    q: 'Which instruments does it cover?',
+    a: 'Strongest on guitar, bass, vocals, keys, and drums today. More instruments land through the soft launch.',
   },
   {
-    q: 'Which instruments does it support?',
-    a: "It's strongest on guitar, bass, vocals, keys, and drums today — stems, chords, and tab lean guitar-forward. More instruments and per-part notation land through the soft launch.",
-  },
-  {
-    q: 'How accurate is the transcription?',
-    a: 'Good enough to learn from, and honest about its limits. Chords and structure are reliable; dense or lo-fi mixes are harder. You can correct anything in the editor, and corrections stick.',
-  },
-  {
-    q: 'Can I change the key or tempo?',
-    a: "Yes. Slow a passage down without changing pitch, loop the bar that's fighting you, and transpose to fit your voice or your capo. Tell Maestro what you want and it'll set it up.",
-  },
-  {
-    q: 'Where do songs come from — can I upload my own?',
-    a: "You bring the audio. Upload a file you own and Octave does the rest. We're not a catalog; we're the bench you take your own material to.",
-  },
-  {
-    q: 'What about copyright and licensing?',
-    a: "Learning from music you own, for your own practice, is exactly what we're built for. You're responsible for having the rights to what you upload; we don't host, stream, or redistribute copyrighted recordings. It stays on your machine.",
+    q: 'Do I upload my own music?',
+    a: 'Yes. You bring audio you own — there’s no catalog, and we don’t host or share your files. Learning from your own music is the whole point.',
   },
   {
     q: 'What will it cost?',
-    a: "Pricing isn't final. Soft-launch invitees get early access and a say in where pricing lands. Join the waitlist and we'll bring you in as we open seats.",
-  },
-  {
-    q: 'What do I need to run it?',
-    a: 'A modern browser and the audio you want to learn. Heavy analysis runs in the cloud; you just play.',
+    a: 'Not final yet. Early invitees get in first and help set the price. Join the waitlist and you’ll hear from us as seats open.',
   },
 ];
+
+/* ---------- final CTA (scene 5) ---------- */
+export const FINAL_CTA = {
+  eyebrow: 'Seats opening through the soft launch',
+  title: 'Pick the song you’ve always wanted to play.',
+  sub: 'Join the waitlist. We’ll bring you in as seats open.',
+};
 
 /* ---------- waitlist options ---------- */
 export const INSTRUMENTS = ['Guitar', 'Bass', 'Vocals', 'Keys', 'Drums', 'Other'];
@@ -206,81 +185,81 @@ export const HEARD = ['A friend', 'Reddit / forum', 'YouTube', 'Search', 'Social
 
 /* ---------- Concierge knowledge base (simulated semantic retrieval) ----------
    Each entry has keywords used to score a query (stand-in for embeddings),
-   a short passage "id" for the retrieval chip, and the answer. The Concierge is
+   a short passage "id" for the retrieval chip, and the answer. The concierge is
    strictly about the product, with a few honest general-music answers. */
 export const KB: KbEntry[] = [
   {
     id: 'kb/overview',
     topic: 'What Octave is',
     kw: 'what is octave do product about overview purpose explain summary work works working how learn learning use',
-    a: 'Octave turns a recording into a workbench. It separates stems, detects key/tempo/structure, syncs lyrics, and transcribes chords, tab, and notation — then puts it all in one Studio so you can isolate parts, slow things down, loop, and play along.',
+    a: 'Octave turns a recording into a workbench. It splits out the parts, finds key, tempo, and structure, syncs the words, and writes out chords, tab, and notation — all in one Studio where you isolate parts, slow things down, loop, and play along.',
   },
   {
     id: 'kb/maestro',
     topic: 'Maestro, the in-app coach',
     kw: 'maestro coach assistant agent ai help guide explain natural language ask question chat studio app in-app inside product voicing pattern',
-    a: 'Maestro is the musician-literate coach inside the Studio. Ask it to explain a voicing, name a pattern, walk you through tab, transpose to a new key, or simplify a busy part — all in plain language, anchored to where you are in the song. (Octavia, here on the site, is the concierge; Maestro is the one that plays along inside the app.)',
+    a: 'Maestro is the coach inside the Studio. Ask it to explain a voicing, name a pattern, walk you through tab, move a song to a new key, or simplify a busy part — in plain words, anchored to where you are in the song.',
   },
   {
     id: 'kb/concierge',
-    topic: 'Octavia, the site concierge',
-    kw: 'octavia concierge you who are this bot site help talking here assistant',
-    a: "Octavia — that's me — is the Octave concierge here on the site. I answer what the product does, who it's for, pricing, and the music side of it. The coach that plays along with you inside the Studio is Maestro.",
+    topic: 'The site concierge',
+    kw: 'octavia concierge you who are this bot site help talking here assistant name',
+    a: 'I’m Octavia — the site concierge. I answer what Octave does, who it’s for, and what it’ll cost. Inside the Studio, the coach you’ll actually work with is Maestro.',
   },
   {
     id: 'kb/stems',
     topic: 'Stem separation',
     kw: 'stems separate isolate mute solo vocals bass drums guitar parts track split',
-    a: "Stem separation splits the mix into parts — vocals, bass, drums, and more — so you can solo the line you're learning or mute the singer. It's how you hear exactly the part you need, with nothing in the way.",
+    a: 'Stem separation splits the mix into parts — vocals, bass, drums, and more — so you can solo the line you’re learning or mute the singer. You hear exactly the part you need, nothing else.',
   },
   {
     id: 'kb/transcription',
     topic: 'Transcription accuracy',
     kw: 'transcription accurate accuracy correct chords tab notation midi automatic amt',
-    a: 'Automatic transcription gives you chords, tab, and notation good enough to learn from. Structure and chords are reliable; dense or lo-fi mixes are harder. Anything off, you fix in the editor and the correction sticks.',
+    a: 'Automatic transcription gives you chords, tab, and notation good enough to learn from. Chords and structure are reliable; dense or lo-fi mixes are harder. Anything off, you fix in the editor — and the fix sticks.',
   },
   {
     id: 'kb/transpose',
     topic: 'Key, tempo, feel',
     kw: 'transpose key change tempo slow speed pitch capo mood feel transposition',
-    a: 'You can slow a passage without changing pitch, loop a bar, transpose to fit your voice or capo, and ask Maestro to change the feel. Tell it what you want and it sets up the transport for you.',
+    a: 'You can slow a passage without changing pitch, loop a bar, and move the song to fit your voice or your capo. Tell Maestro what you want and it sets up the transport for you.',
   },
   {
     id: 'kb/instruments',
     topic: 'Supported instruments',
     kw: 'instrument support guitar bass vocals keys piano drums what which play',
-    a: "Today it's strongest on guitar, bass, vocals, keys, and drums, with the tab and chord work leaning guitar-forward. More instruments and per-part notation arrive through the soft launch.",
+    a: 'Today it’s strongest on guitar, bass, vocals, keys, and drums, with tab and chords leaning guitar-forward. More instruments arrive through the soft launch.',
   },
   {
     id: 'kb/beginner',
-    topic: "Who it's for",
+    topic: 'Who it’s for',
     kw: 'beginner beginners skill level intermediate advanced who for new start novice experienced fit right',
-    a: "Octave is built for players who are already past the basics and want to learn real songs faster. If you've never held the instrument, build fundamentals first — this is a bench for taking songs apart, not a first lesson.",
+    a: 'Octave is for players past the basics who want to learn real songs faster. If you’ve never held the instrument, learn the fundamentals first — this is a bench for taking songs apart, not a first lesson.',
   },
   {
     id: 'kb/upload',
     topic: 'Bringing your own audio',
     kw: 'upload song audio file own catalog where source import bring',
-    a: "You bring the audio you own and Octave does the analysis. It's not a streaming catalog — it's the bench you take your own material to.",
+    a: 'You bring the audio you own and Octave does the analysis. It’s not a streaming catalog — it’s the bench you take your own material to.',
   },
   {
     id: 'kb/pricing',
     topic: 'Pricing & access',
     kw: 'price pricing cost free trial subscription pay money plan waitlist access',
-    a: "Pricing isn't locked yet. Soft-launch invitees get early access and a say in where it lands. Join the waitlist and we'll bring you in as seats open.",
+    a: 'Pricing isn’t locked yet. Early invitees get in first and help set where it lands. Join the waitlist and we’ll bring you in as seats open.',
   },
   {
     id: 'kb/legal',
     topic: 'Rights & legality',
     kw: 'legal copyright rights law allowed legitimate own redistribute host',
-    a: "Learning from music you own, for your own practice, is exactly the use we're built for. You're responsible for the rights to what you upload; we don't host or redistribute copyrighted recordings.",
+    a: 'Learning from music you own, for your own practice, is exactly the use we’re built for. You’re responsible for the rights to what you upload; we don’t host or redistribute copyrighted recordings.',
   },
   {
     id: 'kb/theory',
     topic: 'Music theory (general)',
     general: true,
     kw: 'theory chord scale key mode interval progression diatonic circle fifths harmony ii turnaround cadence resolve voicing',
-    a: "Happy to talk theory in general terms — a major scale's diatonic chords, a ii–V–I, relative minors, the circle of fifths. Inside the Studio I tie it to the actual song: which chord you're on and why it pulls where it does.",
+    a: 'Happy to talk theory in general terms — a major scale’s diatonic chords, a ii–V–I, relative minors, the circle of fifths. Inside the Studio, Maestro ties it to the actual song: which chord you’re on and why it pulls where it does.',
   },
   {
     id: 'kb/mir',
@@ -294,6 +273,6 @@ export const KB: KbEntry[] = [
     topic: 'Automatic transcription (general)',
     general: true,
     kw: 'amt automatic music transcription notes pitch detection note tracking polyphonic',
-    a: "Automatic music transcription is the task of turning audio into notes — pitches, timing, sometimes fingering. It's hard for dense, polyphonic mixes, which is why Octave pairs it with an editor and Maestro instead of pretending it's perfect.",
+    a: 'Automatic music transcription is the task of turning audio into notes — pitches, timing, sometimes fingering. It’s hard for dense, polyphonic mixes, which is why Octave pairs it with an editor and Maestro instead of pretending it’s perfect.',
   },
 ];

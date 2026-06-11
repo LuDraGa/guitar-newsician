@@ -3,9 +3,9 @@ import type { Metadata } from 'next';
 import { MarketingLanding } from '@/features/marketing/MarketingLanding';
 
 export const metadata: Metadata = {
-  title: 'Octave — Take any song to the woodshed',
+  title: 'Octave — Take a song apart. Learn it piece by piece.',
   description:
-    'Octave pulls any recording apart — stems, chords, tab, and sheet — with Maestro, an agent that talks you through the hard parts. A workbench for players past the basics.',
+    'You can play — Octave helps you play that song. It pulls a recording apart into parts, chords, and words so you learn it piece by piece, with Maestro, a coach that talks like a musician.',
 };
 
 export default function HomePage() {
