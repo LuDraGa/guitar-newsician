@@ -71,6 +71,9 @@ import { createBrowserAudioContext } from '@/lib/music/waveform/audio-context';
 import { ANALYZE_FULL_ANALYZERS, computeStageStatuses } from '@/server/werecode/pipeline-versions';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
 import type { AssetSummary, SongSummary, StudioDetail } from '@/types/werecode-client';
+import { PitchShift } from 'tone/build/esm/effect/PitchShift.js';
+import { setContext as setToneContext } from 'tone/build/esm/core/Global.js';
+import { connect as connectToneAudioNodes } from 'tone/build/esm/core/context/ToneAudioNode.js';
 import { MusicXmlPreviewPanel } from './MusicXmlPreviewPanel';
 import { StudioPicker } from './StudioPicker';
 import { fetchJson, formatBytes, signDownloads } from './studio-utils';
@@ -1763,18 +1766,56 @@ type EngineLoop = { start: number; end: number } | null;
 type EngineSource = { id: string; url: string };
 
 const ORIGINAL_SOURCE_ID = '__original__';
+const PITCH_CORRECTION_WINDOW_SECONDS = 0.1;
+const RATE_CHANGE_DUCK_SECONDS = 0.012;
+const RATE_CHANGE_SETTLE_SECONDS = 0.075;
+const RATE_CHANGE_FADE_IN_SECONDS = 0.035;
+const RATE_CHANGE_SILENT_GAIN = 0.0001;
+
+function pitchCorrectionSemitones(rate: number) {
+  return -12 * Math.log2(rate);
+}
+
+function setPitchCorrection(pitchShift: PitchShift, semitones: number) {
+  pitchShift.pitch = semitones;
+}
+
+function wrapLoopOffset(offset: number, loop: NonNullable<EngineLoop>) {
+  const length = loop.end - loop.start;
+  if (length <= 0) {
+    return loop.start;
+  }
+  return loop.start + ((((offset - loop.start) % length) + length) % length);
+}
+
+function clampPlaybackOffset(offset: number, loop: EngineLoop, duration: number) {
+  if (loop && loop.end > loop.start) {
+    return Math.min(Math.max(offset, loop.start), loop.end - 0.001);
+  }
+  return Math.max(0, Math.min(offset, duration || offset));
+}
+
+function normalizePlaybackPosition(pos: number, loop: EngineLoop, duration: number) {
+  if (loop && loop.end > loop.start && pos >= loop.end) {
+    return wrapLoopOffset(pos, loop);
+  }
+  if (!loop && duration > 0 && pos > duration) {
+    return duration;
+  }
+  return pos;
+}
 
 /**
  * Sample-accurate multi-stem transport built on a single AudioContext clock.
  *
- * Every stem is decoded to an AudioBuffer and played from an AudioBufferSourceNode
- * scheduled against one shared `ctx.currentTime` anchor, so the stems can never drift
- * relative to each other — this is what kills the old loop-desync (separate <audio>
- * elements each ran on their own clock and were re-seeked independently). Per-stem gain
- * feeds a master gain (0–1.5, so >100% boost is possible) into a soft limiter so the
- * boost stays loud without hard-clipping. Loop / repeat use the source nodes' native
- * gapless loop; control changes (rate, loop bounds, seek) reschedule from the live
- * position, steady-state looping never reschedules.
+ * Every stem is decoded to an AudioBuffer and scheduled against one shared
+ * `ctx.currentTime` anchor, so the stems can never drift relative to each other.
+ * Playback speed still uses AudioBufferSourceNode.playbackRate for reliable
+ * clocking and loop behavior. A warmed Tone.PitchShift sits in each source path
+ * and applies the inverse correction, so rate-only changes can update in place
+ * without rebuilding the DSP window. Per-stem gain feeds a master gain (0-1.5,
+ * so >100% boost is possible) into a soft limiter so the boost stays loud
+ * without hard-clipping.
  */
 /**
  * Module-level cache of decoded PCM keyed by source URL. `AudioBuffer`s are not bound
@@ -1816,9 +1857,11 @@ function cacheDecodedBuffer(url: string, buffer: AudioBuffer) {
 function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: number) {
   const ctxRef = useRef<AudioContext | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
+  const rateTransitionGainRef = useRef<GainNode | null>(null);
   const buffersRef = useRef(new Map<string, AudioBuffer>());
   const gainNodesRef = useRef(new Map<string, GainNode>());
-  const sourcesRef = useRef(new Map<string, AudioBufferSourceNode>());
+  const sourcesRef = useRef(new Set<AudioBufferSourceNode>());
+  const pitchShiftNodesRef = useRef(new Set<PitchShift>());
   const desiredGainRef = useRef(new Map<string, number>());
   const masterVolumeRef = useRef(0.8);
   const rateRef = useRef(1);
@@ -1829,6 +1872,7 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
   const playingRef = useRef(false);
   const durationRef = useRef(fallbackDuration);
   const rafRef = useRef<number | null>(null);
+  const pendingPitchCorrectionTimerRef = useRef<number | null>(null);
 
   const [ready, setReady] = useState(false);
   const [decodedCount, setDecodedCount] = useState(0);
@@ -1860,18 +1904,65 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
       return pausedOffsetRef.current;
     }
     const elapsed = Math.max(0, ctx.currentTime - startCtxTimeRef.current) * rateRef.current;
-    let pos = startOffsetRef.current + elapsed;
-    const loop = loopRef.current;
-    if (loop && loop.end > loop.start && pos > loop.end) {
-      pos = loop.start + ((pos - loop.end) % (loop.end - loop.start));
-    } else if (!loop && durationRef.current > 0 && pos > durationRef.current) {
-      pos = durationRef.current;
-    }
-    return pos;
+    const pos = startOffsetRef.current + elapsed;
+    return normalizePlaybackPosition(pos, loopRef.current, durationRef.current);
   }, []);
 
+  const resetRateTransitionGain = useCallback(() => {
+    const ctx = ctxRef.current;
+    const node = rateTransitionGainRef.current;
+    if (!ctx || !node) {
+      return;
+    }
+    node.gain.cancelScheduledValues(ctx.currentTime);
+    node.gain.setValueAtTime(1, ctx.currentTime);
+  }, []);
+
+  const scheduleRateTransitionDuck = useCallback((ctx: AudioContext, switchTime: number) => {
+    const node = rateTransitionGainRef.current;
+    if (!node) {
+      return;
+    }
+    const now = ctx.currentTime;
+    const fadeOutEnd = now + RATE_CHANGE_DUCK_SECONDS;
+    const fadeInStart = switchTime + RATE_CHANGE_SETTLE_SECONDS;
+    const fadeInEnd = fadeInStart + RATE_CHANGE_FADE_IN_SECONDS;
+    try {
+      node.gain.cancelAndHoldAtTime(now);
+    } catch {
+      node.gain.cancelScheduledValues(now);
+      node.gain.setValueAtTime(node.gain.value, now);
+    }
+    node.gain.linearRampToValueAtTime(RATE_CHANGE_SILENT_GAIN, fadeOutEnd);
+    node.gain.setValueAtTime(RATE_CHANGE_SILENT_GAIN, fadeInStart);
+    node.gain.linearRampToValueAtTime(1, fadeInEnd);
+  }, []);
+
+  const clearPendingPitchCorrection = useCallback(() => {
+    if (pendingPitchCorrectionTimerRef.current != null) {
+      window.clearTimeout(pendingPitchCorrectionTimerRef.current);
+      pendingPitchCorrectionTimerRef.current = null;
+    }
+  }, []);
+
+  const schedulePitchCorrectionAt = useCallback(
+    (ctx: AudioContext, switchTime: number, semitones: number) => {
+      clearPendingPitchCorrection();
+      const delayMs = Math.max(0, (switchTime - ctx.currentTime) * 1000);
+      pendingPitchCorrectionTimerRef.current = window.setTimeout(() => {
+        pendingPitchCorrectionTimerRef.current = null;
+        for (const pitchShift of pitchShiftNodesRef.current) {
+          setPitchCorrection(pitchShift, semitones);
+        }
+      }, delayMs);
+    },
+    [clearPendingPitchCorrection]
+  );
+
   const stopSources = useCallback(() => {
-    for (const source of sourcesRef.current.values()) {
+    clearPendingPitchCorrection();
+    resetRateTransitionGain();
+    for (const source of sourcesRef.current) {
       try {
         source.stop();
       } catch {
@@ -1884,7 +1975,11 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
       }
     }
     sourcesRef.current.clear();
-  }, []);
+    for (const pitchShift of pitchShiftNodesRef.current) {
+      pitchShift.dispose();
+    }
+    pitchShiftNodesRef.current.clear();
+  }, [clearPendingPitchCorrection, resetRateTransitionGain]);
 
   const startSourcesAt = useCallback(
     (offset: number) => {
@@ -1893,15 +1988,14 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
         return;
       }
       stopSources();
-      const loop = loopRef.current;
-      let startOffset: number;
-      if (loop && loop.end > loop.start) {
-        startOffset = Math.min(Math.max(offset, loop.start), loop.end - 0.001);
-      } else {
-        startOffset = Math.max(0, Math.min(offset, durationRef.current || offset));
-      }
+      const startOffset = clampPlaybackOffset(offset, loopRef.current, durationRef.current);
       // Tiny shared look-ahead so every source begins on the exact same clock instant.
       const when = ctx.currentTime + 0.03;
+      startCtxTimeRef.current = when;
+      startOffsetRef.current = startOffset;
+
+      const loop = loopRef.current;
+      const pitchCorrection = pitchCorrectionSemitones(rateRef.current);
       for (const [id, buffer] of buffersRef.current) {
         const source = ctx.createBufferSource();
         source.buffer = buffer;
@@ -1913,13 +2007,28 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
         }
         const gain = gainNodesRef.current.get(id);
         if (gain) {
-          source.connect(gain);
+          const pitchShift = new PitchShift({
+            pitch: pitchCorrection,
+            windowSize: PITCH_CORRECTION_WINDOW_SECONDS,
+            delayTime: 0,
+            feedback: 0,
+            wet: 1,
+          });
+          connectToneAudioNodes(source, pitchShift);
+          pitchShift.connect(gain);
+          pitchShiftNodesRef.current.add(pitchShift);
         }
+        source.onended = () => {
+          sourcesRef.current.delete(source);
+          try {
+            source.disconnect();
+          } catch {
+            // already disconnected
+          }
+        };
         source.start(when, startOffset);
-        sourcesRef.current.set(id, source);
+        sourcesRef.current.add(source);
       }
-      startCtxTimeRef.current = when;
-      startOffsetRef.current = startOffset;
     },
     [stopSources]
   );
@@ -1966,8 +2075,8 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
     if (durationRef.current > 0 && offset >= durationRef.current - 0.05) {
       offset = 0;
     }
-    startSourcesAt(offset);
     playingRef.current = true;
+    startSourcesAt(offset);
     setPlaying(true);
     startRaf();
   }, [startRaf, startSourcesAt]);
@@ -2013,13 +2122,31 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
 
   const setRate = useCallback(
     (rate: number) => {
+      const oldRate = rateRef.current;
       const pos = computePosition();
       rateRef.current = rate;
       if (playingRef.current) {
-        startSourcesAt(pos);
+        const ctx = ctxRef.current;
+        if (!ctx || sourcesRef.current.size === 0) {
+          startSourcesAt(pos);
+          return;
+        }
+        const now = ctx.currentTime;
+        const switchTime = now + RATE_CHANGE_DUCK_SECONDS;
+        const switchOffset = normalizePlaybackPosition(pos + oldRate * RATE_CHANGE_DUCK_SECONDS, loopRef.current, durationRef.current);
+        startCtxTimeRef.current = switchTime;
+        startOffsetRef.current = switchOffset;
+        scheduleRateTransitionDuck(ctx, switchTime);
+        for (const source of sourcesRef.current) {
+          source.playbackRate.cancelScheduledValues(now);
+          source.playbackRate.setValueAtTime(oldRate, now);
+          source.playbackRate.setValueAtTime(rate, switchTime);
+        }
+        const pitchCorrection = pitchCorrectionSemitones(rate);
+        schedulePitchCorrectionAt(ctx, switchTime, pitchCorrection);
       }
     },
-    [computePosition, startSourcesAt]
+    [computePosition, schedulePitchCorrectionAt, scheduleRateTransitionDuck, startSourcesAt]
   );
 
   const setMasterVolume = useCallback((value: number) => {
@@ -2043,28 +2170,14 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
   const setLoop = useCallback(
     (loop: EngineLoop) => {
       const normalized = loop && loop.end > loop.start ? loop : null;
-      loopRef.current = normalized;
       if (!playingRef.current) {
+        loopRef.current = normalized;
         return;
       }
-      // If the playhead is already inside the new window (always true for
-      // repeat-song = whole track), or we're clearing the loop, flip the loop
-      // flags on the live source nodes in place — no stop/recreate, no audible
-      // gap. Only a window set *ahead* of the playhead needs a real reschedule.
+      // Source nodes are one-shot; restarting from the live playhead rebuilds
+      // native loop flags without disturbing the shared transport position.
       const pos = computePosition();
-      const contained = !normalized || (pos >= normalized.start && pos < normalized.end);
-      if (contained && sourcesRef.current.size > 0) {
-        for (const source of sourcesRef.current.values()) {
-          if (normalized) {
-            source.loop = true;
-            source.loopStart = normalized.start;
-            source.loopEnd = normalized.end;
-          } else {
-            source.loop = false;
-          }
-        }
-        return;
-      }
+      loopRef.current = normalized;
       startSourcesAt(pos);
     },
     [computePosition, startSourcesAt]
@@ -2086,13 +2199,17 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
         ctxRef.current = null;
       }
       masterGainRef.current = null;
+      rateTransitionGainRef.current = null;
       return;
     }
 
     const ctx = createBrowserAudioContext();
     ctxRef.current = ctx;
+    setToneContext(ctx);
     const master = ctx.createGain();
     master.gain.value = masterVolumeRef.current;
+    const rateTransitionGain = ctx.createGain();
+    rateTransitionGain.gain.value = 1;
     // Soft limiter: lets master boost past 100% stay loud without harsh digital clipping.
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -2;
@@ -2100,12 +2217,15 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
     limiter.ratio.value = 20;
     limiter.attack.value = 0.003;
     limiter.release.value = 0.25;
-    master.connect(limiter);
+    master.connect(rateTransitionGain);
+    rateTransitionGain.connect(limiter);
     limiter.connect(ctx.destination);
     masterGainRef.current = master;
+    rateTransitionGainRef.current = rateTransitionGain;
     buffersRef.current = new Map();
     gainNodesRef.current = new Map();
-    sourcesRef.current = new Map();
+    sourcesRef.current = new Set();
+    pitchShiftNodesRef.current = new Set();
 
     let settled = 0;
     let decoded = 0;
@@ -2165,6 +2285,7 @@ function usePlaybackEngine(engineSources: EngineSource[], fallbackDuration: numb
         void ctx.close().catch(() => undefined);
         ctxRef.current = null;
         masterGainRef.current = null;
+        rateTransitionGainRef.current = null;
       }
     };
     // Only the stem set (ids + urls) should trigger a full decode/teardown.
