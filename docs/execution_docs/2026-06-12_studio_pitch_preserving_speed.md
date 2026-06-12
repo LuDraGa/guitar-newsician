@@ -21,6 +21,7 @@ Fix Studio transport speed changes so practice speed does not transpose the song
 - [x] Dispose pitch-correction DSP nodes on pause, seek, song change, and unmount.
 - [x] Keep pitch-correction nodes warmed during playback so rapid speed changes do not briefly expose uncorrected pitch.
 - [x] Add a short internal transition duck while the pitch-correction window settles.
+- [x] Replace live pitch/rate mutation with a warmed dual-bank crossfade for speed changes.
 - [x] Verify with typecheck and lint.
 
 ## Progress Log
@@ -55,6 +56,12 @@ Fix Studio transport speed changes so practice speed does not transpose the song
 **Result**: The old rate keeps the old correction during fade-out, then rate and correction change together while the transition gain is silent.
 **Notes**: Pending deferred correction is cancelled on later rate changes or transport teardown.
 
+### 2026-06-12 20:29
+
+**Action**: Replaced the single live source bank transition with a dual-bank transition. A muted replacement bank starts at the target speed and inverse pitch correction, warms for 100ms, then crossfades over 60ms while the old bank fades out.
+**Result**: Speed changes no longer mutate `playbackRate` or `PitchShift.pitch` on audible source paths. Rapid changes cancel or promote the in-flight bank transition, so later taps start from the currently audible transport state.
+**Notes**: Transition CPU temporarily doubles for the active stems during the warmup/crossfade window, then returns to one active bank after the retiring bank is stopped and disposed.
+
 ## Blockers
 
 - [ ] Manual audio quality verification still needs an authenticated Studio session with a real uploaded song/stems.
@@ -69,12 +76,17 @@ Fix Studio transport speed changes so practice speed does not transpose the song
    - **Rationale**: It avoids adding a dependency and keeps changes scoped to the Studio transport.
    - **Alternatives Considered**: Custom granular scheduling, which caused robotic/static artifacts; a dedicated WSOLA/phase-vocoder dependency, which is likely the longer-term quality ceiling.
 
+3. **Decision**: Use two source banks for speed transitions instead of mutating pitch correction on the audible bank.
+   - **Rationale**: Tone's pitch-shift window can expose a short old/new correction mismatch when changed in place. Warming a muted replacement path moves that settling period off the audible path.
+   - **Alternatives Considered**: Deeper ducking around the single-bank mutation, which reduced the transient but still let brief odd-pitch artifacts through on quick changes.
+
 ## Testing
 
 - [x] `pnpm typecheck` with Node 22
 - [x] `pnpm lint` with Node 22
+- [x] `pnpm build` with Node 22
 - [ ] Manual Studio listening pass at `0.5x`, `0.75x`, `1.5x`, `1.75x`, and `2x`
 
 ## Results
 
-Studio playback rate changes now keep timing on the shared Web Audio clock and compensate the pitch shift for the active speed.
+Studio playback rate changes now keep timing on the shared Web Audio clock and compensate the pitch shift for the active speed. Transition changes warm a corrected replacement bank before crossfading, avoiding audible live mutation of pitch-correction nodes.
