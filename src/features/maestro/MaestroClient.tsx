@@ -23,6 +23,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { PillIcon, ReadinessChips } from '@/components/werecode/WereCodePrimitives';
+import { JsonViewer } from '@/features/maestro/JsonViewer';
+import { useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
+import type { MaestroFactPack, MaestroTool, SongSummary } from '@/types/werecode-client';
 
 /**
  * Maestro: the in-product guitar-learning coach (developer surface).
@@ -36,16 +39,6 @@ import { PillIcon, ReadinessChips } from '@/components/werecode/WereCodePrimitiv
  * docs/execution_docs/2026-06-14_maestro-baseline-build.md.
  */
 
-type SongOption = {
-  id: string;
-  title: string;
-  artist: string | null;
-  has_stems: boolean;
-  has_midi: boolean;
-  has_analysis: boolean;
-};
-
-type FactPack = Record<string, unknown>;
 type ChatTrace = Record<string, unknown> | null;
 
 type ChatMessage = {
@@ -64,8 +57,6 @@ type ChatConversation = {
 };
 
 type ModelOption = { id: string; name: string; hint: string };
-type MaestroToolParam = { name: string; type: string | null; required: boolean; default: unknown };
-type MaestroTool = { name: string; description: string; params: MaestroToolParam[] };
 type DrawerContent = { title: string; subtitle: string; detail: unknown } | null;
 
 // OpenAI only for now. Ordered cheapest → most capable. `name` shows when the
@@ -146,15 +137,21 @@ function relTime(ts: number): string {
 }
 
 export function MaestroClient() {
-  const [songs, setSongs] = useState<SongOption[]>([]);
+  const cachedSongs = useWereCodeDataCache((state) => state.songs);
+  const songsLoaded = useWereCodeDataCache((state) => state.songsLoaded);
+  const setCachedSongs = useWereCodeDataCache((state) => state.setSongs);
+  const tools = useWereCodeDataCache((state) => state.maestroTools);
+  const toolsLoaded = useWereCodeDataCache((state) => state.maestroToolsLoaded);
+  const setCachedMaestroFactPack = useWereCodeDataCache((state) => state.setMaestroFactPack);
+  const setCachedMaestroTools = useWereCodeDataCache((state) => state.setMaestroTools);
   const [songsError, setSongsError] = useState<string | null>(null);
-  const [loadingSongs, setLoadingSongs] = useState(true);
+  const [loadingSongs, setLoadingSongs] = useState(!songsLoaded);
   const [query, setQuery] = useState('');
 
   const [selectedSongId, setSelectedSongId] = useState<string | null>(null);
   const [modelId, setModelId] = useState<string>(DEFAULT_MODEL_ID);
 
-  const [factPack, setFactPack] = useState<FactPack | null>(null);
+  const [factPack, setFactPack] = useState<MaestroFactPack | null>(null);
   const [factPackBusy, setFactPackBusy] = useState<'idle' | 'building' | 'loading'>('idle');
   const [factPackError, setFactPackError] = useState<string | null>(null);
 
@@ -167,7 +164,6 @@ export function MaestroClient() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const conversationsRef = useRef<ChatConversation[]>([]);
 
-  const [tools, setTools] = useState<MaestroTool[]>([]);
   const [toolsError, setToolsError] = useState<string | null>(null);
 
   const [pinnedTurn, setPinnedTurn] = useState<number | null>(null);
@@ -179,22 +175,38 @@ export function MaestroClient() {
     conversationsRef.current = conversations;
   }, [conversations]);
 
-  const loadLatestPack = useCallback(async (songId: string) => {
-    setFactPack(null);
-    setFactPackError(null);
-    setFactPackBusy('loading');
-    try {
-      const response = await fetch(`/api/maestro/fact-pack/${songId}`, { cache: 'no-store' });
-      if (response.status === 404 || response.status === 409) return; // not built yet
-      if (!response.ok) throw new Error(await readError(response, 'Could not load the fact pack'));
-      const body = await response.json();
-      setFactPack(body.factPack ?? null);
-    } catch (error) {
-      setFactPackError(error instanceof Error ? error.message : 'Could not load the fact pack');
-    } finally {
-      setFactPackBusy('idle');
-    }
-  }, []);
+  const loadLatestPack = useCallback(
+    async (songId: string, options: { force?: boolean } = {}) => {
+      const cached = useWereCodeDataCache.getState().maestroFactPacksBySongId[songId];
+      if (!options.force && cached) {
+        setFactPack(cached.factPack);
+        setFactPackError(null);
+        setFactPackBusy('idle');
+        return;
+      }
+
+      setFactPack(null);
+      setFactPackError(null);
+      setFactPackBusy('loading');
+      try {
+        const response = await fetch(`/api/maestro/fact-pack/${songId}`, { cache: 'no-store' });
+        if (response.status === 404 || response.status === 409) {
+          setCachedMaestroFactPack(songId, null);
+          return; // not built yet
+        }
+        if (!response.ok) throw new Error(await readError(response, 'Could not load the fact pack'));
+        const body = await response.json();
+        const nextFactPack = (body.factPack ?? null) as MaestroFactPack | null;
+        setCachedMaestroFactPack(songId, nextFactPack);
+        setFactPack(nextFactPack);
+      } catch (error) {
+        setFactPackError(error instanceof Error ? error.message : 'Could not load the fact pack');
+      } finally {
+        setFactPackBusy('idle');
+      }
+    },
+    [setCachedMaestroFactPack]
+  );
 
   // Switching songs restores that song's most recent conversation (if any) and
   // loads its fact pack. Reads conversations via a ref so the callback stays
@@ -216,28 +228,47 @@ export function MaestroClient() {
     [loadLatestPack]
   );
 
+  const loadSongs = useCallback(
+    async (options: { force?: boolean } = {}) => {
+      const cache = useWereCodeDataCache.getState();
+      if (!options.force && cache.songsLoaded) {
+        const ready = cache.songs.filter((song) => song.has_analysis);
+        if (ready[0] && (!selectedSongId || !ready.some((song) => song.id === selectedSongId))) {
+          selectSong(ready[0].id);
+        }
+        setLoadingSongs(false);
+        return;
+      }
+
+      setLoadingSongs(true);
+      setSongsError(null);
+      try {
+        const response = await fetch('/api/songs?limit=100', { cache: 'no-store' });
+        if (!response.ok) throw new Error(await readError(response, 'Could not load library'));
+        const body = (await response.json()) as { songs?: SongSummary[] };
+        const nextSongs = body.songs ?? [];
+        const ready = nextSongs.filter((song) => song.has_analysis);
+        setCachedSongs(nextSongs);
+        if (ready[0] && (!selectedSongId || !ready.some((song) => song.id === selectedSongId))) {
+          selectSong(ready[0].id);
+        }
+      } catch (error) {
+        setSongsError(error instanceof Error ? error.message : 'Could not load library');
+      } finally {
+        setLoadingSongs(false);
+      }
+    },
+    [selectSong, selectedSongId, setCachedSongs]
+  );
+
   // Library, narrowed to analysis-ready songs; auto-select the first.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await fetch('/api/library?includeJobs=false', { cache: 'no-store' });
-        if (!response.ok) throw new Error(await readError(response, 'Could not load library'));
-        const body = await response.json();
-        if (cancelled) return;
-        const ready: SongOption[] = (body.songs ?? []).filter((song: SongOption) => song.has_analysis);
-        setSongs(ready);
-        if (ready[0]) selectSong(ready[0].id);
-      } catch (error) {
-        if (!cancelled) setSongsError(error instanceof Error ? error.message : 'Could not load library');
-      } finally {
-        if (!cancelled) setLoadingSongs(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectSong]);
+    const timer = window.setTimeout(() => {
+      void loadSongs();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadSongs]);
 
   // Load persisted history + the tool catalog once on mount. We yield a microtask
   // before the first setState so it isn't a synchronous set-state-in-effect, and
@@ -249,11 +280,14 @@ export function MaestroClient() {
       await Promise.resolve();
       if (cancelled) return;
       setConversations(loadConversations());
+      if (useWereCodeDataCache.getState().maestroToolsLoaded) {
+        return;
+      }
       try {
         const response = await fetch('/api/maestro/tools', { cache: 'no-store' });
         if (!response.ok) throw new Error(await readError(response, 'Could not load tools'));
         const body = await response.json();
-        if (!cancelled) setTools(body.tools ?? []);
+        if (!cancelled) setCachedMaestroTools(body.tools ?? []);
       } catch (error) {
         if (!cancelled) setToolsError(error instanceof Error ? error.message : 'Could not load tools');
       }
@@ -261,7 +295,7 @@ export function MaestroClient() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setCachedMaestroTools]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' });
@@ -313,7 +347,9 @@ export function MaestroClient() {
       });
       if (!response.ok) throw new Error(await readError(response, 'Could not build the fact pack'));
       const body = await response.json();
-      setFactPack(body.factPack ?? null);
+      const nextFactPack = (body.factPack ?? null) as MaestroFactPack | null;
+      setCachedMaestroFactPack(selectedSongId, nextFactPack);
+      setFactPack(nextFactPack);
     } catch (error) {
       setFactPackError(error instanceof Error ? error.message : 'Could not build the fact pack');
     } finally {
@@ -356,6 +392,8 @@ export function MaestroClient() {
       setChatBusy(false);
     }
   }
+
+  const songs = useMemo(() => cachedSongs.filter((song) => song.has_analysis), [cachedSongs]);
 
   const filteredSongs = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -493,7 +531,9 @@ export function MaestroClient() {
                         style={active ? { boxShadow: 'inset 0 0 0 1.5px var(--accent)' } : undefined}
                       >
                         <p className="display truncate text-[13px] leading-5">{song.title}</p>
-                        {song.artist && <p className="mt-0.5 truncate text-[11px] text-[var(--muted)]">{song.artist}</p>}
+                        {song.artist && (
+                          <p className="mt-0.5 truncate text-[11px] text-[var(--muted)]">{song.artist}</p>
+                        )}
                         <div className="mt-1.5">
                           <ReadinessChips
                             items={[
@@ -519,7 +559,7 @@ export function MaestroClient() {
                   type="button"
                   className="pill ghost sm"
                   disabled={!selectedSongId || factPackBusy !== 'idle'}
-                  onClick={() => selectedSongId && loadLatestPack(selectedSongId)}
+                  onClick={() => selectedSongId && loadLatestPack(selectedSongId, { force: true })}
                   title="Load the latest persisted fact pack"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${factPackBusy === 'loading' ? 'animate-spin' : ''}`} />
@@ -642,7 +682,13 @@ export function MaestroClient() {
                 <p>Ask about the key, sections, chords, tempo, or parts. Try:</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {SUGGESTED_PROMPTS.map((prompt) => (
-                    <button key={prompt} type="button" className="chip" disabled={!hasPack} onClick={() => send(prompt)}>
+                    <button
+                      key={prompt}
+                      type="button"
+                      className="chip"
+                      disabled={!hasPack}
+                      onClick={() => send(prompt)}
+                    >
                       {prompt}
                     </button>
                   ))}
@@ -663,20 +709,19 @@ export function MaestroClient() {
               }
               const isActive = index === activeTurn;
               return (
-                <div key={index} className="flex flex-col gap-1">
+                <div key={index} className="group flex flex-col gap-1">
                   <div
                     className="markdown max-w-[94%] rounded-lg px-1 text-[14px] leading-7 [&_a]:underline [&_code]:rounded [&_code]:bg-[var(--card)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[12px] [&_h1]:mt-2 [&_h1]:text-[16px] [&_h2]:mt-2 [&_h2]:text-[15px] [&_li]:my-0.5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_pre]:my-2 [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-[var(--card)] [&_pre]:p-3 [&_pre]:text-[12px] [&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[var(--hair)] [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-[var(--hair)] [&_th]:bg-[var(--card)] [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
                     style={isActive ? { boxShadow: 'inset 2px 0 0 var(--accent)' } : undefined}
                   >
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                   </div>
-                  {message.trace && (
+                  {message.trace && !isActive && (
                     <button
                       type="button"
                       onClick={() => setPinnedTurn(index)}
-                      className="self-start text-[11px] text-[var(--muted)] hover:text-[var(--ink)]"
+                      className="max-h-0 self-start overflow-hidden text-[11px] text-[var(--muted)] opacity-0 transition-[max-height,opacity] duration-150 hover:text-[var(--ink)] focus-visible:max-h-6 focus-visible:opacity-100 group-hover:max-h-6 group-hover:opacity-100 group-focus-within:max-h-6 group-focus-within:opacity-100"
                     >
-                      {isActive ? '● ' : ''}
                       View runtime →
                     </button>
                   )}
@@ -724,7 +769,7 @@ export function MaestroClient() {
         {/* Right: runtime + tools, stacked */}
         <div className="flex min-h-0 flex-col gap-3">
           <RuntimeRail trace={activeTrace} turnLabel={activeTurnLabel} onOpen={setDrawer} />
-          <ToolsPanel tools={tools} error={toolsError} onOpen={setDrawer} />
+          <ToolsPanel tools={tools} toolsLoaded={toolsLoaded} error={toolsError} onOpen={setDrawer} />
         </div>
       </div>
 
@@ -805,7 +850,9 @@ function RuntimeRail({
         {trace ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px]">
             {model && <span className="chip">{model}</span>}
-            {usage?.total_tokens != null && <span className="chip">{Number(usage.total_tokens).toLocaleString()} tok</span>}
+            {usage?.total_tokens != null && (
+              <span className="chip">{Number(usage.total_tokens).toLocaleString()} tok</span>
+            )}
             {usage?.cost_usd != null && <span className="chip">${Number(usage.cost_usd).toFixed(4)}</span>}
             {elapsed != null && <span className="chip">{(elapsed / 1000).toFixed(1)}s</span>}
           </div>
@@ -871,10 +918,12 @@ function RuntimeRail({
 
 function ToolsPanel({
   tools,
+  toolsLoaded,
   error,
   onOpen,
 }: {
   tools: MaestroTool[];
+  toolsLoaded: boolean;
   error: string | null;
   onOpen: (content: DrawerContent) => void;
 }) {
@@ -889,7 +938,9 @@ function ToolsPanel({
         {error ? (
           <p className="p-2 text-[12px] text-[var(--danger)]">{error}</p>
         ) : tools.length === 0 ? (
-          <p className="p-2 text-[12px] text-[var(--muted)]">Loading tools…</p>
+          <p className="p-2 text-[12px] text-[var(--muted)]">
+            {toolsLoaded ? 'No tools available.' : 'Loading tools…'}
+          </p>
         ) : (
           <ul className="flex flex-col gap-1">
             {tools.map((tool) => (
@@ -897,7 +948,11 @@ function ToolsPanel({
                 <RuntimeRow
                   icon={Wrench}
                   name={tool.name}
-                  meta={tool.params.length === 0 ? 'no params' : `${tool.params.length} param${tool.params.length > 1 ? 's' : ''}`}
+                  meta={
+                    tool.params.length === 0
+                      ? 'no params'
+                      : `${tool.params.length} param${tool.params.length > 1 ? 's' : ''}`
+                  }
                   onClick={() => onOpen({ title: tool.name, subtitle: 'tool', detail: tool })}
                 />
               </li>
@@ -935,7 +990,9 @@ function RuntimeRow({
         <span className="block truncate text-[10px] uppercase tracking-wide text-[var(--muted)]">{meta}</span>
       </span>
       {status && (
-        <span className={`shrink-0 text-[10px] ${danger ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`}>{status}</span>
+        <span className={`shrink-0 text-[10px] ${danger ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`}>
+          {status}
+        </span>
       )}
     </button>
   );
@@ -978,10 +1035,10 @@ function RuntimeDrawer({ content, onClose }: { content: DrawerContent; onClose: 
           open ? 'translate-x-0' : 'pointer-events-none translate-x-[120%]'
         }`}
       >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--hair)] px-4 py-3.5">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--hair)] px-4 py-4">
           <div className="min-w-0">
-            <p className="text-[11px] uppercase tracking-wide text-[var(--muted)]">{content?.subtitle}</p>
-            <p className="display mt-0.5 truncate text-[16px]">{content?.title}</p>
+            <p className="text-[11px] leading-4 uppercase tracking-wide text-[var(--muted)]">{content?.subtitle}</p>
+            <p className="display mt-0.5 truncate text-[16px] leading-5">{content?.title}</p>
           </div>
           <button type="button" onClick={onClose} className="iconbtn shrink-0" aria-label="Close">
             <X className="h-4 w-4" />
@@ -989,9 +1046,7 @@ function RuntimeDrawer({ content, onClose }: { content: DrawerContent; onClose: 
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
           {description && <p className="mb-3 text-[13px] leading-6 text-[var(--ink-2)]">{description}</p>}
-          <pre className="overflow-auto rounded-[10px] bg-[var(--paper)] p-3 text-[11px] leading-4 text-[var(--ink-2)]">
-            {content ? JSON.stringify(content.detail, null, 2) : ''}
-          </pre>
+          {content && <JsonViewer data={content.detail} />}
         </div>
       </aside>
     </>
@@ -1026,7 +1081,7 @@ type FactPackSummary = {
   keyConflict: boolean;
 };
 
-function summarizeFactPack(pack: FactPack | null): FactPackSummary | null {
+function summarizeFactPack(pack: MaestroFactPack | null): FactPackSummary | null {
   if (!pack) return null;
   const key = asRecord(pack.key);
   const tempo = asRecord(pack.tempo);

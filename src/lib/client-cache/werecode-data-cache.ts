@@ -5,7 +5,15 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 
 import type { MusicXmlPreviewData } from '@/lib/music/musicxml';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
-import type { AssetSummary, JobSummary, SignedAssetUrl, SongSummary, StudioDetail } from '@/types/werecode-client';
+import type {
+  AssetSummary,
+  JobSummary,
+  MaestroFactPack,
+  MaestroTool,
+  SignedAssetUrl,
+  SongSummary,
+  StudioDetail,
+} from '@/types/werecode-client';
 
 import { clearStoredStudioDetails } from './studio-detail-store';
 
@@ -35,6 +43,11 @@ type MusicXmlPreviewCacheEntry = {
   loadedAt: number;
 };
 
+type MaestroFactPackCacheEntry = {
+  factPack: MaestroFactPack | null;
+  loadedAt: number;
+};
+
 type WereCodeDataCacheState = {
   owner: string | null;
   songs: SongSummary[];
@@ -48,6 +61,10 @@ type WereCodeDataCacheState = {
   studioBySongId: Record<string, StudioCacheEntry>;
   signedUrlsByAssetId: Record<string, SignedUrlCacheEntry>;
   musicXmlPreviewsByAssetId: Record<string, MusicXmlPreviewCacheEntry>;
+  maestroFactPacksBySongId: Record<string, MaestroFactPackCacheEntry>;
+  maestroTools: MaestroTool[];
+  maestroToolsLoaded: boolean;
+  maestroToolsLoadedAt: number | null;
   setSongs: (songs: SongSummary[]) => void;
   upsertSong: (song: SongSummary | SongRow) => void;
   removeSong: (songId: string) => void;
@@ -63,6 +80,8 @@ type WereCodeDataCacheState = {
   setStudioAnalysisResults: (songId: string, analysisResults: AnalysisResultRow[]) => void;
   setSignedAssetUrls: (signedUrls: SignedAssetUrl[]) => void;
   setMusicXmlPreview: (assetId: string, preview: MusicXmlPreviewData) => void;
+  setMaestroFactPack: (songId: string, factPack: MaestroFactPack | null) => void;
+  setMaestroTools: (tools: MaestroTool[]) => void;
   setOwner: (owner: string | null) => void;
   clear: () => void;
 };
@@ -80,180 +99,205 @@ const emptyState = {
   studioBySongId: {},
   signedUrlsByAssetId: {},
   musicXmlPreviewsByAssetId: {},
+  maestroFactPacksBySongId: {},
+  maestroTools: [],
+  maestroToolsLoaded: false,
+  maestroToolsLoadedAt: null,
 };
 
 export const useWereCodeDataCache = create<WereCodeDataCacheState>()(
   persist(
     (set) => ({
-  ...emptyState,
-  setSongs: (songs) =>
-    set({
-      songs: songs.map(toSongSummary).sort(sortSongs),
-      songsLoaded: true,
-      songsLoadedAt: Date.now(),
-    }),
-  upsertSong: (song) =>
-    set((state) => {
-      const summary = toSongSummary(song);
-      return {
-        songs: upsertById(state.songs, summary).sort(sortSongs),
-        songsLoaded: state.songsLoaded,
-        songsLoadedAt: state.songsLoadedAt,
-        studioBySongId: patchStudioDetail(state.studioBySongId, summary.id, { song: summary }),
-      };
-    }),
-  removeSong: (songId) =>
-    set((state) => ({
-      songs: state.songs.filter((song) => song.id !== songId),
-      songsLoaded: true,
-      songsLoadedAt: state.songsLoadedAt ?? Date.now(),
-    })),
-  setJobs: (jobs) =>
-    set({
-      jobs: jobs.map(toJobSummary).sort(sortJobs),
-      jobsLoaded: true,
-      jobsLoadedAt: Date.now(),
-    }),
-  upsertJob: (job) =>
-    set((state) => ({
-      jobs: upsertById(state.jobs, toJobSummary(job)).sort(sortJobs),
-      jobsLoaded: state.jobsLoaded,
-      jobsLoadedAt: state.jobsLoadedAt,
-    })),
-  setJobDetail: (job) =>
-    set((state) => ({
-      jobs: upsertById(state.jobs, toJobSummary(job)).sort(sortJobs),
-      jobsLoaded: state.jobsLoaded,
-      jobsLoadedAt: state.jobsLoadedAt,
-      jobDetailsById: {
-        ...state.jobDetailsById,
-        [job.id]: job,
-      },
-    })),
-  setAssetsForSong: (songId, assets) =>
-    set((state) => {
-      const summaries = assets.map(toAssetSummary).sort(sortAssets);
-      return {
-        assetsBySongId: {
-          ...state.assetsBySongId,
-          [songId]: {
-            assets: summaries,
-            loadedAt: Date.now(),
+      ...emptyState,
+      setSongs: (songs) =>
+        set({
+          songs: songs.map(toSongSummary).sort(sortSongs),
+          songsLoaded: true,
+          songsLoadedAt: Date.now(),
+        }),
+      upsertSong: (song) =>
+        set((state) => {
+          const summary = toSongSummary(song);
+          return {
+            songs: upsertById(state.songs, summary).sort(sortSongs),
+            songsLoaded: state.songsLoaded,
+            songsLoadedAt: state.songsLoadedAt,
+            studioBySongId: patchStudioDetail(state.studioBySongId, summary.id, { song: summary }),
+          };
+        }),
+      removeSong: (songId) =>
+        set((state) => {
+          return {
+            songs: state.songs.filter((song) => song.id !== songId),
+            songsLoaded: true,
+            songsLoadedAt: state.songsLoadedAt ?? Date.now(),
+            maestroFactPacksBySongId: omitKey(state.maestroFactPacksBySongId, songId),
+          };
+        }),
+      setJobs: (jobs) =>
+        set({
+          jobs: jobs.map(toJobSummary).sort(sortJobs),
+          jobsLoaded: true,
+          jobsLoadedAt: Date.now(),
+        }),
+      upsertJob: (job) =>
+        set((state) => ({
+          jobs: upsertById(state.jobs, toJobSummary(job)).sort(sortJobs),
+          jobsLoaded: state.jobsLoaded,
+          jobsLoadedAt: state.jobsLoadedAt,
+        })),
+      setJobDetail: (job) =>
+        set((state) => ({
+          jobs: upsertById(state.jobs, toJobSummary(job)).sort(sortJobs),
+          jobsLoaded: state.jobsLoaded,
+          jobsLoadedAt: state.jobsLoadedAt,
+          jobDetailsById: {
+            ...state.jobDetailsById,
+            [job.id]: job,
           },
-        },
-        studioBySongId: patchStudioDetail(state.studioBySongId, songId, { assets: summaries }),
-      };
-    }),
-  upsertAssetForSong: (songId, asset) =>
-    set((state) => {
-      const summary = toAssetSummary(asset);
-      const currentEntry = state.assetsBySongId[songId];
-      const nextAssets = currentEntry ? upsertById(currentEntry.assets, summary).sort(sortAssets) : null;
-      const studioEntry = state.studioBySongId[songId];
-      const nextStudioAssets = studioEntry ? upsertById(studioEntry.detail.assets, summary).sort(sortAssets) : null;
-
-      return {
-        assetsBySongId: nextAssets
-          ? {
+        })),
+      setAssetsForSong: (songId, assets) =>
+        set((state) => {
+          const summaries = assets.map(toAssetSummary).sort(sortAssets);
+          return {
+            assetsBySongId: {
               ...state.assetsBySongId,
               [songId]: {
-                assets: nextAssets,
-                loadedAt: currentEntry!.loadedAt,
+                assets: summaries,
+                loadedAt: Date.now(),
               },
-            }
-          : state.assetsBySongId,
-        studioBySongId: nextStudioAssets
-          ? patchStudioDetail(state.studioBySongId, songId, { assets: nextStudioAssets })
-          : state.studioBySongId,
-      };
-    }),
-  setStudioDetail: (songId, detail) =>
-    set((state) => {
-      const studioDetail = toStudioDetail(detail);
-      return {
-        studioBySongId: {
-          ...state.studioBySongId,
-          [songId]: {
-            detail: studioDetail,
-            loadedAt: Date.now(),
-          },
-        },
-        songs: upsertById(state.songs, studioDetail.song).sort(sortSongs),
-        assetsBySongId: {
-          ...state.assetsBySongId,
-          [songId]: {
-            assets: studioDetail.assets,
-            loadedAt: Date.now(),
-          },
-        },
-      };
-    }),
-  patchStudioSong: (song) =>
-    set((state) => {
-      const summary = toSongSummary(song);
-      return {
-        songs: upsertById(state.songs, summary).sort(sortSongs),
-        studioBySongId: patchStudioDetail(state.studioBySongId, summary.id, { song: summary }),
-      };
-    }),
-  upsertStudioAssets: (songId, assets) =>
-    set((state) => {
-      const summaries = assets.map(toAssetSummary);
-      const studioEntry = state.studioBySongId[songId];
-      const assetEntry = state.assetsBySongId[songId];
-      const nextStudioAssets = studioEntry
-        ? summaries.reduce((current, asset) => upsertById(current, asset), studioEntry.detail.assets).sort(sortAssets)
-        : null;
-      const nextAssetSummaries = assetEntry
-        ? summaries.reduce((current, asset) => upsertById(current, asset), assetEntry.assets).sort(sortAssets)
-        : null;
+            },
+            studioBySongId: patchStudioDetail(state.studioBySongId, songId, { assets: summaries }),
+          };
+        }),
+      upsertAssetForSong: (songId, asset) =>
+        set((state) => {
+          const summary = toAssetSummary(asset);
+          const currentEntry = state.assetsBySongId[songId];
+          const nextAssets = currentEntry ? upsertById(currentEntry.assets, summary).sort(sortAssets) : null;
+          const studioEntry = state.studioBySongId[songId];
+          const nextStudioAssets = studioEntry ? upsertById(studioEntry.detail.assets, summary).sort(sortAssets) : null;
 
-      return {
-        studioBySongId: nextStudioAssets
-          ? patchStudioDetail(state.studioBySongId, songId, { assets: nextStudioAssets })
-          : state.studioBySongId,
-        assetsBySongId: nextAssetSummaries
-          ? {
+          return {
+            assetsBySongId: nextAssets
+              ? {
+                  ...state.assetsBySongId,
+                  [songId]: {
+                    assets: nextAssets,
+                    loadedAt: currentEntry!.loadedAt,
+                  },
+                }
+              : state.assetsBySongId,
+            studioBySongId: nextStudioAssets
+              ? patchStudioDetail(state.studioBySongId, songId, { assets: nextStudioAssets })
+              : state.studioBySongId,
+          };
+        }),
+      setStudioDetail: (songId, detail) =>
+        set((state) => {
+          const studioDetail = toStudioDetail(detail);
+          return {
+            studioBySongId: {
+              ...state.studioBySongId,
+              [songId]: {
+                detail: studioDetail,
+                loadedAt: Date.now(),
+              },
+            },
+            songs: upsertById(state.songs, studioDetail.song).sort(sortSongs),
+            assetsBySongId: {
               ...state.assetsBySongId,
               [songId]: {
-                assets: nextAssetSummaries,
-                loadedAt: assetEntry!.loadedAt,
+                assets: studioDetail.assets,
+                loadedAt: Date.now(),
               },
-            }
-          : state.assetsBySongId,
-      };
-    }),
-  setStudioLyrics: (songId, lyrics) =>
-    set((state) => ({
-      studioBySongId: patchStudioDetail(state.studioBySongId, songId, { lyrics }),
-    })),
-  setStudioAnalysisResults: (songId, analysisResults) =>
-    set((state) => ({
-      studioBySongId: patchStudioDetail(state.studioBySongId, songId, { analysisResults }),
-    })),
-  setSignedAssetUrls: (signedUrls) =>
-    set((state) => {
-      const next = { ...state.signedUrlsByAssetId };
-      for (const signedUrl of signedUrls) {
-        next[signedUrl.assetId] = {
-          signedUrl: signedUrl.signedUrl,
-          expiresAt: new Date(signedUrl.expiresAt).getTime(),
-        };
-      }
-      return { signedUrlsByAssetId: next };
-    }),
-  setMusicXmlPreview: (assetId, preview) =>
-    set((state) => ({
-      musicXmlPreviewsByAssetId: {
-        ...state.musicXmlPreviewsByAssetId,
-        [assetId]: {
-          preview,
-          loadedAt: Date.now(),
-        },
-      },
-    })),
-  setOwner: (owner) => set({ owner }),
-  clear: () => set(emptyState),
+            },
+          };
+        }),
+      patchStudioSong: (song) =>
+        set((state) => {
+          const summary = toSongSummary(song);
+          return {
+            songs: upsertById(state.songs, summary).sort(sortSongs),
+            studioBySongId: patchStudioDetail(state.studioBySongId, summary.id, { song: summary }),
+          };
+        }),
+      upsertStudioAssets: (songId, assets) =>
+        set((state) => {
+          const summaries = assets.map(toAssetSummary);
+          const studioEntry = state.studioBySongId[songId];
+          const assetEntry = state.assetsBySongId[songId];
+          const nextStudioAssets = studioEntry
+            ? summaries
+                .reduce((current, asset) => upsertById(current, asset), studioEntry.detail.assets)
+                .sort(sortAssets)
+            : null;
+          const nextAssetSummaries = assetEntry
+            ? summaries.reduce((current, asset) => upsertById(current, asset), assetEntry.assets).sort(sortAssets)
+            : null;
+
+          return {
+            studioBySongId: nextStudioAssets
+              ? patchStudioDetail(state.studioBySongId, songId, { assets: nextStudioAssets })
+              : state.studioBySongId,
+            assetsBySongId: nextAssetSummaries
+              ? {
+                  ...state.assetsBySongId,
+                  [songId]: {
+                    assets: nextAssetSummaries,
+                    loadedAt: assetEntry!.loadedAt,
+                  },
+                }
+              : state.assetsBySongId,
+          };
+        }),
+      setStudioLyrics: (songId, lyrics) =>
+        set((state) => ({
+          studioBySongId: patchStudioDetail(state.studioBySongId, songId, { lyrics }),
+        })),
+      setStudioAnalysisResults: (songId, analysisResults) =>
+        set((state) => ({
+          studioBySongId: patchStudioDetail(state.studioBySongId, songId, { analysisResults }),
+        })),
+      setSignedAssetUrls: (signedUrls) =>
+        set((state) => {
+          const next = { ...state.signedUrlsByAssetId };
+          for (const signedUrl of signedUrls) {
+            next[signedUrl.assetId] = {
+              signedUrl: signedUrl.signedUrl,
+              expiresAt: new Date(signedUrl.expiresAt).getTime(),
+            };
+          }
+          return { signedUrlsByAssetId: next };
+        }),
+      setMusicXmlPreview: (assetId, preview) =>
+        set((state) => ({
+          musicXmlPreviewsByAssetId: {
+            ...state.musicXmlPreviewsByAssetId,
+            [assetId]: {
+              preview,
+              loadedAt: Date.now(),
+            },
+          },
+        })),
+      setMaestroFactPack: (songId, factPack) =>
+        set((state) => ({
+          maestroFactPacksBySongId: {
+            ...state.maestroFactPacksBySongId,
+            [songId]: {
+              factPack,
+              loadedAt: Date.now(),
+            },
+          },
+        })),
+      setMaestroTools: (tools) =>
+        set({
+          maestroTools: tools,
+          maestroToolsLoaded: true,
+          maestroToolsLoadedAt: Date.now(),
+        }),
+      setOwner: (owner) => set({ owner }),
+      clear: () => set(emptyState),
     }),
     {
       name: STORAGE_KEY,
@@ -445,11 +489,7 @@ export function toStudioDetail(detail: StudioDetail): StudioDetail {
   };
 }
 
-function patchStudioDetail(
-  entries: Record<string, StudioCacheEntry>,
-  songId: string,
-  patch: Partial<StudioDetail>
-) {
+function patchStudioDetail(entries: Record<string, StudioCacheEntry>, songId: string, patch: Partial<StudioDetail>) {
   const current = entries[songId];
   if (!current) {
     return entries;
@@ -465,6 +505,16 @@ function patchStudioDetail(
       },
     },
   };
+}
+
+function omitKey<T>(record: Record<string, T>, key: string) {
+  if (!(key in record)) {
+    return record;
+  }
+
+  const next = { ...record };
+  delete next[key];
+  return next;
 }
 
 function upsertById<T extends { id: string }>(items: T[], item: T) {

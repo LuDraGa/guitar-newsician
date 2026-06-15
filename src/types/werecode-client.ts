@@ -70,3 +70,18 @@ export type StudioDetail = {
   analysisResults: AnalysisResultRow[];
   lyrics: LyricsRow[];
 };
+
+export type MaestroFactPack = Record<string, unknown>;
+
+export type MaestroToolParam = {
+  name: string;
+  type: string | null;
+  required: boolean;
+  default: unknown;
+};
+
+export type MaestroTool = {
+  name: string;
+  description: string;
+  params: MaestroToolParam[];
+};
