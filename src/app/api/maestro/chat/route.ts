@@ -22,6 +22,8 @@ const bodySchema = z.object({
     )
     .max(64)
     .default([]),
+  // LiteLLM `provider/model`; the agent validates it against its allowlist.
+  model: z.string().min(1).max(64).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -29,11 +31,11 @@ export async function POST(request: NextRequest) {
     return jsonError('Maestro is not enabled', { status: 404, code: 'maestro_disabled' });
   }
   try {
-    const { songId, message, history } = bodySchema.parse(await request.json().catch(() => null));
+    const { songId, message, history, model } = bodySchema.parse(await request.json().catch(() => null));
     const { user, supabase } = await getWereCodeRequestContext();
     await requireOwnedSong(supabase, user.id, songId);
 
-    const result = await chatWithMaestro({ songId, message, history });
+    const result = await chatWithMaestro({ songId, message, history, model });
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof MaestroAgentError) {

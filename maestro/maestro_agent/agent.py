@@ -8,6 +8,7 @@ chat model (`maestro_agent.llm`), the tools read the WereCode SongFactPack
 
 from __future__ import annotations
 
+import inspect
 import json
 import time
 from datetime import UTC, datetime
@@ -17,10 +18,28 @@ from deepagents import create_deep_agent
 
 from maestro_agent.config import Settings
 from maestro_agent.fact_pack import FactPackUnavailable, SongFactPackService
-from maestro_agent.llm import make_chat_model, usage_observer
+from maestro_agent.llm import make_chat_model, normalize_model, usage_observer
 
 MAX_HISTORY_MESSAGES = 16
 MAX_HISTORY_CHARS = 6000
+
+# Per-request model override is dev-only and gated, but we still refuse anything
+# that isn't an OpenAI model so a typo can't quietly bill an unexpected provider.
+ALLOWED_MODEL_PREFIX = "openai/"
+
+
+class ModelNotAllowed(ValueError):
+    """Raised when a requested model is outside the permitted set."""
+
+
+def resolve_model(model: str | None, settings: Settings) -> str:
+    """Normalize a requested model (or fall back to the configured default) and
+    enforce the allowlist. Always returns the LiteLLM `provider/model` form so it
+    doubles as a stable agent-cache key."""
+    normalized = normalize_model(model or settings.agent_model)
+    if not normalized.startswith(ALLOWED_MODEL_PREFIX):
+        raise ModelNotAllowed(f"Unsupported model '{model}'. Only {ALLOWED_MODEL_PREFIX}* models are allowed.")
+    return normalized
 
 SYSTEM_PROMPT_TEMPLATE = """You are Maestro, a guitar-learning music coach answering questions about ONE song the learner is studying.
 
@@ -41,14 +60,19 @@ Important behavior:
 _agent_cache: dict[str, Any] = {}
 
 
-def create_agent_runner(settings: Settings, fact_pack: SongFactPackService, song_id: str):
-    """Create a DeepAgents runnable scoped to one song."""
-    model = make_chat_model(settings.agent_model)
+def create_agent_runner(
+    settings: Settings,
+    fact_pack: SongFactPackService,
+    song_id: str,
+    model: str | None = None,
+):
+    """Create a DeepAgents runnable scoped to one song (and one model)."""
+    chat_model = make_chat_model(model or settings.agent_model)
     tools = _make_tools(fact_pack, song_id)
     return create_deep_agent(
-        model=model,
+        model=chat_model,
         tools=tools,
-        subagents=_make_subagents(model),
+        subagents=_make_subagents(chat_model),
         system_prompt=SYSTEM_PROMPT_TEMPLATE.format(song_id=song_id),
         name="song_qna_agent",
     )
@@ -60,13 +84,18 @@ def invoke_agent(
     message: str,
     song_id: str,
     history: list[dict[str, Any]] | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     if not settings.agent_enabled:
         return {"content": "Agent is disabled by MAESTRO_AGENT_ENABLED=0.", "raw": None}
-    agent = _agent_cache.get(song_id)
+    resolved_model = resolve_model(model, settings)
+    # Cache per (song, model): switching models must not reuse a runner bound to
+    # the old model.
+    cache_key = f"{song_id}|{resolved_model}"
+    agent = _agent_cache.get(cache_key)
     if agent is None:
-        agent = create_agent_runner(settings, fact_pack, song_id)
-        _agent_cache[song_id] = agent
+        agent = create_agent_runner(settings, fact_pack, song_id, resolved_model)
+        _agent_cache[cache_key] = agent
 
     messages = _build_agent_messages(song_id, message, history or [])
     observer = usage_observer()
@@ -82,7 +111,7 @@ def invoke_agent(
     trace.update(
         {
             "request": {"song_id": song_id, "message": message, "history_messages": len(messages) - 1},
-            "model": settings.agent_model,
+            "model": resolved_model,
             "usage": usage_observer().summarize(usage_records),
             "usage_calls": usage_records,
             "started_at": started_at,
@@ -139,6 +168,33 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         return _safe_fact_query(query.transpose_song, semitones, target_key)
 
     return [get_sections, get_bar_grid, get_chords, get_key, get_midi_tracks, get_song_slice, transpose_song]
+
+
+def describe_tools(fact_pack: SongFactPackService) -> list[dict[str, Any]]:
+    """Introspect the bounded tools (name, docstring, signature) for the UI's
+    Tools panel. The closures are built with a placeholder song id and only
+    inspected, never invoked, so no song data is read."""
+    described: list[dict[str, Any]] = []
+    for tool in _make_tools(fact_pack, "_introspect"):
+        params: list[dict[str, Any]] = []
+        for name, parameter in inspect.signature(tool).parameters.items():
+            annotation = parameter.annotation
+            type_str = (
+                None
+                if annotation is inspect.Parameter.empty
+                else getattr(annotation, "__name__", None) or str(annotation)
+            )
+            has_default = parameter.default is not inspect.Parameter.empty
+            params.append(
+                {
+                    "name": name,
+                    "type": type_str,
+                    "required": not has_default,
+                    "default": parameter.default if has_default else None,
+                }
+            )
+        described.append({"name": tool.__name__, "description": (tool.__doc__ or "").strip(), "params": params})
+    return described
 
 
 def _make_subagents(model: Any) -> list[dict[str, Any]]:

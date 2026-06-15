@@ -31,6 +31,7 @@ class ChatRequest(BaseModel):
     song_id: str
     message: str
     history: list[ChatHistoryMessage] = Field(default_factory=list)
+    model: str | None = None
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -43,6 +44,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, Any]:
         return {"status": "ok", **settings.public_dict()}
+
+    @app.get("/tools")
+    def list_tools() -> dict[str, Any]:
+        # Lazy import keeps the heavy agent stack off the fact-pack path.
+        from maestro_agent.agent import describe_tools
+
+        return {"tools": describe_tools(fact_pack)}
 
     @app.post("/fact-pack/build")
     def build_fact_pack(request: FactPackBuildRequest) -> dict[str, Any]:
@@ -72,7 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="message is required")
         # Lazy import: keeps the agent stack (deepagents/litellm) out of the
         # fact-pack path and the C1a data layer.
-        from maestro_agent.agent import invoke_agent
+        from maestro_agent.agent import ModelNotAllowed, invoke_agent
 
         try:
             return invoke_agent(
@@ -81,7 +89,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 request.message,
                 request.song_id,
                 [item.model_dump() for item in request.history],
+                request.model,
             )
+        except ModelNotAllowed as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except SongNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except FactPackUnavailable as exc:

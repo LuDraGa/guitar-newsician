@@ -16,6 +16,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // workbench layout and the contextual coach; bare `/app/studio` is the picker and
   // scrolls like any other page.
   const inSongStudio = pathname.startsWith('/app/studio/');
+  // Maestro is a single-viewport workbench too: it manages its own internal
+  // scroll regions and must not produce a document-level scroll.
+  const fixedViewport = inSongStudio || pathname.startsWith('/app/maestro');
 
   // Library + Studio are the product. Pipeline and Maestro are developer-only
   // surfaces, each gated by its own flag (auto-on in local dev, hidden on prod),
@@ -74,7 +77,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <AuthButton />
           </div>
         </header>
-        <ShellContent inSongStudio={inSongStudio}>{children}</ShellContent>
+        <ShellContent fixedViewport={fixedViewport}>{children}</ShellContent>
       </main>
     </SessionProvider>
   );
@@ -90,15 +93,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
  * sibling. This replaces the former per-surface sign-in gates.
  */
 function ShellContent({
-  inSongStudio,
+  fixedViewport,
   children,
 }: {
-  inSongStudio: boolean;
+  fixedViewport: boolean;
   children: React.ReactNode;
 }) {
   const { session } = useSession();
   const locked = Boolean(session && session.authEnabled && !session.user);
-  const contentClass = inSongStudio ? 'wc-content wc-content-studio' : 'wc-content';
+  const contentClass = fixedViewport ? 'wc-content wc-content-studio' : 'wc-content';
 
   return (
     <>

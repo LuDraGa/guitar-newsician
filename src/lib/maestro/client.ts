@@ -98,6 +98,23 @@ export type MaestroChatResult = {
   raw: Record<string, unknown> | null;
 };
 
+export type MaestroToolParam = {
+  name: string;
+  type: string | null;
+  required: boolean;
+  default: unknown;
+};
+
+export type MaestroTool = {
+  name: string;
+  description: string;
+  params: MaestroToolParam[];
+};
+
+export function getMaestroTools(): Promise<{ tools: MaestroTool[] }> {
+  return maestroFetch<{ tools: MaestroTool[] }>('/tools');
+}
+
 export function buildFactPack(songId: string): Promise<MaestroFactPack> {
   return maestroFetch<MaestroFactPack>('/fact-pack/build', {
     method: 'POST',
@@ -113,6 +130,8 @@ export function chatWithMaestro(input: {
   songId: string;
   message: string;
   history: MaestroChatHistoryMessage[];
+  /** LiteLLM `provider/model` (e.g. `openai/gpt-5.4-nano`); omitted = agent default. */
+  model?: string;
 }): Promise<MaestroChatResult> {
   return maestroFetch<MaestroChatResult>('/chat', {
     method: 'POST',
@@ -120,6 +139,7 @@ export function chatWithMaestro(input: {
       song_id: input.songId,
       message: input.message,
       history: input.history,
+      model: input.model,
     }),
   });
 }
