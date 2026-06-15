@@ -1,0 +1,116 @@
+"""Maestro LLM client — the single chokepoint for every model call.
+
+All agent + specialist calls go through LiteLLM (via langchain-litellm's
+ChatLiteLLM), so we get one place for: token/cost tracking, observability /
+instrumentation, and easy provider switching (incl. multi-provider voting in
+later slices). Swapping providers is an env change (`MAESTRO_AGENT_MODEL`); the
+usage observer is the seam where richer instrumentation (e.g. Langfuse) plugs in.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+from typing import Any
+
+import litellm
+from langchain_litellm import ChatLiteLLM
+from litellm.integrations.custom_logger import CustomLogger
+
+logger = logging.getLogger("maestro.llm")
+
+
+def normalize_model(model: str) -> str:
+    """Accept both the langchain `provider:model` and LiteLLM `provider/model`
+    forms; LiteLLM wants the slash form."""
+    if "/" in model:
+        return model
+    if ":" in model:
+        return model.replace(":", "/", 1)
+    return model
+
+
+class MaestroUsageObserver(CustomLogger):
+    """Records model / tokens / cost / latency for every LiteLLM completion."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._records: list[dict[str, Any]] = []
+
+    def log_success_event(self, kwargs, response_obj, start_time, end_time) -> None:  # noqa: ANN001
+        try:
+            usage = getattr(response_obj, "usage", None)
+
+            def field(name: str) -> Any:
+                if usage is None:
+                    return None
+                return usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+
+            try:
+                cost = litellm.completion_cost(completion_response=response_obj)
+            except Exception:
+                cost = None
+            try:
+                latency_ms = round((end_time - start_time).total_seconds() * 1000, 1)
+            except Exception:
+                latency_ms = None
+
+            record = {
+                "model": kwargs.get("model"),
+                "prompt_tokens": field("prompt_tokens"),
+                "completion_tokens": field("completion_tokens"),
+                "total_tokens": field("total_tokens"),
+                "cost_usd": round(cost, 6) if isinstance(cost, (int, float)) else None,
+                "latency_ms": latency_ms,
+            }
+            with self._lock:
+                self._records.append(record)
+            logger.info("llm.call %s", record)
+        except Exception as exc:  # never let observability break a call
+            logger.warning("usage observe failed: %s", exc)
+
+    def drain(self) -> list[dict[str, Any]]:
+        with self._lock:
+            records = list(self._records)
+            self._records.clear()
+            return records
+
+    @staticmethod
+    def summarize(records: list[dict[str, Any]]) -> dict[str, Any]:
+        def total(name: str) -> int:
+            return sum(int(record.get(name) or 0) for record in records)
+
+        return {
+            "calls": len(records),
+            "prompt_tokens": total("prompt_tokens"),
+            "completion_tokens": total("completion_tokens"),
+            "total_tokens": total("total_tokens"),
+            "cost_usd": round(sum(float(record.get("cost_usd") or 0) for record in records), 6),
+        }
+
+
+_observer = MaestroUsageObserver()
+_initialized = False
+
+
+def _init_litellm() -> None:
+    global _initialized
+    if _initialized:
+        return
+    if _observer not in (litellm.callbacks or []):
+        litellm.callbacks = [*(litellm.callbacks or []), _observer]
+    _initialized = True
+
+
+def make_chat_model(model: str, *, temperature: float = 1.0) -> ChatLiteLLM:
+    """Build a LiteLLM-backed chat model for DeepAgents to consume.
+
+    Temperature defaults to 1.0: GPT-5 / o-series reasoning models reject any
+    other value, and 1.0 is valid everywhere. Per-model temperature policy can
+    live here later (this is the single LLM chokepoint)."""
+    _init_litellm()
+    return ChatLiteLLM(model=normalize_model(model), temperature=temperature)
+
+
+def usage_observer() -> MaestroUsageObserver:
+    return _observer

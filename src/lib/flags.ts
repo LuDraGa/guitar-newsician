@@ -23,3 +23,17 @@ export function isPipelineEnabled(): boolean {
     process.env.NODE_ENV === 'development'
   );
 }
+
+/**
+ * Maestro is the in-product guitar-learning coach, built behind a developer flag
+ * exactly like Pipeline: on automatically in local `next dev`, hidden on Vercel
+ * preview + production unless `NEXT_PUBLIC_ENABLE_MAESTRO=true`. One helper gates
+ * both the nav item (client) and the `/app/maestro` route guard (server) so they
+ * cannot disagree. See docs/maestro/maestro-build-flow.md §2.
+ */
+export function isMaestroEnabled(): boolean {
+  return (
+    process.env.NEXT_PUBLIC_ENABLE_MAESTRO === 'true' ||
+    process.env.NODE_ENV === 'development'
+  );
+}

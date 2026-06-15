@@ -8,7 +8,7 @@ import { AuthButton } from '@/components/auth/AuthButton';
 import { SessionProvider, useSession } from '@/components/auth/session-context';
 import { CommandSearch } from '@/components/shell/CommandSearch';
 import { PillIcon } from '@/components/werecode/WereCodePrimitives';
-import { isPipelineEnabled } from '@/lib/flags';
+import { isMaestroEnabled, isPipelineEnabled } from '@/lib/flags';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -17,16 +17,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // scrolls like any other page.
   const inSongStudio = pathname.startsWith('/app/studio/');
 
-  const navItems = isPipelineEnabled()
-    ? ([
-        { href: '/app/library', label: 'Library' },
-        { href: '/app/studio', label: 'Studio' },
-        { href: '/app/pipeline', label: 'Pipeline' },
-      ] as const)
-    : ([
-        { href: '/app/library', label: 'Library' },
-        { href: '/app/studio', label: 'Studio' },
-      ] as const);
+  // Library + Studio are the product. Pipeline and Maestro are developer-only
+  // surfaces, each gated by its own flag (auto-on in local dev, hidden on prod),
+  // so the nav never advertises a route its server guard would redirect away.
+  // `as const` per item keeps the literal href types that Next's typed routes
+  // (and the typed <Link>) require.
+  const navItems = [
+    { href: '/app/library', label: 'Library' } as const,
+    { href: '/app/studio', label: 'Studio' } as const,
+    ...(isPipelineEnabled() ? [{ href: '/app/pipeline', label: 'Pipeline' } as const] : []),
+    ...(isMaestroEnabled() ? [{ href: '/app/maestro', label: 'Maestro' } as const] : []),
+  ];
 
   function openCoach() {
     window.dispatchEvent(new CustomEvent('werecode:toggle-coach'));

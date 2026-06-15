@@ -7,8 +7,12 @@ const eslintConfig = [
   {
     ignores: [
       ".next/**",
+      ".claude/**",
       "backend/**",
       "downloads/**",
+      // The Maestro agent is a separate Python (uv) project; its `.venv`
+      // vendored JS bundles are not part of the Next app and must not be linted.
+      "maestro/**",
       "newsician 2/**",
       "Newsician/**",
     ],
