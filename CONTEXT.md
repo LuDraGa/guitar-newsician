@@ -23,3 +23,11 @@ _Avoid_: All-instrument learning app, generic music AI
 **Learner Context**:
 What Maestro knows about the learner from their questions, doubts, and progress around a song, with broader history across songs becoming more important over time.
 _Avoid_: Profile settings, preference form
+
+**Songbook**:
+The learner's reusable collection of song artifacts and playable material: stems, chords, tabs, lyrics, sheet music, and MIDI or piano-roll views they return to for practice, repetition, review, and follow-up questions.
+_Avoid_: Static library, file archive
+
+**Octavia**:
+The product-only concierge on the public site. Octavia explains Octave, access, fit, and product questions; it is separate from Maestro, the in-product music coach.
+_Avoid_: Maestro, music coach, tutor
