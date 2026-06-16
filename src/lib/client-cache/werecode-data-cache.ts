@@ -473,9 +473,11 @@ export function toAssetSummary(asset: AssetSummary | AssetRow): AssetSummary {
     content_type: asset.content_type,
     byte_size: asset.byte_size,
     duration_sec: asset.duration_sec,
+    source_asset_id: asset.source_asset_id,
     modal_model: asset.modal_model,
     modal_endpoint: asset.modal_endpoint,
     pipeline_version: asset.pipeline_version ?? null,
+    metadata: asset.metadata ?? {},
     created_at: asset.created_at,
   };
 }

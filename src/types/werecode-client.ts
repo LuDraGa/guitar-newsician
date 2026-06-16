@@ -49,9 +49,11 @@ export type AssetSummary = Pick<
   | 'content_type'
   | 'byte_size'
   | 'duration_sec'
+  | 'source_asset_id'
   | 'modal_model'
   | 'modal_endpoint'
   | 'pipeline_version'
+  | 'metadata'
   | 'created_at'
 >;
 

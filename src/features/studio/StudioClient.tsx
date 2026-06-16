@@ -67,8 +67,19 @@ import {
   type SectionSegment,
 } from '@/lib/music/analysis-overview';
 import { parseLrc } from '@/lib/music/lrc';
+import {
+  DEFAULT_STEM_LEVELS,
+  compareStemAssets,
+  getStemInfo,
+  isStemAudioKind,
+  isVocalStemAsset,
+  stemColor,
+  stemDisplayLabel,
+  stemDisplayTags,
+  stemIdentity,
+} from '@/lib/music/stem-metadata';
 import { createBrowserAudioContext } from '@/lib/music/waveform/audio-context';
-import { ANALYZE_FULL_ANALYZERS, computeStageStatuses } from '@/server/werecode/pipeline-versions';
+import { ANALYZE_FULL_ANALYZERS, computeStageStatuses, pipelineVersionFor } from '@/server/werecode/pipeline-versions';
 import type { AnalysisResultRow, AssetRow, JobRow, LyricsRow, SongRow } from '@/types/werecode';
 import type { AssetSummary, SongSummary, StudioDetail } from '@/types/werecode-client';
 import { PitchShift } from 'tone/build/esm/effect/PitchShift.js';
@@ -101,6 +112,7 @@ type GuitarMode = 'chords' | 'sheet' | 'tab';
 type LyricDisplayLine = { id: string; timestamp: number | null; text: string };
 type StemMixState = { level: number; muted: boolean; solo: boolean };
 type StemPlaybackSource = { id: string; kind: AssetSummary['kind']; url: string; level: number; muted: boolean; solo: boolean };
+type StemAnalysisStatus = 'none' | 'analyzing' | 'ready' | 'stale';
 type SeekCommand = { id: number; time: number };
 type PlaybackCommand = { id: number; action: 'toggle' };
 type EditorLyricLine = { id: string; time: number | null; text: string };
@@ -111,24 +123,6 @@ type EditorLyricsSavePayload = {
 type StemLevelPreviewDetail = { assetId: string; level: number };
 
 const stemLevelPreviewEvent = 'werecode:stem-level-preview';
-const stemKindSet = new Set(['stem_vocals', 'stem_drums', 'stem_bass', 'stem_other', 'stem_guitar', 'stem_piano']);
-const stemKindOrder = ['stem_vocals', 'stem_guitar', 'stem_bass', 'stem_drums', 'stem_piano', 'stem_other'];
-const defaultStemLevels: Record<string, number> = {
-  stem_vocals: 82,
-  stem_guitar: 72,
-  stem_bass: 64,
-  stem_drums: 58,
-  stem_piano: 62,
-  stem_other: 70,
-};
-const stemColors: Record<string, string> = {
-  stem_vocals: '#c8752d',
-  stem_guitar: '#0f9b72',
-  stem_bass: '#5d7bd6',
-  stem_drums: '#c95f5f',
-  stem_piano: '#8f70d5',
-  stem_other: '#a36bb1',
-};
 const studioTabs = [
   ['karaoke', 'Karaoke', Mic],
   ['guitar', 'Guitar learner', Guitar],
@@ -163,6 +157,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const [stemUrls, setStemUrls] = useState<Record<string, string>>({});
   const [stemMix, setStemMix] = useState<Record<string, StemMixState>>({});
   const [stemSignError, setStemSignError] = useState<string | null>(null);
+  const [activeStemAnalysisId, setActiveStemAnalysisId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<ReadonlySet<string>>(() => new Set<string>());
   // Stages observed as still in flight on the server (e.g. a job started before a
@@ -198,17 +193,21 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     latestAssetsByKind.get('normalized_audio') ??
     latestAssetsByKind.get('source_audio') ??
     latestAssetsByKind.get('preview_audio');
-  const vocalAsset = latestAssetsByKind.get('stem_vocals');
   const noteEventsAsset = latestAssetsByKind.get('note_events');
   const musicXmlAsset = latestAssetsByKind.get('musicxml') ?? latestAssetsByKind.get('tab_musicxml');
   const tabAsset = latestAssetsByKind.get('tab_musicxml');
   const plainLyrics = useMemo(() => findLatestPlainLyrics(lyrics), [lyrics]);
   const syncedLyrics = useMemo(() => findActiveSyncedLyrics(lyrics, plainLyrics), [lyrics, plainLyrics]);
   const stemAssets = useMemo(
-    () => assets.filter((asset) => stemKindSet.has(asset.kind)).sort((a, b) => stemKindOrder.indexOf(a.kind) - stemKindOrder.indexOf(b.kind)),
+    () => assets.filter((asset) => isStemAudioKind(asset.kind)).sort(compareStemAssets),
     [assets]
   );
   const playableStemAssets = useMemo(() => dedupeLatestStemAssets(stemAssets), [stemAssets]);
+  const stemAnalysisBySourceAssetId = useMemo(() => latestStemAnalysisBySourceAssetId(assets), [assets]);
+  const vocalAsset = useMemo(
+    () => playableStemAssets.find(isVocalStemAsset) ?? latestAssetsByKind.get('stem_vocals'),
+    [latestAssetsByKind, playableStemAssets]
+  );
   const stageStatuses = useMemo(
     () => computeStageStatuses(assets.map((asset) => ({ kind: asset.kind, pipeline_version: asset.pipeline_version ?? null }))),
     [assets]
@@ -420,6 +419,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         setStemUrls({});
         setStemMix({});
         setStemSignError(null);
+        setActiveStemAnalysisId(null);
         setLoading(false);
         return;
       }
@@ -538,8 +538,8 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     const poll = async () => {
       let active: Set<string>;
       try {
-        const payload = await fetchJson<{ jobs: Array<{ id: string; job_type: string; status: string }> }>(
-          `/api/jobs?songId=${songId}&limit=20`
+        const payload = await fetchJson<{ jobs: Array<Pick<JobRow, 'id' | 'job_type' | 'status' | 'request_payload'>> }>(
+          `/api/jobs?songId=${songId}&limit=20&includePayloads=true`
         );
         if (cancelled) {
           return;
@@ -551,6 +551,23 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         // Drive async completion: ask the server to advance each in-flight job.
         for (const job of activeJobs) {
           void syncJob(job.id);
+        }
+        const activeStemAnalysisJob = activeJobs.find((job) => {
+          const requestPayload = job.request_payload;
+          return (
+            job.job_type === 'analyze' &&
+            requestPayload &&
+            typeof requestPayload === 'object' &&
+            !Array.isArray(requestPayload) &&
+            requestPayload.is_stem === true &&
+            typeof requestPayload.source_asset_id === 'string'
+          );
+        });
+        if (activeStemAnalysisJob?.request_payload && typeof activeStemAnalysisJob.request_payload === 'object') {
+          const sourceAssetId = (activeStemAnalysisJob.request_payload as { source_asset_id?: unknown }).source_asset_id;
+          setActiveStemAnalysisId(typeof sourceAssetId === 'string' ? sourceAssetId : null);
+        } else if (!active.has('Analysis')) {
+          setActiveStemAnalysisId(null);
         }
       } catch {
         // Best-effort: keep the prior view and retry next tick.
@@ -621,10 +638,10 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
       return next;
     });
 
-  async function runWorkflow(name: string, endpoint: string, payload: Record<string, unknown>) {
+  async function runWorkflow(name: string, endpoint: string, payload: Record<string, unknown>): Promise<WorkflowResult | null> {
     if (!song) {
       setError('Select a song first');
-      return;
+      return null;
     }
 
     beginStage(name);
@@ -705,8 +722,10 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
         });
         setJobPollNonce((nonce) => nonce + 1);
       }
+      return result;
     } catch (workflowError) {
       setError(workflowError instanceof Error ? workflowError.message : `${name} failed`);
+      return null;
     } finally {
       finishStage(name);
     }
@@ -799,11 +818,26 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     }
   }
 
+  async function runStemAnalysis(asset: AssetSummary, options?: { force?: boolean }) {
+    setActiveStemAnalysisId(asset.id);
+    const result = await runWorkflow('Analysis', '/api/workflows/analyze', {
+      source_asset_id: asset.id,
+      is_stem: true,
+      ...(analyzeDepth === 'full' ? { analyzers: ANALYZE_FULL_ANALYZERS } : { preset: 'quick' }),
+      ...(options?.force ? { force: true } : {}),
+    });
+
+    if (result?.job?.status !== 'processing') {
+      setActiveStemAnalysisId((current) => (current === asset.id ? null : current));
+    }
+  }
+
   const workflowActions = {
     analyze: (options?: { force?: boolean; analyzers?: readonly string[] }) => {
       // Depth toggle drives the analyzer set: full sends the explicit list
       // (incl. chords + structure); quick uses the cheap preset.
       const analyzers = options?.analyzers ?? (analyzeDepth === 'full' ? ANALYZE_FULL_ANALYZERS : undefined);
+      setActiveStemAnalysisId(null);
       return (
         sourceAsset &&
         runWorkflow('Analysis', '/api/workflows/analyze', {
@@ -906,6 +940,8 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   stemMix={stemMix}
                   stemUrls={stemUrls}
                   stemSignError={stemSignError}
+                  stemAnalysisBySourceAssetId={stemAnalysisBySourceAssetId}
+                  activeStemAnalysisId={activeStemAnalysisId}
                   sourceAsset={sourceAsset}
                   stemSeparationWarning={stemSeparationWarning}
                   analysisResults={analysisResults}
@@ -914,6 +950,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   onPreviewStemLevel={previewStemLevel}
                   onSoloStem={soloStem}
                   onOpenAsset={(asset) => void openAsset(asset)}
+                  onRunStemAnalysis={(asset, options) => void runStemAnalysis(asset, options)}
                   onRunStems={() => void workflowActions.stems()}
                   onRunAnalyze={() => void workflowActions.analyze()}
                   onFetchLyrics={() => void workflowActions.lyricsFetch()}
@@ -1156,7 +1193,7 @@ function AnalysisControl({
         })}
       </div>
       <PipelineActionButton
-        label={busy ? 'Analyzing' : hasAnalysis ? 'Re-run' : 'Analyze'}
+        label={busy ? 'Analyzing track' : hasAnalysis ? 'Re-run track' : 'Analyze track'}
         idleIcon={hasAnalysis ? <RefreshCw className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
         busy={busy}
         stale={stale && hasAnalysis}
@@ -1165,9 +1202,9 @@ function AnalysisControl({
         title={
           hasAnalysis
             ? stale
-              ? `Newer analysis model available — re-run (${depth})`
-              : `Re-run analysis (${depth})`
-            : `Run ${depth} analysis`
+              ? `Newer track analysis model available — re-run (${depth})`
+              : `Re-run track analysis (${depth})`
+            : `Run ${depth} track analysis`
         }
       />
     </div>
@@ -1183,6 +1220,8 @@ function KaraokeProductView({
   stemMix,
   stemUrls,
   stemSignError,
+  stemAnalysisBySourceAssetId,
+  activeStemAnalysisId,
   sourceAsset,
   stemSeparationWarning,
   analysisResults,
@@ -1191,6 +1230,7 @@ function KaraokeProductView({
   onPreviewStemLevel,
   onSoloStem,
   onOpenAsset,
+  onRunStemAnalysis,
   onRunStems,
   onRunAnalyze,
   onFetchLyrics,
@@ -1210,6 +1250,8 @@ function KaraokeProductView({
   stemMix: Record<string, StemMixState>;
   stemUrls: Record<string, string>;
   stemSignError: string | null;
+  stemAnalysisBySourceAssetId: Map<string, AssetSummary>;
+  activeStemAnalysisId: string | null;
   sourceAsset: AssetSummary | undefined;
   stemSeparationWarning: string | null;
   analysisResults: AnalysisResultRow[];
@@ -1218,6 +1260,7 @@ function KaraokeProductView({
   onPreviewStemLevel: (assetId: string, level: number) => void;
   onSoloStem: (assetId: string) => void;
   onOpenAsset: (asset: AssetSummary) => void;
+  onRunStemAnalysis: (asset: AssetSummary, options?: { force?: boolean }) => void;
   onRunStems: () => void;
   onRunAnalyze: () => void;
   onFetchLyrics: () => void;
@@ -1238,6 +1281,8 @@ function KaraokeProductView({
             stemMix={stemMix}
             stemUrls={stemUrls}
             stemSignError={stemSignError}
+            stemAnalysisBySourceAssetId={stemAnalysisBySourceAssetId}
+            activeStemAnalysisId={activeStemAnalysisId}
             sourceAsset={sourceAsset}
             stemSeparationWarning={stemSeparationWarning}
             running={running}
@@ -1245,6 +1290,7 @@ function KaraokeProductView({
             onPreviewStemLevel={onPreviewStemLevel}
             onSoloStem={onSoloStem}
             onOpenAsset={onOpenAsset}
+            onRunStemAnalysis={onRunStemAnalysis}
             onRunStems={onRunStems}
             stale={stemsStale}
             onRerun={onRerunStems}
@@ -1274,6 +1320,8 @@ function StemsPanel({
   stemMix,
   stemUrls,
   stemSignError,
+  stemAnalysisBySourceAssetId,
+  activeStemAnalysisId,
   sourceAsset,
   stemSeparationWarning,
   running,
@@ -1281,6 +1329,7 @@ function StemsPanel({
   onPreviewStemLevel,
   onSoloStem,
   onOpenAsset,
+  onRunStemAnalysis,
   onRunStems,
   stale,
   onRerun,
@@ -1289,6 +1338,8 @@ function StemsPanel({
   stemMix: Record<string, StemMixState>;
   stemUrls: Record<string, string>;
   stemSignError: string | null;
+  stemAnalysisBySourceAssetId: Map<string, AssetSummary>;
+  activeStemAnalysisId: string | null;
   sourceAsset: AssetSummary | undefined;
   stemSeparationWarning: string | null;
   running: ReadonlySet<string>;
@@ -1296,14 +1347,16 @@ function StemsPanel({
   onPreviewStemLevel: (assetId: string, level: number) => void;
   onSoloStem: (assetId: string) => void;
   onOpenAsset: (asset: AssetSummary) => void;
+  onRunStemAnalysis: (asset: AssetSummary, options?: { force?: boolean }) => void;
   onRunStems: () => void;
   stale: boolean;
   onRerun: () => void;
 }) {
   const anySolo = Object.values(stemMix).some((state) => state.solo);
+  const analysisBusy = running.has('Analysis');
 
   return (
-    <section className="surface flex min-h-[278px] flex-col overflow-hidden p-4 lg:min-h-0">
+    <section className="surface flex min-h-0 flex-col overflow-hidden p-4">
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Layers className="h-4 w-4 text-[var(--muted)]" />
@@ -1328,27 +1381,36 @@ function StemsPanel({
       {stemSeparationWarning && <div className="chip danger mb-2 w-fit">{stemSeparationWarning}</div>}
 
       {stemAssets.length > 0 ? (
-        <div className="grid flex-1 content-center gap-1.5">
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="grid content-start gap-1.5">
           {stemAssets.map((asset) => {
             const state = stemMix[asset.id] ?? defaultStemMix(asset);
             const isMuted = state.muted;
             const isSolo = state.solo;
             const silenced = isMuted || (anySolo && !isSolo);
             const level = state.level;
-            const color = stemColors[asset.kind] ?? 'var(--accent)';
+            const color = stemColor(asset);
+            const label = stemDisplayLabel(asset);
+            const tagSummary = stemTagSummary(asset);
+            const analysisAsset = stemAnalysisBySourceAssetId.get(asset.id) ?? null;
+            const analysisStatus = stemAnalysisStatus(asset, analysisAsset, activeStemAnalysisId);
+            const analysisSummary = stemAnalysisStatusLabel(analysisStatus);
+            const canForceAnalysis = analysisStatus === 'ready' || analysisStatus === 'stale';
             return (
-              <div key={asset.id} className={`grid grid-cols-[86px_1fr_auto] items-center gap-3 ${silenced ? 'opacity-45' : ''}`}>
-                <button type="button" onClick={() => onOpenAsset(asset)} className="min-w-0 text-left">
+              <div key={asset.id} className={`grid grid-cols-[minmax(104px,136px)_1fr_auto_auto] items-center gap-3 ${silenced ? 'opacity-45' : ''}`}>
+                <button type="button" onClick={() => onOpenAsset(asset)} className="min-w-0 text-left" title={label}>
                   <span className="flex items-center gap-2 truncate text-[13px] font-bold leading-4">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
-                    {stemLabel(asset.kind)}
+                    {label}
                   </span>
-                  <span className="mono block text-[9px] leading-3 text-[var(--faint)]">{formatBytes(asset.byte_size)}</span>
+                  <span className="mono block truncate text-[9px] leading-3 text-[var(--faint)]">
+                    {[formatBytes(asset.byte_size), analysisSummary, tagSummary].filter(Boolean).join(' · ')}
+                  </span>
                 </button>
                 <div className="relative h-6">
                   <StemLevelControl
                     assetId={asset.id}
-                    label={stemLabel(asset.kind)}
+                    label={label}
                     level={level}
                     color={color}
                     silenced={silenced}
@@ -1356,11 +1418,35 @@ function StemsPanel({
                     onChange={(nextLevel) => onUpdateStemMix(asset.id, { level: nextLevel })}
                   />
                 </div>
+                <button
+                  type="button"
+                  onClick={() => onRunStemAnalysis(asset, { force: canForceAnalysis })}
+                  disabled={analysisBusy}
+                  aria-label={`${canForceAnalysis ? 'Re-run' : 'Run'} analysis for ${label}`}
+                  className={`grid h-7 w-7 place-items-center rounded-[8px] text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-50 ${
+                    analysisStatus === 'ready'
+                      ? 'bg-[var(--live-soft)] text-[var(--live-ink)]'
+                      : analysisStatus === 'stale'
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent-ink)]'
+                        : analysisStatus === 'analyzing'
+                          ? 'bg-[var(--accent-soft)] text-[var(--accent-ink)]'
+                          : 'bg-[var(--paper-2)]'
+                  }`}
+                  title={stemAnalysisTitle(label, analysisStatus, canForceAnalysis)}
+                >
+                  {analysisStatus === 'analyzing' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : canForceAnalysis ? (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                </button>
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => onUpdateStemMix(asset.id, { muted: !isMuted })}
-                    aria-label={`Mute ${stemLabel(asset.kind)}`}
+                    aria-label={`Mute ${label}`}
                     aria-pressed={isMuted}
                     data-active={isMuted || undefined}
                     className={`grid h-7 w-7 place-items-center rounded-[8px] text-xs font-black ${
@@ -1375,7 +1461,7 @@ function StemsPanel({
                   <button
                     type="button"
                     onClick={() => onSoloStem(asset.id)}
-                    aria-label={`Solo ${stemLabel(asset.kind)}`}
+                    aria-label={`Solo ${label}`}
                     aria-pressed={isSolo}
                     data-active={isSolo || undefined}
                     className={`grid h-7 w-7 place-items-center rounded-[8px] text-xs font-black ${
@@ -1391,6 +1477,7 @@ function StemsPanel({
               </div>
             );
           })}
+          </div>
         </div>
       ) : (
         <EmptyState
@@ -1570,7 +1657,7 @@ function CurrentChordPanel({
             <PillIcon>
               {running.has('Analysis') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Activity className="h-3.5 w-3.5" />}
             </PillIcon>
-            Detect chords
+            Analyze track
           </button>
         </div>
       ) : (
@@ -3029,10 +3116,10 @@ function TransportCard({
                 disabled={analyzing}
                 className="chip accent inline-flex items-center gap-1 disabled:opacity-50"
                 style={{ cursor: analyzing ? 'default' : 'pointer' }}
-                title="Run analysis to detect song sections (verse, chorus, bridge)"
+                title="Run track analysis to detect song sections"
               >
                 <Wand2 className="h-3 w-3" />
-                {analyzing ? 'Analyzing…' : 'Run analysis for sections'}
+                {analyzing ? 'Analyzing track' : 'Analyze track sections'}
               </button>
             ) : null}
             <span className={`chip ${hasStemPlayback && engineReady ? 'live' : ''}`}>{playbackModeLabel}</span>
@@ -3997,7 +4084,7 @@ function EmptyState({
 
 function ensureStemMix(assets: AssetSummary[], current: Record<string, StemMixState>) {
   const next: Record<string, StemMixState> = {};
-  for (const asset of assets.filter((item) => stemKindSet.has(item.kind))) {
+  for (const asset of assets.filter((item) => isStemAudioKind(item.kind))) {
     next[asset.id] = {
       ...defaultStemMix(asset),
       ...current[asset.id],
@@ -4007,14 +4094,66 @@ function ensureStemMix(assets: AssetSummary[], current: Record<string, StemMixSt
 }
 
 function dedupeLatestStemAssets(stemAssets: AssetSummary[]) {
-  const byKind = new Map<string, AssetSummary>();
+  const byIdentity = new Map<string, AssetSummary>();
   for (const asset of stemAssets) {
-    const current = byKind.get(asset.kind);
+    const identity = stemIdentity(asset);
+    const current = byIdentity.get(identity);
     if (!current || assetCreatedAtMs(asset) > assetCreatedAtMs(current)) {
-      byKind.set(asset.kind, asset);
+      byIdentity.set(identity, asset);
     }
   }
-  return Array.from(byKind.values()).sort((a, b) => stemKindOrder.indexOf(a.kind) - stemKindOrder.indexOf(b.kind));
+  return Array.from(byIdentity.values()).sort(compareStemAssets);
+}
+
+function latestStemAnalysisBySourceAssetId(assets: AssetSummary[]) {
+  const bySourceAssetId = new Map<string, AssetSummary>();
+  for (const asset of assets) {
+    if (asset.kind !== 'stem_analysis_json' || !asset.source_asset_id) {
+      continue;
+    }
+    const current = bySourceAssetId.get(asset.source_asset_id);
+    if (!current || assetCreatedAtMs(asset) > assetCreatedAtMs(current)) {
+      bySourceAssetId.set(asset.source_asset_id, asset);
+    }
+  }
+  return bySourceAssetId;
+}
+
+function stemAnalysisStatus(
+  stemAsset: AssetSummary,
+  analysisAsset: AssetSummary | null,
+  activeStemAnalysisId: string | null
+): StemAnalysisStatus {
+  if (activeStemAnalysisId === stemAsset.id) {
+    return 'analyzing';
+  }
+  if (!analysisAsset) {
+    return 'none';
+  }
+  return analysisAsset.pipeline_version === pipelineVersionFor('analyze') ? 'ready' : 'stale';
+}
+
+function stemAnalysisTitle(label: string, status: StemAnalysisStatus, force: boolean) {
+  if (status === 'analyzing') {
+    return `Analyzing ${label}`;
+  }
+  if (force) {
+    return status === 'stale' ? `Re-run stale analysis for ${label}` : `Re-run analysis for ${label}`;
+  }
+  return `Analyze ${label}`;
+}
+
+function stemAnalysisStatusLabel(status: StemAnalysisStatus) {
+  if (status === 'analyzing') {
+    return 'analysis running';
+  }
+  if (status === 'ready') {
+    return 'analysis ready';
+  }
+  if (status === 'stale') {
+    return 'analysis stale';
+  }
+  return 'not analyzed';
 }
 
 function assetCreatedAtMs(asset: AssetSummary) {
@@ -4055,14 +4194,14 @@ function compareIsoDesc(a: string, b: string) {
 
 function defaultStemMix(asset: AssetSummary): StemMixState {
   return {
-    level: defaultStemLevels[asset.kind] ?? 82,
+    level: DEFAULT_STEM_LEVELS[getStemInfo(asset).role],
     muted: false,
     solo: false,
   };
 }
 
-function stemLabel(kind: string) {
-  return kind.replace('stem_', '').replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+function stemTagSummary(asset: AssetSummary) {
+  return stemDisplayTags(asset).slice(0, 2).join(' · ');
 }
 
 function renderLyricWords(text: string) {

@@ -13,6 +13,15 @@ import { RouteNotFoundError, WorkflowConflictError } from '@/lib/http/route-erro
 import { modalFetch } from '@/lib/modal/client';
 import { deriveStudioOverviewData } from '@/lib/music/analysis-overview';
 import {
+  createStemMetadata,
+  getStemInfo,
+  inferStemRoleFromText,
+  isStemAudioKind,
+  isStemMidiKind,
+  stemAudioKindFromRole,
+  type StemRole,
+} from '@/lib/music/stem-metadata';
+import {
   WERECODE_STORAGE_BUCKETS,
   type WereCodeStorageBucket,
   createSignedStorageDownloadUrl,
@@ -59,6 +68,8 @@ type OutputSpec = {
   objectPath: string;
   contentType?: string;
   expectedFormat?: StemSeparationArtifactFormat;
+  metadata?: Record<string, Json>;
+  sourceAssetId?: string | null;
 };
 
 type LyricsResolution = {
@@ -314,14 +325,39 @@ export async function finalizeStoredJob(jobId: string) {
 
 export async function runAnalyzeWorkflow(input: z.infer<typeof analyzeWorkflowSchema>, existingJob?: JobRow) {
   const context = await workflowContext('analyze', '/analyze/music', input, existingJob);
+  const stemSourceAsset = input.is_stem
+    ? await requireStemAnalysisSource(context.supabase, context.userId, input.song_id, input.source_asset_id)
+    : null;
 
-  const fresh = await maybeSkipIfFresh(context, input.song_id, 'analyze', input.force, existingJob);
+  const fresh = await maybeSkipIfFresh(
+    context,
+    input.song_id,
+    'analyze',
+    input.force,
+    existingJob,
+    stemSourceAsset
+      ? { kinds: ['stem_analysis_json'], sourceAssetId: stemSourceAsset.id }
+      : { kinds: ['analysis_json'] }
+  );
   if (fresh) {
     return { ...fresh, analysisResults: [] };
   }
 
   const outputSpecs = [
-    jsonOutput(context.userId, input.song_id, context.job.id, 'analysis', 'analysis_json', 'analysis.json'),
+    stemSourceAsset
+      ? jsonOutput(
+          context.userId,
+          input.song_id,
+          context.job.id,
+          'analysis',
+          'stem_analysis_json',
+          `stem-analysis/${stemSourceAsset.id}/analysis.json`,
+          {
+            sourceAssetId: stemSourceAsset.id,
+            metadata: stemAnalysisMetadata(stemSourceAsset),
+          }
+        )
+      : jsonOutput(context.userId, input.song_id, context.job.id, 'analysis', 'analysis_json', 'analysis.json'),
   ];
   const inputUrl = await resolveInputUrl(context.supabase, input, context.userId, input.song_id);
   const output_upload_urls = await createUploadUrlMap(outputSpecs);
@@ -364,21 +400,38 @@ export async function runSeparateWorkflow(input: z.infer<typeof separateWorkflow
     return skipSeparateForDurationGuard(context, input, durationSec, durationWarning);
   }
 
-  const outputSpecs = input.stems.map((stem) => ({
-    key: stem,
-    kind: stemToAssetKind(stem),
-    bucket: WERECODE_STORAGE_BUCKETS.artifacts,
-    objectPath: buildObjectPath(
-      context.userId,
-      input.song_id,
-      'artifacts',
-      context.job.id,
-      'stems',
-      `${stem}.${input.output_format}`
-    ),
-    contentType: stemSeparationContentType(input.output_format),
-    expectedFormat: input.output_format,
-  }));
+  const outputSpecs = input.stems.map((stem) => {
+    const role = stemRoleForSeparationStem(stem);
+    return {
+      key: stem,
+      kind: stemToAssetKind(stem),
+      bucket: WERECODE_STORAGE_BUCKETS.artifacts,
+      objectPath: buildObjectPath(
+        context.userId,
+        input.song_id,
+        'artifacts',
+        context.job.id,
+        'stems',
+        `${stem}.${input.output_format}`
+      ),
+      contentType: stemSeparationContentType(input.output_format),
+      expectedFormat: input.output_format,
+      metadata: createStemMetadata({
+        id: stem,
+        role,
+        label: stemLabelForSeparationStem(stem),
+        tags: [stem, input.model, input.output_format],
+        source: 'modal',
+        extra: {
+          provenance: 'modal',
+          requested_stem: stem,
+          separation_model: input.model,
+          separation_shifts: input.shifts,
+          output_format: input.output_format,
+        },
+      }),
+    } satisfies OutputSpec;
+  });
   const inputUrl = await resolveInputUrl(context.supabase, input, context.userId, input.song_id);
   const output_upload_urls = await createUploadUrlMap(outputSpecs);
 
@@ -424,6 +477,54 @@ async function resolveInputAssetDuration(
   }
 
   return data;
+}
+
+async function requireStemAnalysisSource(
+  supabase: SupabaseClient,
+  ownerId: string,
+  songId: string,
+  sourceAssetId: string | undefined
+) {
+  if (!sourceAssetId) {
+    throw new Error('Per-stem analysis requires a stem source asset id');
+  }
+
+  const { data, error } = await supabase
+    .from('assets')
+    .select('*')
+    .eq('id', sourceAssetId)
+    .eq('owner_id', ownerId)
+    .eq('song_id', songId)
+    .maybeSingle<AssetRow>();
+
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    throw new RouteNotFoundError('Stem asset not found', 'asset_not_found');
+  }
+  if (!isStemAudioKind(data.kind)) {
+    throw new Error('Per-stem analysis can only run on stem audio assets');
+  }
+
+  return data;
+}
+
+function stemAnalysisMetadata(sourceAsset: AssetRow): Record<string, Json> {
+  const stem = getStemInfo(sourceAsset);
+  return createStemMetadata({
+    id: stem.id,
+    role: stem.role,
+    label: stem.label,
+    tags: stem.tags,
+    source: 'analysis',
+    extra: {
+      provenance: 'modal',
+      source_asset_id: sourceAsset.id,
+      source_asset_kind: sourceAsset.kind,
+      source_asset_metadata: sourceAsset.metadata,
+    },
+  });
 }
 
 async function skipSeparateForDurationGuard(
@@ -799,26 +900,33 @@ async function maybeSkipIfFresh(
   songId: string,
   stage: PipelineStage,
   force: boolean | undefined,
-  existingJob: JobRow | undefined
+  existingJob: JobRow | undefined,
+  freshnessTarget?: { kinds?: AssetKind[]; sourceAssetId?: string | null }
 ) {
   if (force || existingJob) {
     return null;
   }
 
-  const current = await findCurrentStageAssets(context.supabase, context.userId, songId, STAGE_ASSET_KINDS[stage]);
-  const target = PIPELINE_VERSIONS[stage].version;
-  if (current.length === 0 || !current.some((asset) => asset.pipeline_version === target)) {
+  const current = await findCurrentStageAssets(
+    context.supabase,
+    context.userId,
+    songId,
+    freshnessTarget?.kinds ?? STAGE_ASSET_KINDS[stage],
+    freshnessTarget && 'sourceAssetId' in freshnessTarget ? freshnessTarget.sourceAssetId : undefined
+  );
+  const targetVersion = PIPELINE_VERSIONS[stage].version;
+  if (current.length === 0 || !current.some((asset) => asset.pipeline_version === targetVersion)) {
     return null;
   }
 
   const job = await updateJob(context.supabase, context.userId, context.job.id, {
     status: 'ready',
     progress: 100,
-    message: `${PIPELINE_VERSIONS[stage].label} already up to date (${target})`,
+    message: `${PIPELINE_VERSIONS[stage].label} already up to date (${targetVersion})`,
     response_payload: {
       status: 'skipped',
       reason: 'already_current',
-      pipeline_version: target,
+      pipeline_version: targetVersion,
     } as Json,
     diagnostics: [],
     completed_at: new Date().toISOString(),
@@ -836,16 +944,24 @@ async function findCurrentStageAssets(
   supabase: SupabaseClient,
   ownerId: string,
   songId: string,
-  kinds: AssetKind[]
+  kinds: AssetKind[],
+  sourceAssetId?: string | null
 ): Promise<AssetRow[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('assets')
     .select('*')
     .eq('owner_id', ownerId)
     .eq('song_id', songId)
     .eq('is_current', true)
-    .in('kind', kinds)
-    .returns<AssetRow[]>();
+    .in('kind', kinds);
+
+  if (typeof sourceAssetId === 'string') {
+    query = query.eq('source_asset_id', sourceAssetId);
+  } else if (sourceAssetId === null) {
+    query = query.is('source_asset_id', null);
+  }
+
+  const { data, error } = await query.returns<AssetRow[]>();
 
   if (error) {
     throw error;
@@ -858,19 +974,50 @@ async function supersedePriorStageAssets(
   supabase: SupabaseClient,
   ownerId: string,
   songId: string,
-  kinds: AssetKind[]
+  kinds: AssetKind[],
+  targetSpecs?: OutputSpec[]
 ) {
-  const { error } = await supabase
+  if (targetSpecs?.length) {
+    const superseded: AssetRow[] = [];
+    for (const spec of targetSpecs) {
+      let query = supabase
+        .from('assets')
+        .update({ is_current: false })
+        .eq('owner_id', ownerId)
+        .eq('song_id', songId)
+        .eq('is_current', true)
+        .eq('kind', spec.kind);
+
+      if (typeof spec.sourceAssetId === 'string') {
+        query = query.eq('source_asset_id', spec.sourceAssetId);
+      } else if (spec.sourceAssetId === null) {
+        query = query.is('source_asset_id', null);
+      }
+
+      const { data, error } = await query.select('*').returns<AssetRow[]>();
+      if (error) {
+        throw error;
+      }
+      superseded.push(...(data ?? []));
+    }
+    return superseded;
+  }
+
+  const { data, error } = await supabase
     .from('assets')
     .update({ is_current: false })
     .eq('owner_id', ownerId)
     .eq('song_id', songId)
     .eq('is_current', true)
-    .in('kind', kinds);
+    .in('kind', kinds)
+    .select('*')
+    .returns<AssetRow[]>();
 
   if (error) {
     throw error;
   }
+
+  return data ?? [];
 }
 
 async function runJobWithModal(options: {
@@ -964,14 +1111,16 @@ async function finalizeJobFromModal(options: {
   // Replace-in-place: a successful re-run supersedes the prior current outputs for
   // this stage (soft-archive via is_current=false) before the new ones are inserted
   // as current. Keeps exactly one current set per (song, stage) and avoids duplicates.
-  if (ready && options.outputSpecs?.length && options.pipelineStage && targetSongId) {
-    await supersedePriorStageAssets(
-      options.supabase,
-      options.job.owner_id,
-      targetSongId,
-      STAGE_ASSET_KINDS[options.pipelineStage]
-    );
-  }
+  const supersededAssets =
+    ready && options.outputSpecs?.length && options.pipelineStage && targetSongId
+      ? await supersedePriorStageAssets(
+          options.supabase,
+          options.job.owner_id,
+          targetSongId,
+          STAGE_ASSET_KINDS[options.pipelineStage],
+          options.pipelineStage === 'analyze' ? options.outputSpecs : undefined
+        )
+      : [];
   const assets =
     ready && options.outputSpecs?.length
       ? await createAssetRows(options.supabase, {
@@ -1019,7 +1168,11 @@ async function finalizeJobFromModal(options: {
   // synchronous path and the async poll/finalize path produce identical results.
   const analysisResults =
     ready && targetSongId && options.pipelineStage === 'analyze'
-      ? await persistAnalysisResults(options.supabase, options.job.owner_id, targetSongId, { assets, modal })
+      ? await persistAnalysisResults(options.supabase, options.job.owner_id, targetSongId, {
+          assets,
+          modal,
+          supersededAssets,
+        })
       : [];
   const lyrics =
     ready && targetSongId && options.pipelineStage === 'lyrics_align'
@@ -1311,11 +1464,13 @@ async function createAssetRows(
         content_type: artifact?.mime_type ?? spec.contentType ?? null,
         byte_size: readByteSize(artifact),
         duration_sec: artifact?.duration_sec ?? null,
+        source_asset_id: spec.sourceAssetId ?? null,
         modal_model: artifact?.model ?? null,
         modal_endpoint: options.job.modal_endpoint,
         pipeline_version: options.pipelineVersion ?? null,
         is_current: true,
         metadata: {
+          ...(spec.metadata ?? {}),
           job_id: options.job.id,
           modal_artifact: artifact ?? null,
         },
@@ -1350,7 +1505,7 @@ async function updateSongReadiness(
     if (asset.kind === 'normalized_audio') {
       patch.has_normalized_audio = true;
     }
-    if (asset.kind.startsWith('stem_')) {
+    if (isStemAudioKind(asset.kind)) {
       patch.has_stems = true;
     }
     if (asset.kind === 'analysis_json') {
@@ -1362,7 +1517,7 @@ async function updateSongReadiness(
     if (asset.kind === 'lyrics_lrc' || asset.kind === 'lyrics_alignment') {
       patch.has_synced_lyrics = true;
     }
-    if (asset.kind === 'midi' || asset.kind === 'note_events') {
+    if (asset.kind === 'midi' || asset.kind === 'note_events' || isStemMidiKind(asset.kind)) {
       patch.has_midi = true;
     }
   }
@@ -1389,10 +1544,15 @@ async function persistAnalysisResults(
   supabase: SupabaseClient,
   ownerId: string,
   songId: string,
-  result: { assets: AssetRow[]; modal: ModalResponse }
+  result: { assets: AssetRow[]; modal: ModalResponse; supersededAssets: AssetRow[] }
 ) {
   const analyses = assertRecord(result.modal.analyses);
-  const assetId = result.assets.find((asset) => asset.kind === 'analysis_json')?.id ?? null;
+  const analysisAsset =
+    result.assets.find((asset) => asset.kind === 'analysis_json') ??
+    result.assets.find((asset) => asset.kind === 'stem_analysis_json') ??
+    null;
+  const assetId = analysisAsset?.id ?? null;
+  const isStemAnalysis = analysisAsset?.kind === 'stem_analysis_json';
   const rows = Object.entries(analyses)
     .filter(([name]) => name !== '_meta')
     .map(([name, value]) => {
@@ -1415,45 +1575,76 @@ async function persistAnalysisResults(
     return [];
   }
 
+  await supersedeAnalysisRowsForTarget(supabase, ownerId, songId, analysisAsset, result.supersededAssets);
+
   // Derive the compact studio_overview summary from the fresh analyzer rows and
   // persist it alongside them. Cold /api/studio reads only this one small row
-  // instead of every heavy analyzer envelope. It is excluded from the response
-  // below so the live post-run client keeps deriving from the full rows it has.
-  const overviewData = deriveStudioOverviewData(rows as unknown as AnalysisResultRow[]);
-  const rowsToInsert = [
-    ...rows,
-    {
-      owner_id: ownerId,
-      song_id: songId,
-      asset_id: assetId,
-      analyzer_name: 'studio_overview',
-      analyzer_version: null,
-      ok: true,
-      elapsed_sec: null,
-      error: null,
-      data: overviewData as unknown as Json,
-      is_current: true,
-    },
-  ];
-
-  // Replace-in-place: soft-archive prior analyzer rows for this song before
-  // inserting the fresh set as current (mirrors asset supersede).
-  const { error: supersedeError } = await supabase
-    .from('analysis_results')
-    .update({ is_current: false })
-    .eq('owner_id', ownerId)
-    .eq('song_id', songId)
-    .eq('is_current', true);
-  if (supersedeError) {
-    throw supersedeError;
-  }
+  // instead of every heavy analyzer envelope. Per-stem analysis deliberately skips
+  // studio_overview so the full-track chords/facts stay tied to full-mix analysis.
+  const rowsToInsert = isStemAnalysis
+    ? rows
+    : [
+        ...rows,
+        {
+          owner_id: ownerId,
+          song_id: songId,
+          asset_id: assetId,
+          analyzer_name: 'studio_overview',
+          analyzer_version: null,
+          ok: true,
+          elapsed_sec: null,
+          error: null,
+          data: deriveStudioOverviewData(rows as unknown as AnalysisResultRow[]) as unknown as Json,
+          is_current: true,
+        },
+      ];
 
   const { data, error } = await supabase.from('analysis_results').insert(rowsToInsert).select('*');
   if (error) {
     throw error;
   }
 
-  return (data ?? []).filter((row) => row.analyzer_name !== 'studio_overview');
+  return isStemAnalysis ? [] : (data ?? []).filter((row) => row.analyzer_name !== 'studio_overview');
+}
+
+async function supersedeAnalysisRowsForTarget(
+  supabase: SupabaseClient,
+  ownerId: string,
+  songId: string,
+  analysisAsset: AssetRow | null,
+  supersededAssets: AssetRow[]
+) {
+  const supersededAssetIds = supersededAssets
+    .filter((asset) => !analysisAsset || asset.kind === analysisAsset.kind)
+    .map((asset) => asset.id);
+
+  if (supersededAssetIds.length > 0) {
+    const { error } = await supabase
+      .from('analysis_results')
+      .update({ is_current: false })
+      .eq('owner_id', ownerId)
+      .eq('song_id', songId)
+      .eq('is_current', true)
+      .in('asset_id', supersededAssetIds);
+    if (error) {
+      throw error;
+    }
+  }
+
+  // Legacy full-mix analysis rows may have no asset_id. Supersede those only
+  // when writing a new full-mix analysis, not when analyzing a single stem.
+  if (analysisAsset?.kind !== 'stem_analysis_json') {
+    const { error } = await supabase
+      .from('analysis_results')
+      .update({ is_current: false })
+      .eq('owner_id', ownerId)
+      .eq('song_id', songId)
+      .eq('is_current', true)
+      .is('asset_id', null);
+    if (error) {
+      throw error;
+    }
+  }
 }
 
 async function persistAlignedLyrics(
@@ -1557,7 +1748,8 @@ function jsonOutput(
   jobId: string,
   key: string,
   kind: AssetKind,
-  filename: string
+  filename: string,
+  options?: Pick<OutputSpec, 'metadata' | 'sourceAssetId'>
 ): OutputSpec {
   return {
     key,
@@ -1565,6 +1757,8 @@ function jsonOutput(
     bucket: WERECODE_STORAGE_BUCKETS.artifacts,
     objectPath: buildObjectPath(ownerId, songId, 'artifacts', jobId, filename),
     contentType: 'application/json',
+    metadata: options?.metadata,
+    sourceAssetId: options?.sourceAssetId,
   };
 }
 
@@ -1576,11 +1770,27 @@ function buildObjectPath(...parts: string[]) {
 }
 
 function stemToAssetKind(stem: string): AssetKind {
-  if (stem === 'accompaniment') {
+  const role = stemRoleForSeparationStem(stem);
+  if (role === 'other' && stem !== 'other') {
     return 'stem_other';
   }
 
-  return `stem_${stem}` as AssetKind;
+  return stemAudioKindFromRole(role);
+}
+
+function stemRoleForSeparationStem(stem: string): StemRole {
+  if (stem === 'accompaniment') {
+    return 'other';
+  }
+  return inferStemRoleFromText(stem) ?? 'other';
+}
+
+function stemLabelForSeparationStem(stem: string) {
+  return stem
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function getSongId(value: unknown) {

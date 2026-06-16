@@ -23,8 +23,15 @@ import { useSession } from '@/components/auth/session-context';
 import { CoverArt, PillIcon, ReadinessChips, StatusDot } from '@/components/werecode/WereCodePrimitives';
 import { toJobSummary, toSongSummary, useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
 import { deleteStoredStudioDetail } from '@/lib/client-cache/studio-detail-store';
+import {
+  createStemMetadata,
+  inferStemRoleFromText,
+  stemAudioKindFromRole,
+  stemMidiKindFromRole,
+  type StemRole,
+} from '@/lib/music/stem-metadata';
 import { getSupabaseBrowserClient } from '@/lib/supabase/browser';
-import type { JobRow, SongRow } from '@/types/werecode';
+import type { AssetKind, AssetRow, JobRow, Json, SongRow } from '@/types/werecode';
 import type { SongSummary } from '@/types/werecode-client';
 import {
   fetchJson,
@@ -43,18 +50,50 @@ type WorkflowResult = {
 };
 
 type LibraryView = 'grid' | 'list';
-type IntakeMode = 'upload' | null;
+type IntakeMode = 'upload' | 'dataset' | null;
 
 type UploadProgressState = {
   id: string;
   songId: string | null;
+  mode: 'audio' | 'dataset';
   title: string;
   artist: string;
   fileName: string;
   progress: number;
   stage: string;
   status: 'uploading' | 'failed';
+  files?: UploadFileProgressState[];
 };
+
+type UploadFileProgressState = {
+  id: string;
+  label: string;
+  detail: string;
+  status: 'queued' | 'signing' | 'hashing' | 'uploading' | 'saving' | 'ready' | 'failed';
+  error?: string;
+};
+
+type ParsedStemMetadata = {
+  stem_id: string;
+  inst_class: string | null;
+  is_drum: boolean;
+  midi_program_name?: string;
+  program_num?: number;
+  plugin_name?: string;
+  integrated_loudness?: number;
+};
+
+type StemUploadPlan = {
+  stemId: string;
+  role: StemRole;
+  label: string;
+  tags: string[];
+  metadata: ParsedStemMetadata;
+  audioFile: File | null;
+  midiFile: File | null;
+};
+
+type UploadFileStage = UploadFileProgressState['status'];
 
 export function LibraryClient() {
   const { session } = useSession();
@@ -78,6 +117,14 @@ export function LibraryClient() {
   const [uploadArtist, setUploadArtist] = useState('');
   const [uploadSongId, setUploadSongId] = useState('');
   const [uploadInputKey, setUploadInputKey] = useState(0);
+  const [datasetMixFile, setDatasetMixFile] = useState<File | null>(null);
+  const [datasetMidiFile, setDatasetMidiFile] = useState<File | null>(null);
+  const [datasetStemAudioFiles, setDatasetStemAudioFiles] = useState<File[]>([]);
+  const [datasetStemMidiFiles, setDatasetStemMidiFiles] = useState<File[]>([]);
+  const [datasetMetadataFile, setDatasetMetadataFile] = useState<File | null>(null);
+  const [datasetTitle, setDatasetTitle] = useState('');
+  const [datasetArtist, setDatasetArtist] = useState('');
+  const [datasetInputKey, setDatasetInputKey] = useState(0);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SongSummary | null>(null);
   const [deletingSongId, setDeletingSongId] = useState<string | null>(null);
@@ -196,6 +243,30 @@ export function LibraryClient() {
     }
   }
 
+  function handleDatasetMixChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    setDatasetMixFile(file);
+    if (file && !datasetTitle && file.name.toLowerCase() !== 'mix.wav') {
+      setDatasetTitle(titleFromFilename(file.name));
+    }
+  }
+
+  function handleDatasetMidiChange(event: ChangeEvent<HTMLInputElement>) {
+    setDatasetMidiFile(event.target.files?.[0] ?? null);
+  }
+
+  function handleDatasetStemAudioChange(event: ChangeEvent<HTMLInputElement>) {
+    setDatasetStemAudioFiles(filesFromInput(event));
+  }
+
+  function handleDatasetStemMidiChange(event: ChangeEvent<HTMLInputElement>) {
+    setDatasetStemMidiFiles(filesFromInput(event));
+  }
+
+  function handleDatasetMetadataChange(event: ChangeEvent<HTMLInputElement>) {
+    setDatasetMetadataFile(event.target.files?.[0] ?? null);
+  }
+
   async function uploadAudio(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!uploadFile) {
@@ -215,6 +286,7 @@ export function LibraryClient() {
     setUploadProgress({
       id: uploadId,
       songId: targetSong?.id ?? null,
+      mode: 'audio',
       title: displayTitle,
       artist: displayArtist,
       fileName: uploadFile.name,
@@ -353,6 +425,319 @@ export function LibraryClient() {
     }
   }
 
+  async function uploadDataset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const sourceMidiFromStemSelection = !datasetMidiFile
+      ? datasetStemMidiFiles.find((file) => stemIdFromFile(file).toLowerCase() === 'all_src') ?? null
+      : null;
+    const fullMidiFile = datasetMidiFile ?? sourceMidiFromStemSelection;
+    const stemMidiFiles = datasetStemMidiFiles.filter((file) => file !== sourceMidiFromStemSelection);
+    const selectedFiles = [
+      datasetMixFile,
+      fullMidiFile,
+      datasetMetadataFile,
+      ...datasetStemAudioFiles,
+      ...stemMidiFiles,
+    ].filter((file): file is File => Boolean(file));
+
+    if (selectedFiles.length === 0) {
+      setError('Choose at least one dataset file');
+      return;
+    }
+    if (!datasetMixFile && datasetStemAudioFiles.length === 0) {
+      setError('Choose a mix audio file or at least one stem audio file');
+      return;
+    }
+
+    setUploading(true);
+    setError(null);
+    setMessage(null);
+    const uploadId = createUploadId();
+    const metadataText = datasetMetadataFile ? await datasetMetadataFile.text().catch(() => '') : '';
+    const parsedStemMetadata = parseBabySlakhStemMetadata(metadataText);
+    const stemPlan = prepareStemUploadPlan(datasetStemAudioFiles, stemMidiFiles, parsedStemMetadata);
+    const displayTitle =
+      datasetTitle.trim() || inferDatasetTitle(datasetMixFile, datasetMetadataFile, stemPlan) || 'Trusted dataset';
+    const displayArtist = datasetArtist.trim() || 'Unknown artist';
+    const uploadFiles = buildDatasetUploadFileStatuses({
+      mixFile: datasetMixFile,
+      fullMidiFile,
+      metadataFile: datasetMetadataFile,
+      stems: stemPlan,
+    });
+    const totalAssets = uploadFiles.length;
+
+    setIntakeMode(null);
+    setUploadProgress({
+      id: uploadId,
+      songId: null,
+      mode: 'dataset',
+      title: displayTitle,
+      artist: displayArtist,
+      fileName: formatFileCount(totalAssets),
+      progress: 5,
+      stage: 'Preparing dataset',
+      status: 'uploading',
+      files: uploadFiles,
+    });
+
+    const updateUploadProgress = (progress: number, stage: string) => {
+      setUploadProgress((current) =>
+        current?.id === uploadId ? { ...current, progress, stage, status: 'uploading' } : current
+      );
+    };
+    const updateUploadFile = (
+      fileId: string,
+      patch: Partial<Pick<UploadFileProgressState, 'status' | 'error'>>
+    ) => {
+      setUploadProgress((current) => {
+        if (current?.id !== uploadId || !current.files) {
+          return current;
+        }
+
+        const files = current.files.map((file) => (file.id === fileId ? { ...file, ...patch } : file));
+        const readyCount = files.filter((file) => file.status === 'ready').length;
+        const failed = files.some((file) => file.status === 'failed');
+        const progress = Math.min(88, 22 + Math.round((readyCount / Math.max(files.length, 1)) * 64));
+
+        return {
+          ...current,
+          files,
+          progress: failed ? Math.max(current.progress, progress) : progress,
+          stage: uploadFileProgressSummary(files),
+        };
+      });
+    };
+    const runTrackedUpload = async <T,>(
+      fileId: string,
+      task: (onStage: (stage: UploadFileStage) => void) => Promise<T>
+    ) => {
+      updateUploadFile(fileId, { status: 'signing', error: undefined });
+      try {
+        const result = await task((stage) => updateUploadFile(fileId, { status: stage }));
+        updateUploadFile(fileId, { status: 'ready' });
+        return result;
+      } catch (uploadError) {
+        updateUploadFile(fileId, {
+          status: 'failed',
+          error: uploadError instanceof Error ? uploadError.message : 'Upload failed',
+        });
+        throw uploadError;
+      }
+    };
+
+    try {
+      updateUploadProgress(10, 'Reading mix length');
+      const durationSec = datasetMixFile ? await readAudioDuration(datasetMixFile).catch(() => null) : null;
+      updateUploadProgress(18, 'Creating library item');
+      const songPayload = await fetchJson<{ song: SongRow }>('/api/songs', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: displayTitle,
+          artist: datasetArtist.trim() || null,
+          source_kind: datasetMixFile || datasetStemAudioFiles.length > 0 ? 'audio_upload' : 'midi_upload',
+          duration_sec: durationSec,
+          metadata: {
+            trusted_upload: true,
+            source_audio_required: !datasetMixFile,
+            dataset_upload: {
+              format: metadataText.includes('stems:') ? 'babyslakh' : 'multi_asset',
+              file_count: totalAssets,
+              mix_file_name: datasetMixFile?.name ?? null,
+              source_midi_file_name: fullMidiFile?.name ?? null,
+              metadata_file_name: datasetMetadataFile?.name ?? null,
+              stem_audio_count: datasetStemAudioFiles.length,
+              stem_midi_count: stemMidiFiles.length,
+              uploaded_at: new Date().toISOString(),
+            },
+          },
+        }),
+      });
+      const songId = songPayload.song.id;
+      setUploadProgress((current) => (current?.id === uploadId ? { ...current, songId } : current));
+
+      const uploadTasks: Array<Promise<unknown>> = [];
+      if (datasetMixFile) {
+        uploadTasks.push(
+          runTrackedUpload('mix', (onStage) =>
+            uploadTrustedAsset({
+              songId,
+              file: datasetMixFile,
+              kind: 'source_audio',
+              area: 'sources',
+              durationSec,
+              onStage,
+              metadata: {
+                provenance: 'uploaded',
+                trusted_upload: true,
+                upload_source: 'library_dataset',
+                role: 'mix',
+                original_file_name: datasetMixFile.name,
+              },
+            })
+          )
+        );
+      }
+
+      if (fullMidiFile) {
+        uploadTasks.push(
+          runTrackedUpload('source-midi', (onStage) =>
+            uploadTrustedAsset({
+              songId,
+              file: fullMidiFile,
+              kind: 'source_midi',
+              area: 'sources',
+              onStage,
+              metadata: {
+                provenance: 'uploaded',
+                trusted_upload: true,
+                upload_source: 'library_dataset',
+                role: 'all_src',
+                original_file_name: fullMidiFile.name,
+              },
+            })
+          )
+        );
+      }
+
+      if (datasetMetadataFile) {
+        uploadTasks.push(
+          runTrackedUpload('metadata', (onStage) =>
+            uploadTrustedAsset({
+              songId,
+              file: datasetMetadataFile,
+              kind: 'source_metadata',
+              area: 'sources/metadata',
+              onStage,
+              metadata: {
+                provenance: 'uploaded',
+                trusted_upload: true,
+                upload_source: 'library_dataset',
+                original_file_name: datasetMetadataFile.name,
+                parsed_stem_count: parsedStemMetadata.size,
+              },
+            })
+          )
+        );
+      }
+
+      for (const stem of stemPlan) {
+        if (!stem.audioFile && !stem.midiFile) {
+          continue;
+        }
+        uploadTasks.push(
+          (async () => {
+            let stemAudioAsset: AssetRow | null = null;
+            if (stem.audioFile) {
+              try {
+                stemAudioAsset = await runTrackedUpload(`stem-audio:${stem.stemId}`, (onStage) =>
+                  uploadTrustedAsset({
+                    songId,
+                    file: stem.audioFile!,
+                    kind: stemAudioKindFromRole(stem.role),
+                    area: 'sources/stems',
+                    onStage,
+                    metadata: {
+                      ...stemUploadMetadata(stem),
+                      original_file_name: stem.audioFile!.name,
+                    },
+                  })
+                );
+              } catch (uploadError) {
+                if (stem.midiFile) {
+                  updateUploadFile(`stem-midi:${stem.stemId}`, {
+                    status: 'failed',
+                    error: 'Skipped because stem audio failed',
+                  });
+                }
+                throw uploadError;
+              }
+            }
+
+            if (!stem.midiFile) {
+              return;
+            }
+
+            await runTrackedUpload(`stem-midi:${stem.stemId}`, (onStage) =>
+              uploadTrustedAsset({
+                songId,
+                file: stem.midiFile!,
+                kind: stemMidiKindFromRole(stem.role),
+                area: 'sources/stem-midi',
+                sourceAssetId: stemAudioAsset?.id ?? null,
+                onStage,
+                metadata: {
+                  ...stemUploadMetadata(stem),
+                  original_file_name: stem.midiFile!.name,
+                },
+              })
+            );
+          })()
+        );
+      }
+
+      const uploadResults = await Promise.allSettled(uploadTasks);
+      const failedUploads = uploadResults.filter((result) => result.status === 'rejected');
+      if (failedUploads.length > 0) {
+        const firstReason = failedUploads[0]?.reason;
+        const firstMessage = firstReason instanceof Error ? firstReason.message : 'Upload failed';
+        throw new Error(`${failedUploads.length} file upload${failedUploads.length === 1 ? '' : 's'} failed: ${firstMessage}`);
+      }
+
+      updateUploadProgress(92, 'Finishing library item');
+      const updatedSongPayload = await fetchJson<{ song: SongRow }>(`/api/songs/${songId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          duration_sec: durationSec,
+          status: 'ready',
+          has_audio: Boolean(datasetMixFile),
+          has_stems: stemPlan.some((stem) => Boolean(stem.audioFile)),
+          has_midi: Boolean(fullMidiFile || stemPlan.some((stem) => Boolean(stem.midiFile))),
+          metadata: {
+            ...(songPayload.song.metadata &&
+            typeof songPayload.song.metadata === 'object' &&
+            !Array.isArray(songPayload.song.metadata)
+              ? songPayload.song.metadata
+              : {}),
+            source_audio_required: !datasetMixFile,
+            dataset_uploaded_at: new Date().toISOString(),
+          },
+        }),
+      });
+
+      updateUploadProgress(100, 'Ready');
+      setMessage(`Uploaded ${displayTitle}`);
+      setDatasetMixFile(null);
+      setDatasetMidiFile(null);
+      setDatasetStemAudioFiles([]);
+      setDatasetStemMidiFiles([]);
+      setDatasetMetadataFile(null);
+      setDatasetTitle('');
+      setDatasetArtist('');
+      setDatasetInputKey((current) => current + 1);
+      setIntakeMode(null);
+      upsertCachedSong(toSongSummary(updatedSongPayload.song));
+      window.setTimeout(() => {
+        setUploadProgress((current) => (current?.id === uploadId ? null : current));
+      }, 900);
+    } catch (datasetError) {
+      setUploadProgress((current) =>
+        current?.id === uploadId
+          ? {
+              ...current,
+              progress: Math.max(current.progress, 96),
+              stage: 'Upload failed',
+              status: 'failed',
+            }
+          : current
+      );
+      setIntakeMode('dataset');
+      setError(datasetError instanceof Error ? datasetError.message : 'Could not upload dataset');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function deleteSong(song: SongSummary) {
     setDeletingSongId(song.id);
     setError(null);
@@ -402,6 +787,12 @@ export function LibraryClient() {
                 <UploadCloud className="h-3.5 w-3.5" />
               </PillIcon>
               Upload audio
+            </button>
+            <button type="button" onClick={() => setIntakeMode('dataset')} className="pill ghost">
+              <PillIcon>
+                <UploadCloud className="h-3.5 w-3.5" />
+              </PillIcon>
+              Upload stems/MIDI
             </button>
           </div>
         </header>
@@ -494,6 +885,96 @@ export function LibraryClient() {
                 </PillIcon>
                 {uploading ? 'Uploading' : 'Upload'}
               </button>
+            </form>
+          </section>
+        )}
+
+        {intakeMode === 'dataset' && (
+          <section className="surface mb-5 p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <div className="label mb-2">Trusted dataset</div>
+                <h2 className="font-semibold">Upload mix, stems, and MIDI</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIntakeMode(null)}
+                className="iconbtn"
+                aria-label="Close dataset upload"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form className="grid gap-4" onSubmit={uploadDataset}>
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  id="dataset-title"
+                  value={datasetTitle}
+                  onChange={(event) => setDatasetTitle(event.target.value)}
+                  placeholder="Song title"
+                  className="wc-input h-11 px-4 text-sm"
+                />
+                <input
+                  id="dataset-artist"
+                  value={datasetArtist}
+                  onChange={(event) => setDatasetArtist(event.target.value)}
+                  placeholder="Artist"
+                  className="wc-input h-11 px-4 text-sm"
+                />
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <DatasetFileInput
+                  key={`mix-${datasetInputKey}`}
+                  id="dataset-mix-upload"
+                  label="Mix audio"
+                  accept="audio/*"
+                  onChange={handleDatasetMixChange}
+                />
+                <DatasetFileInput
+                  key={`midi-${datasetInputKey}`}
+                  id="dataset-midi-upload"
+                  label="Full MIDI"
+                  accept=".mid,.midi,audio/midi"
+                  onChange={handleDatasetMidiChange}
+                />
+                <DatasetFileInput
+                  key={`stem-audio-${datasetInputKey}`}
+                  id="dataset-stem-audio-upload"
+                  label={`Stem audio${datasetStemAudioFiles.length ? ` (${datasetStemAudioFiles.length})` : ''}`}
+                  accept="audio/*"
+                  multiple
+                  onChange={handleDatasetStemAudioChange}
+                />
+                <DatasetFileInput
+                  key={`stem-midi-${datasetInputKey}`}
+                  id="dataset-stem-midi-upload"
+                  label={`Stem MIDI${datasetStemMidiFiles.length ? ` (${datasetStemMidiFiles.length})` : ''}`}
+                  accept=".mid,.midi,audio/midi"
+                  multiple
+                  onChange={handleDatasetStemMidiChange}
+                />
+                <DatasetFileInput
+                  key={`metadata-${datasetInputKey}`}
+                  id="dataset-metadata-upload"
+                  label="Metadata YAML"
+                  accept=".yaml,.yml,text/yaml,text/x-yaml"
+                  onChange={handleDatasetMetadataChange}
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="chip">{datasetMixFile ? 'mix ready' : 'mix optional'}</span>
+                <span className="chip">{datasetMidiFile ? 'full MIDI ready' : 'full MIDI optional'}</span>
+                <span className="chip">{datasetStemAudioFiles.length} stem audio</span>
+                <span className="chip">{datasetStemMidiFiles.length} stem MIDI</span>
+                <span className="chip">{datasetMetadataFile ? 'metadata ready' : 'metadata optional'}</span>
+                <div className="flex-1" />
+                <button type="submit" disabled={uploading} className="pill sm">
+                  <PillIcon>
+                    <UploadCloud className="h-3.5 w-3.5" />
+                  </PillIcon>
+                  {uploading ? 'Uploading' : 'Upload bundle'}
+                </button>
+              </div>
             </form>
           </section>
         )}
@@ -591,6 +1072,34 @@ export function LibraryClient() {
         />
       )}
     </>
+  );
+}
+
+function DatasetFileInput({
+  id,
+  label,
+  accept,
+  multiple = false,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  accept: string;
+  multiple?: boolean;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <label htmlFor={id} className="grid min-w-0 gap-2 text-sm font-semibold text-[var(--ink)]">
+      <span className="truncate">{label}</span>
+      <input
+        id={id}
+        type="file"
+        accept={accept}
+        multiple={multiple}
+        onChange={onChange}
+        className="h-11 w-full rounded-full bg-[var(--paper)] px-4 py-2 text-sm text-[var(--muted)] shadow-[inset_0_0_0_1.5px_var(--line)] file:mr-3 file:h-7 file:rounded-full file:border-0 file:bg-[var(--ink)] file:px-3 file:text-sm file:font-medium file:text-[var(--paper)]"
+      />
+    </label>
   );
 }
 
@@ -696,11 +1205,20 @@ function UploadProgressCard({ upload }: { upload: UploadProgressState }) {
       </div>
 
       <ReadinessChips
-        items={[
-          { label: 'Audio', ready: false },
-          { label: 'Stems', ready: false },
-          { label: 'Lyrics', ready: false },
-        ]}
+        items={
+          upload.mode === 'dataset'
+            ? [
+                { label: 'Audio', ready: false },
+                { label: 'Stems', ready: false },
+                { label: 'MIDI', ready: false },
+                { label: 'Analysis', ready: false },
+              ]
+            : [
+                { label: 'Audio', ready: false },
+                { label: 'Stems', ready: false },
+                { label: 'Lyrics', ready: false },
+              ]
+        }
       />
 
       <UploadProgressMeter upload={upload} />
@@ -764,6 +1282,29 @@ function UploadProgressMeter({ upload, compact = false }: { upload: UploadProgre
         />
       </div>
       {!compact && <div className="mt-2 truncate text-xs text-[var(--faint)]">{upload.fileName}</div>}
+      {!compact && upload.files && upload.files.length > 0 && <UploadFileProgressList files={upload.files} />}
+    </div>
+  );
+}
+
+function UploadFileProgressList({ files }: { files: UploadFileProgressState[] }) {
+  return (
+    <div className="mt-3 max-h-44 space-y-2 overflow-y-auto pr-1">
+      {files.map((file) => (
+        <div
+          key={file.id}
+          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-[10px] bg-[var(--paper)] px-3 py-2 shadow-[inset_0_0_0_1px_var(--line-2)]"
+        >
+          <span className={`h-2 w-2 rounded-full ${uploadFileStatusDotClass(file.status)}`} />
+          <span className="min-w-0">
+            <span className="block truncate text-xs font-semibold text-[var(--ink)]">{file.label}</span>
+            <span className="block truncate text-[11px] text-[var(--faint)]">{file.error ?? file.detail}</span>
+          </span>
+          <span className={`mono text-[10px] font-semibold uppercase ${uploadFileStatusTextClass(file.status)}`}>
+            {uploadFileStatusLabel(file.status)}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -824,6 +1365,395 @@ function createUploadId() {
   }
 
   return `upload-${Date.now()}`;
+}
+
+function buildDatasetUploadFileStatuses({
+  mixFile,
+  fullMidiFile,
+  metadataFile,
+  stems,
+}: {
+  mixFile: File | null;
+  fullMidiFile: File | null;
+  metadataFile: File | null;
+  stems: StemUploadPlan[];
+}): UploadFileProgressState[] {
+  const files: UploadFileProgressState[] = [];
+  if (mixFile) {
+    files.push(createUploadFileProgress('mix', 'Mix audio', mixFile.name));
+  }
+  if (fullMidiFile) {
+    files.push(createUploadFileProgress('source-midi', 'Full MIDI', fullMidiFile.name));
+  }
+  if (metadataFile) {
+    files.push(createUploadFileProgress('metadata', 'Metadata YAML', metadataFile.name));
+  }
+  for (const stem of stems) {
+    if (stem.audioFile) {
+      files.push(createUploadFileProgress(`stem-audio:${stem.stemId}`, `${stem.label} audio`, stem.audioFile.name));
+    }
+    if (stem.midiFile) {
+      files.push(createUploadFileProgress(`stem-midi:${stem.stemId}`, `${stem.label} MIDI`, stem.midiFile.name));
+    }
+  }
+  return files;
+}
+
+function createUploadFileProgress(id: string, label: string, detail: string): UploadFileProgressState {
+  return {
+    id,
+    label,
+    detail,
+    status: 'queued',
+  };
+}
+
+function uploadFileProgressSummary(files: UploadFileProgressState[]) {
+  const ready = files.filter((file) => file.status === 'ready').length;
+  const failed = files.filter((file) => file.status === 'failed').length;
+  const active = files.filter((file) => ['signing', 'hashing', 'uploading', 'saving'].includes(file.status)).length;
+
+  if (failed > 0) {
+    return `${failed} failed - ${ready}/${files.length} uploaded`;
+  }
+  if (active > 0) {
+    return `${active} active - ${ready}/${files.length} uploaded`;
+  }
+  return `${ready}/${files.length} uploaded`;
+}
+
+function uploadFileStatusLabel(status: UploadFileProgressState['status']) {
+  if (status === 'ready') {
+    return 'done';
+  }
+  if (status === 'failed') {
+    return 'failed';
+  }
+  return status;
+}
+
+function uploadFileStatusDotClass(status: UploadFileProgressState['status']) {
+  if (status === 'ready') {
+    return 'bg-[var(--live)]';
+  }
+  if (status === 'failed') {
+    return 'bg-[var(--danger)]';
+  }
+  if (status === 'queued') {
+    return 'bg-[var(--faint)]';
+  }
+  return 'bg-[var(--accent)]';
+}
+
+function uploadFileStatusTextClass(status: UploadFileProgressState['status']) {
+  if (status === 'ready') {
+    return 'text-[var(--live-ink)]';
+  }
+  if (status === 'failed') {
+    return 'text-[var(--danger)]';
+  }
+  return 'text-[var(--muted)]';
+}
+
+async function uploadTrustedAsset({
+  songId,
+  file,
+  kind,
+  area,
+  metadata,
+  durationSec,
+  sourceAssetId,
+  onStage,
+}: {
+  songId: string;
+  file: File;
+  kind: AssetKind;
+  area: string;
+  metadata: Record<string, Json>;
+  durationSec?: number | null;
+  sourceAssetId?: string | null;
+  onStage?: (stage: UploadFileStage) => void;
+}) {
+  const objectName = `${Date.now()}-${createUploadId()}-${safeFilename(file.name)}`;
+  onStage?.('signing');
+  const signedUpload = await fetchJson<{
+    bucket: string;
+    objectPath: string;
+    token: string;
+  }>('/api/storage/sign-upload', {
+    method: 'POST',
+    body: JSON.stringify({
+      bucket: 'werecode-sources',
+      pathParts: [songId, area, objectName],
+      upsert: false,
+    }),
+  });
+  const contentType = file.type || contentTypeForFile(file.name);
+  onStage?.('hashing');
+  const checksumSha256 = await sha256File(file);
+  const supabase = getSupabaseBrowserClient();
+  onStage?.('uploading');
+  const { error: uploadError } = await supabase.storage
+    .from(signedUpload.bucket)
+    .uploadToSignedUrl(signedUpload.objectPath, signedUpload.token, file, {
+      contentType,
+      cacheControl: '31536000',
+    });
+
+  if (uploadError) {
+    throw uploadError;
+  }
+
+  onStage?.('saving');
+  const payload = await fetchJson<{ asset: AssetRow }>(`/api/songs/${songId}/assets`, {
+    method: 'POST',
+    body: JSON.stringify({
+      kind,
+      bucket_id: signedUpload.bucket,
+      object_path: signedUpload.objectPath,
+      content_type: contentType,
+      byte_size: file.size,
+      duration_sec: durationSec ?? null,
+      checksum_sha256: checksumSha256,
+      source_asset_id: sourceAssetId ?? null,
+      metadata,
+    }),
+  });
+
+  return payload.asset;
+}
+
+function filesFromInput(event: ChangeEvent<HTMLInputElement>) {
+  return Array.from(event.target.files ?? []);
+}
+
+function parseBabySlakhStemMetadata(yamlText: string) {
+  const stems = new Map<string, ParsedStemMetadata>();
+  let inStems = false;
+  let current: ParsedStemMetadata | null = null;
+
+  for (const line of yamlText.split(/\r?\n/)) {
+    if (/^stems:\s*$/.test(line)) {
+      inStems = true;
+      continue;
+    }
+    if (!inStems) {
+      continue;
+    }
+    if (/^\S/.test(line)) {
+      break;
+    }
+
+    const stemHeader = line.match(/^\s+(S\d+):\s*$/);
+    if (stemHeader) {
+      if (current) {
+        stems.set(current.stem_id, current);
+      }
+      current = { stem_id: stemHeader[1], inst_class: null, is_drum: false };
+      continue;
+    }
+    if (!current) {
+      continue;
+    }
+
+    const property = line.match(/^\s+([A-Za-z0-9_]+):\s*(.*?)\s*$/);
+    if (!property) {
+      continue;
+    }
+
+    const key = property[1];
+    const rawValue = unquoteYamlScalar(property[2]);
+    if (key === 'inst_class') {
+      current.inst_class = rawValue || null;
+    } else if (key === 'is_drum') {
+      current.is_drum = rawValue.toLowerCase() === 'true';
+    } else if (key === 'midi_program_name') {
+      current.midi_program_name = rawValue || undefined;
+    } else if (key === 'program_num') {
+      const value = Number(rawValue);
+      if (Number.isFinite(value)) {
+        current.program_num = value;
+      }
+    } else if (key === 'plugin_name') {
+      current.plugin_name = rawValue || undefined;
+    } else if (key === 'integrated_loudness') {
+      const value = Number(rawValue);
+      if (Number.isFinite(value)) {
+        current.integrated_loudness = value;
+      }
+    }
+  }
+
+  if (current) {
+    stems.set(current.stem_id, current);
+  }
+
+  return stems;
+}
+
+function prepareStemUploadPlan(
+  audioFiles: File[],
+  midiFiles: File[],
+  metadataByStemId: Map<string, ParsedStemMetadata>
+) {
+  const byStemId = new Map<string, StemUploadPlan>();
+  const ensurePlan = (stemId: string, fileName: string) => {
+    const existing = byStemId.get(stemId);
+    if (existing) {
+      return existing;
+    }
+
+    const metadata = metadataByStemId.get(stemId) ?? { stem_id: stemId, inst_class: null, is_drum: false };
+    const role = inferStemRoleFromText(metadata.inst_class, metadata.is_drum) ?? inferStemRoleFromText(fileName) ?? 'other';
+    const plan: StemUploadPlan = {
+      stemId,
+      role,
+      label: stemLabelFromUpload(metadata, stemId, fileName),
+      tags: stemTagsFromUpload(metadata, stemId, role),
+      metadata,
+      audioFile: null,
+      midiFile: null,
+    };
+    byStemId.set(stemId, plan);
+    return plan;
+  };
+
+  for (const file of audioFiles) {
+    ensurePlan(stemIdFromFile(file), file.name).audioFile = file;
+  }
+  for (const file of midiFiles) {
+    ensurePlan(stemIdFromFile(file), file.name).midiFile = file;
+  }
+
+  return Array.from(byStemId.values()).sort((a, b) => a.stemId.localeCompare(b.stemId));
+}
+
+function stemUploadMetadata(stem: StemUploadPlan): Record<string, Json> {
+  const extra: Record<string, Json> = {
+    provenance: 'uploaded',
+    trusted_upload: true,
+    upload_source: 'library_dataset',
+    inst_class: stem.metadata.inst_class,
+    is_drum: stem.metadata.is_drum,
+  };
+  if (stem.metadata.midi_program_name) {
+    extra.midi_program_name = stem.metadata.midi_program_name;
+  }
+  if (typeof stem.metadata.program_num === 'number') {
+    extra.program_num = stem.metadata.program_num;
+  }
+  if (stem.metadata.plugin_name) {
+    extra.plugin_name = stem.metadata.plugin_name;
+  }
+  if (typeof stem.metadata.integrated_loudness === 'number') {
+    extra.integrated_loudness = stem.metadata.integrated_loudness;
+  }
+
+  return createStemMetadata({
+    id: stem.stemId,
+    role: stem.role,
+    label: stem.label,
+    tags: stem.tags,
+    source: 'uploaded',
+    extra,
+  });
+}
+
+function stemLabelFromUpload(metadata: ParsedStemMetadata, stemId: string, fileName: string) {
+  return (
+    titleizeStemText(metadata.inst_class) ??
+    titleizeStemText(metadata.midi_program_name) ??
+    titleizeStemText(metadata.plugin_name) ??
+    titleizeStemText(titleFromFilename(fileName)) ??
+    stemId
+  );
+}
+
+function stemTagsFromUpload(metadata: ParsedStemMetadata, stemId: string, role: StemRole) {
+  return [
+    stemId,
+    role,
+    metadata.inst_class,
+    metadata.is_drum ? 'drums' : null,
+    metadata.midi_program_name,
+    typeof metadata.program_num === 'number' ? `program:${metadata.program_num}` : null,
+    metadata.plugin_name,
+  ].filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0);
+}
+
+function titleizeStemText(value: string | null | undefined) {
+  const cleaned = value?.trim();
+  if (!cleaned) {
+    return null;
+  }
+  return cleaned
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function stemIdFromFile(file: File) {
+  return file.name.replace(/\.[^.]+$/, '');
+}
+
+function inferDatasetTitle(mixFile: File | null, metadataFile: File | null, stemPlan: StemUploadPlan[]) {
+  if (mixFile && mixFile.name.toLowerCase() !== 'mix.wav') {
+    return titleFromFilename(mixFile.name);
+  }
+  if (metadataFile && 'webkitRelativePath' in metadataFile) {
+    const relativePath = String(metadataFile.webkitRelativePath);
+    const [folder] = relativePath.split('/').filter(Boolean);
+    if (folder) {
+      return folder;
+    }
+  }
+  if (stemPlan[0]?.stemId) {
+    return `Dataset ${stemPlan[0].stemId}`;
+  }
+  return null;
+}
+
+function unquoteYamlScalar(value: string) {
+  return value.trim().replace(/^["']|["']$/g, '');
+}
+
+function contentTypeForFile(filename: string) {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.wav')) {
+    return 'audio/wav';
+  }
+  if (lower.endsWith('.mp3')) {
+    return 'audio/mpeg';
+  }
+  if (lower.endsWith('.m4a')) {
+    return 'audio/mp4';
+  }
+  if (lower.endsWith('.flac')) {
+    return 'audio/flac';
+  }
+  if (lower.endsWith('.mid') || lower.endsWith('.midi')) {
+    return 'audio/midi';
+  }
+  if (lower.endsWith('.yaml') || lower.endsWith('.yml')) {
+    return 'text/yaml';
+  }
+  return 'application/octet-stream';
+}
+
+async function sha256File(file: File) {
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    return null;
+  }
+
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function formatFileCount(count: number) {
+  return `${count} file${count === 1 ? '' : 's'}`;
 }
 
 function songReadiness(song: SongSummary) {
