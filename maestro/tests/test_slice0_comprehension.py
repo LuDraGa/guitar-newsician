@@ -11,7 +11,13 @@ import io
 
 import mido
 
-from maestro_agent.fact_pack import SongFactPackQueries, _stem_pitch_class_profile
+from maestro_agent.agent import _agent_cache_key
+from maestro_agent.fact_pack import (
+    SongFactPackQueries,
+    _stem_pitch_class_profile,
+    build_song_overview,
+    render_song_overview,
+)
 from maestro_agent.midi import dominant_pitch_classes, note_activity_by_window
 from maestro_agent.werecode_data import _stem_info
 
@@ -313,3 +319,103 @@ def test_get_stems_roster_matches_shared_entry_shape():
     # get_stems / get_midi_tracks / get_song_slice all share one roster shape.
     stems = _queries().get_stems()["stems"]
     assert all(set(stem) == _ROSTER_FIELDS for stem in stems)
+
+
+# --- 0.5: seeded song overview (Seam B — pure assembly + cache key) ----------
+
+
+def _overview_pack() -> dict:
+    return {
+        "version": 5,
+        "created_at": "2026-06-17T00:00:00Z",
+        "song_id": "song-1",
+        "song": {"title": "Track00001", "artist": "BabySlakh", "duration_sec": 24.0},
+        "duration_sec": 24.0,
+        "tempo": {"bpm": 120.0, "confidence": "medium"},
+        "confidence": {"overall": "medium"},
+        "key": {
+            "teaching_key": {"label": "G minor"},
+            "detected_key": {"label": "Bb minor"},
+            "key_conflict": True,
+        },
+        "sections": [{"index": 0}, {"index": 1}, {"index": 2}, {"index": 3}],
+        "evidence": {"analysis_keys": ["chords", "tonal_key", "tempo_beats", "structure_msaf"]},
+        "midi": {
+            "stems": [
+                {
+                    "stem_id": "S05", "label": "Lead Guitar", "role": "guitar", "tags": ["solo"],
+                    "is_drum": False, "has_midi": True, "integrated_loudness": -14.2,
+                    "analysis": {"status": "ok"},
+                },
+                {
+                    "stem_id": "S02", "label": "Bass", "role": "bass", "tags": ["bass"],
+                    "is_drum": False, "has_midi": True, "integrated_loudness": -12.0,
+                    "analysis": {"status": "missing"},
+                },
+            ],
+        },
+    }
+
+
+def test_build_song_overview_compacts_the_pack():
+    overview = build_song_overview(_overview_pack())
+    assert overview["duration_sec"] == 24.0
+    assert overview["tempo_bpm"] == 120.0 and overview["tempo_confidence"] == "medium"
+    assert overview["teaching_key"] == "G minor" and overview["detected_key"] == "Bb minor"
+    assert overview["key_conflict"] is True
+    assert overview["section_count"] == 4
+    assert overview["overall_confidence"] == "medium"
+    assert overview["available_analyses"] == ["chords", "tonal_key", "tempo_beats", "structure_msaf"]
+    # Parts reuse the shared roster shape exactly — the overview never diverges from get_stems.
+    assert all(set(part) == _ROSTER_FIELDS for part in overview["parts"])
+    lead = next(part for part in overview["parts"] if part["stem_id"] == "S05")
+    assert lead["has_analysis"] is True
+    bass = next(part for part in overview["parts"] if part["stem_id"] == "S02")
+    assert bass["has_analysis"] is False and bass["has_midi"] is True
+
+
+def test_render_song_overview_includes_conflict_and_parts():
+    text = render_song_overview(build_song_overview(_overview_pack()))
+    assert "NO tool calls" in text
+    assert "KEY CONFLICT" in text and "G minor" in text and "Bb minor" in text
+    assert "Lead Guitar" in text and "Bass" in text
+    assert "get_stem(stem_id)" in text
+    assert "Parts (2)" in text
+
+
+def test_render_song_overview_handles_missing_key():
+    pack = _overview_pack()
+    pack["key"] = {}
+    text = render_song_overview(build_song_overview(pack))
+    assert "Key: not detected." in text
+    assert "KEY CONFLICT" not in text
+
+
+def test_render_song_overview_agreeing_key_has_no_conflict():
+    pack = _overview_pack()
+    pack["key"] = {
+        "teaching_key": {"label": "C major"},
+        "detected_key": {"label": "C major"},
+        "key_conflict": False,
+    }
+    text = render_song_overview(build_song_overview(pack))
+    assert "KEY CONFLICT" not in text
+    assert "teaching and detected agree" in text
+
+
+def test_agent_cache_key_distinguishes_model_and_pack_identity():
+    pack_v5 = {"version": 5, "created_at": "2026-06-17T00:00:00Z"}
+    pack_v5_rebuilt = {"version": 5, "created_at": "2026-06-17T01:00:00Z"}
+    pack_v6 = {"version": 6, "created_at": "2026-06-17T00:00:00Z"}
+    key = _agent_cache_key
+    # Switching model must not reuse a runner bound to the old model.
+    assert key("s1", "openai/a", pack_v5) != key("s1", "openai/b", pack_v5)
+    # Same version but rebuilt content (re-analysis) must bust the baked-in overview.
+    assert key("s1", "m", pack_v5) != key("s1", "m", pack_v5_rebuilt)
+    # A FACT_PACK_VERSION bump must bust it too.
+    assert key("s1", "m", pack_v5) != key("s1", "m", pack_v6)
+    # No pack yet → a stable sentinel (so repeated blind-start calls share one runner).
+    assert key("s1", "m", None) == "s1|m|nopack"
+    assert key("s1", "m", None) == key("s1", "m", None)
+    # Deterministic for the same inputs (the cached prefix must be reused).
+    assert key("s1", "m", pack_v5) == key("s1", "m", pack_v5)

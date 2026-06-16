@@ -442,6 +442,133 @@ class SongFactPackQueries:
         return self.service.ensure_current(self.song_id)
 
 
+# --- 0.5 seeded song overview (baked into the stable system prefix) ---------
+
+
+def build_song_overview(pack: dict[str, Any]) -> dict[str, Any]:
+    """Compact, deterministic overview of a song's fact pack — the seed folded into
+    the agent's stable system prefix so it can answer "what do you know about this
+    song?" with zero tool calls and scope focused questions without probing for
+    basics. Pure (no I/O): a derived view, regenerated whenever the pack rebuilds
+    (the agent cache is keyed by pack identity). Reuses `_stem_roster_entry` so the
+    parts list matches `get_stems` exactly."""
+    song = pack.get("song", {})
+    key = pack.get("key", {})
+    teaching = key.get("teaching_key") or {}
+    detected = key.get("detected_key") or {}
+    tempo = pack.get("tempo", {})
+    confidence = pack.get("confidence", {})
+    stems = pack.get("midi", {}).get("stems", [])
+    duration = song.get("duration_sec")
+    if duration is None:
+        duration = pack.get("duration_sec")
+    return {
+        "song_id": pack.get("song_id"),
+        "title": song.get("title"),
+        "artist": song.get("artist"),
+        "duration_sec": duration,
+        "tempo_bpm": tempo.get("bpm"),
+        "tempo_confidence": tempo.get("confidence"),
+        "teaching_key": teaching.get("label"),
+        "detected_key": detected.get("label"),
+        "key_conflict": bool(key.get("key_conflict")),
+        "section_count": len(pack.get("sections", [])),
+        "overall_confidence": confidence.get("overall"),
+        "available_analyses": list(pack.get("evidence", {}).get("analysis_keys", [])),
+        "parts": [_stem_roster_entry(stem) for stem in stems],
+        "fact_pack_version": pack.get("version"),
+    }
+
+
+def render_song_overview(overview: dict[str, Any]) -> str:
+    """Render the overview dict as a dense, cache-stable Markdown block for the
+    system prefix. Deterministic field order so the cached prefix stays byte-stable
+    across turns for the same pack (only a rebuild changes it)."""
+    parts = overview.get("parts") or []
+
+    summary_bits: list[str] = []
+    duration = overview.get("duration_sec")
+    if duration is not None:
+        summary_bits.append(f"Duration: {_fmt_seconds(duration)}")
+    tempo = overview.get("tempo_bpm")
+    if tempo is not None:
+        conf = overview.get("tempo_confidence")
+        summary_bits.append(f"Tempo: {_fmt_num(tempo)} BPM" + (f" ({conf} confidence)" if conf else ""))
+    summary_bits.append(f"Sections: {overview.get('section_count', 0)}")
+    overall = overview.get("overall_confidence")
+    if overall:
+        summary_bits.append(f"Overall confidence: {overall}")
+
+    lines = [
+        '## Seeded song overview (already known — answer "what do you know about this song?" with NO tool calls)',
+    ]
+    title = overview.get("title")
+    if title:
+        artist = overview.get("artist")
+        lines.append(f"- Song: {title}" + (f" — {artist}" if artist else ""))
+    lines.append("- " + " · ".join(summary_bits))
+    lines.append("- " + _render_key_line(overview))
+    analyses = overview.get("available_analyses") or []
+    if analyses:
+        lines.append("- Mix analyses available: " + ", ".join(str(name) for name in analyses))
+
+    lines.append("")
+    lines.append(
+        f"Parts ({len(parts)}) — this is the cast. Drill one with get_stem(stem_id); "
+        "ask what plays where with get_section_activity:"
+    )
+    lines.append("")
+    lines.append("| id | part | role | midi | analysis | loudness (LUFS) |")
+    lines.append("|----|------|------|:----:|:--------:|----------------:|")
+    for part in parts:
+        loud = part.get("integrated_loudness")
+        lines.append(
+            "| {id} | {label} | {role} | {midi} | {analysis} | {loud} |".format(
+                id=part.get("stem_id") or "?",
+                label=part.get("label") or "—",
+                role=part.get("role") or "—",
+                midi="✓" if part.get("has_midi") else "·",
+                analysis="✓" if part.get("has_analysis") else "·",
+                loud=_fmt_num(loud) if loud is not None else "—",
+            )
+        )
+
+    lines.append("")
+    lines.append(
+        "Scope every answer to this roster: pick the relevant part(s), then drill — do not dump all parts. "
+        "When key matters, reconcile teaching vs detected first."
+    )
+    return "\n".join(lines)
+
+
+def _render_key_line(overview: dict[str, Any]) -> str:
+    teaching = overview.get("teaching_key")
+    detected = overview.get("detected_key")
+    if not teaching and not detected:
+        return "Key: not detected."
+    if overview.get("key_conflict") and teaching and detected:
+        return (
+            f"Key: teaching **{teaching}** vs detected **{detected}** — KEY CONFLICT. "
+            "Prefer the teaching key for guidance; cite detected as evidence."
+        )
+    label = teaching or detected
+    if teaching and detected:
+        return f"Key: **{label}** (teaching and detected agree)."
+    return f"Key: **{label}**."
+
+
+def _fmt_seconds(value: Any) -> str:
+    return f"{_float(value):.1f}s"
+
+
+def _fmt_num(value: Any) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:.1f}"
+
+
 # --- pure builders (ported verbatim from the POC) ---------------------------
 
 

@@ -46,6 +46,18 @@ class MaestroUsageObserver(CustomLogger):
                     return None
                 return usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
 
+            def cached_tokens() -> Any:
+                # OpenAI/LiteLLM report prompt-cache hits under
+                # prompt_tokens_details.cached_tokens (dict or object form). Surfacing
+                # it lets the trace prove the static prefix (system prompt + 0.5
+                # overview) is being cached across turns.
+                details = field("prompt_tokens_details")
+                if details is None:
+                    return None
+                if isinstance(details, dict):
+                    return details.get("cached_tokens")
+                return getattr(details, "cached_tokens", None)
+
             try:
                 cost = litellm.completion_cost(completion_response=response_obj)
             except Exception:
@@ -58,6 +70,7 @@ class MaestroUsageObserver(CustomLogger):
             record = {
                 "model": kwargs.get("model"),
                 "prompt_tokens": field("prompt_tokens"),
+                "cached_tokens": cached_tokens(),
                 "completion_tokens": field("completion_tokens"),
                 "total_tokens": field("total_tokens"),
                 "cost_usd": round(cost, 6) if isinstance(cost, (int, float)) else None,
@@ -83,6 +96,7 @@ class MaestroUsageObserver(CustomLogger):
         return {
             "calls": len(records),
             "prompt_tokens": total("prompt_tokens"),
+            "cached_tokens": total("cached_tokens"),
             "completion_tokens": total("completion_tokens"),
             "total_tokens": total("total_tokens"),
             "cost_usd": round(sum(float(record.get("cost_usd") or 0) for record in records), 6),

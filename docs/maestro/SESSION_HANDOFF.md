@@ -2,7 +2,7 @@
 
 > **Living pointer, maintained every working step.** Read this first, then the linked plan doc. It is the always-current overlay; the detailed progress log lives in the execution doc below.
 >
-> **Last updated:** 2026-06-17 (0.3 committed + verified; program-ladder overview added) · **Branch:** `maestro/agent-buildout` (off `main`)
+> **Last updated:** 2026-06-17 (0.5 seeded overview committed + live-verified; tool-role audit folded into 0.6 scope) · **Branch:** `maestro/agent-buildout` (off `main`)
 
 ---
 
@@ -13,7 +13,7 @@
 | Rung | What it adds | Status |
 |---|---|---|
 | Baseline (A+B+C) | answer Q&A over the fact pack | ✅ committed |
-| **Slice 0** (this work) | fact-pack **comprehension** — per-part truth + retrieval discipline | 🟢 **in progress** — 0.1 · 0.2 · 0.2b · 0.4 · 0.3 + Freshness done; **0.5 → 0.6 → (0.7 opt) → 0.8 remain** |
+| **Slice 0** (this work) | fact-pack **comprehension** — per-part truth + retrieval discipline | 🟢 **in progress** — 0.1 · 0.2 · 0.2b · 0.4 · 0.3 + Freshness + **0.5** committed & verified; **0.6 → (0.7 opt) → 0.8 remain** |
 | Slice 1 | `Section × Role` **brief** verb + the Comprehension Graph store | ⬜ **next program milestone** (lifts 0.4's rollup into a store) |
 | S2 | learning-path **sequencer** (+ Phrase/Bar) | ⬜ |
 | S3 | drill **generator** (+ Concept Cards) | ⬜ |
@@ -21,7 +21,7 @@
 | S5 | solo-guitar **arrangement** capstone (+ Event×Role) | ⬜ |
 | (S6) | cross-student meta | ⬜ deferred (seam only) |
 
-**Remaining to close Slice 0:** `0.5` overview → `0.6` prompt + parts specialist → (`0.7` basic_stats, optional) → `0.8` next-step CTAs. **Then Slice 1 begins.** Detail + per-sub-slice status live in the Slice 0 execution doc (linked below).
+**Remaining to close Slice 0:** ~~`0.5` overview~~ (done) → `0.6` prompt + parts specialist → (`0.7` basic_stats, optional) → `0.8` next-step CTAs. **Then Slice 1 begins** — back into the PRD coaching slices proper (brief → sequence → drill → adapt → arrange). Detail + per-sub-slice status live in the Slice 0 execution doc (linked below).
 
 ---
 
@@ -35,10 +35,13 @@
   - **Fact Pack Freshness** — the pack stores a `dependency_fingerprint` (assets + analysis-row identities); a cheap read-only `status()` + `GET …/status` route detects when a re-analysis made the pack stale (the live finding: re-analysis didn't trigger a rebuild). Chat UI: always-on **stale banner (Update)** + **blocking send confirm (Update & send / Skip)**. `FACT_PACK_VERSION`→**5**. See [../execution_docs/2026-06-16_maestro_fact_pack_freshness.md](../execution_docs/2026-06-16_maestro_fact_pack_freshness.md). Verified live in the UI.
 - **Done & committed (this session) — 0.3 retrieval discipline:** `get_midi_tracks` keeps `all_src` (mix MIDI) but swaps its per-stem dump for a `stems` **roster** + drill `hint`; `get_song_slice` swaps its `midi_tracks` full dump for a `parts` roster (**all** parts, `has_midi` visible) + `hint`. Shared `_stem_roster_entry` helper; dead `_stem_tool_summary` removed; two tool docstrings updated. **No `FACT_PACK_VERSION` bump** (query-shape change only — stored pack unchanged, no rebuild).
   - **Gate:** **34/34 pytest green.** No `pnpm` checks (Track 1, `maestro/` Python only). **Live try-it ✅** — "what key… separate for diff instruments" → trace = `get_key` + `get_stems` (roster), **no 10-stem dump**; honest "one global key, can drill a stem" answer. *Caveat:* the agent **gestured at** per-stem harmony but did **not** drill `get_stem` for the 0.2b pitch-class content unprompted → the **0.6 nudge is confirmed needed** (see below).
-- **▶ NEXT ACTION:** **0.5 — seeded song overview.** Build a compact overview (duration · tempo+conf · key teaching/detected+conflict · section count · **stem roster** · available analyses · overall confidence) and **inject it into the stable system prefix** (folded into `system_prompt` at agent creation, *not* per-turn) so it rides the OpenAI prompt cache; add the **fact-pack version to the `_agent_cache` key**; surface **`cached_tokens`** in the usage observer. Then **0.6 prompt + parts specialist → 0.8 next-step CTAs.** All via Ask→Explain→Approve→Implement.
+- **Done & committed (this session) — 0.5 seeded overview:** pure `build_song_overview`/`render_song_overview` ([fact_pack.py](../../maestro/maestro_agent/fact_pack.py)) fold a compact overview (duration · tempo+conf · key teaching/detected+conflict · section count · **parts roster** reusing `_stem_roster_entry` · available analyses · overall confidence) into the **stable `system_prompt`** at agent creation ([agent.py](../../maestro/maestro_agent/agent.py)) — rides the prompt cache, not re-sent per turn. `_agent_cache` keyed by **(song, model, pack version + created_at)** so a rebuild busts the stale baked-in overview (chose version+created_at over the literal "version only" so a *same-version re-analysis* also busts it — user-approved). `cached_tokens` (`prompt_tokens_details.cached_tokens`) now in the usage observer record + `summarize` ([llm.py](../../maestro/maestro_agent/llm.py)) so the trace proves cache hits. **No `FACT_PACK_VERSION` bump** (derived live view; no stored-pack fields). **Gate: 43/43 pytest green. Live try-it ✅** — first-message "What do you know about this song?" returned the overview verbatim (duration/tempo+conf/sections/key conflict/10-stem roster) with **~0 tool calls**; `cached_tokens > 0` to eyeball on a 2nd turn.
+- **▶ NEXT ACTION (new session):** **0.6 — prompt + parts specialist.** Teach **stem-first discipline** (the roster + key headline are *already in the seeded overview* — don't re-fetch `get_stems`/`get_key` just to restate them); add a **`parts_agent`** (arrangement/role) on `get_stems`/`get_stem`/`get_section_activity` and repoint **`midi_agent`** off `get_midi_tracks` toward `get_stem`/`get_section_activity`; **demote `get_stems`** (now largely redundant post-0.5 — see the tool-role audit below); **name the pitch-class fields** (`dominant_pitch_classes`, `pitch_class_profile`) in the `get_stem`/`get_section_activity` descriptions and instruct: for per-part/monophonic key questions, drill the stem and compare its dominant PCs to the mix chord roots, reconciling teaching-vs-detected first; optional DeepAgents static-prompt trim. Then (0.7 basic_stats, optional) → 0.8 CTAs. All via Ask→Explain→Approve→Implement.
+  - **Carry-over (tiny):** eyeball **`cached_tokens` > 0** on a 2nd turn to confirm the prefix caches (0.5 behavior is verified; only this cache-hit number is unconfirmed).
 - **Watch-item (Freshness, low priority):** a single-stem re-analysis also surfaced "mix analysis re-run" — confirm the pipeline intends to refresh a current mix `analysis_json` row on stem analysis (expected) before treating it as over-reporting.
 - **Flagged for 0.6 (approved framing):** prompt should steer the agent to *trust pitch-class content over chord labels for bass/monophonic parts* (compare bass dominant PCs to mix chord roots; reconcile teaching-vs-detected key first) and to *name* the new pitch-class fields in the tool descriptions. Data is in the tool JSON now; the explicit nudge lands with 0.6. (0.6 also owns the system-prompt + `midi_agent` stem-first rework deferred from 0.3.)
-- **Waiting on the user:** go-ahead on **0.5** (0.3 is committed + verified). Next session resumes there via Ask→Explain→Approve→Implement.
+- **Tool-role audit (post-0.5, user-reviewed — input to 0.6):** the seeded overview is an *index* — it absorbed the whole-song scalars + the **roster** + the key **headline**, so three tool roles shift. **`get_stems` is now largely redundant** (the overview reproduces its output in-context every turn; residual = `tags`/`is_drum` which the prefix table doesn't render + the `nopack` fallback) → **demote** (repoint docstring; decide tags rendering) or drop; *demote recommended*. **`get_key` sharpens** to the evidence/candidates/confidence drill (headline now in the prefix). **`get_midi_tracks` narrows** to the mix-level `all_src` MIDI (its roster is duplicated) — folds into the `midi_agent` repoint. All depth tools (`get_chords`/`get_sections`/`get_bar_grid`/`get_stem`/`get_section_activity`/`get_song_slice`/`transpose_song`) are untouched and complementary.
+- **Waiting on the user:** nothing blocking — **0.5 committed + verified**; the next session opens **0.6 — prompt + parts specialist**. Resume via Ask→Explain→Approve→Implement.
 
 ## Read in this order (the thread)
 
@@ -98,6 +101,13 @@
 - `maestro/maestro_agent/fact_pack.py` — shared `_stem_roster_entry`; `get_midi_tracks` → `all_src` + `stems` roster + `hint`; `get_song_slice` → `parts` roster (all parts) + `hint`; `get_stems` refactored onto the helper; dead `_stem_tool_summary` removed.
 - `maestro/maestro_agent/agent.py` — `get_midi_tracks` + `get_song_slice` tool docstrings describe roster-and-drill (no tool count change; still 10).
 - `maestro/tests/test_slice0_comprehension.py` — +3 Seam B tests (roster shape, `parts` roster, shared-shape check); **34/34**.
+
+## Files changed in the 0.5 batch (committed this session)
+
+- `maestro/maestro_agent/fact_pack.py` — `build_song_overview(pack)` (pure compact view, parts roster reuses `_stem_roster_entry`) + `render_song_overview(overview)` (deterministic Markdown block) + helpers `_render_key_line`/`_fmt_seconds`/`_fmt_num`. No new tool; no `FACT_PACK_VERSION` bump.
+- `maestro/maestro_agent/agent.py` — `{overview_block}` slot in `SYSTEM_PROMPT_TEMPLATE`; `create_agent_runner(..., pack=)` folds the overview into the static prefix via `_overview_block` (best-effort); `invoke_agent` fetches the pack once (`_safe_overview_pack`) and keys `_agent_cache` via `_agent_cache_key(song, model, pack)` = `song|model|v{version}|{created_at}` (or `…|nopack`).
+- `maestro/maestro_agent/llm.py` — `MaestroUsageObserver` reads `prompt_tokens_details.cached_tokens` into each record + totals it in `summarize`.
+- `maestro/tests/test_slice0_comprehension.py` — +5 Seam B (overview assembly/render variants/cache-key identity). `maestro/tests/test_usage_observer.py` — new, +4 (cached_tokens dict/object/absent + summarize). **43/43.**
 
 ## Boundaries to respect (from CLAUDE.md + the plan)
 

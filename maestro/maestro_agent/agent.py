@@ -17,7 +17,12 @@ from typing import Any
 from deepagents import create_deep_agent
 
 from maestro_agent.config import Settings
-from maestro_agent.fact_pack import FactPackUnavailable, SongFactPackService
+from maestro_agent.fact_pack import (
+    FactPackUnavailable,
+    SongFactPackService,
+    build_song_overview,
+    render_song_overview,
+)
 from maestro_agent.llm import make_chat_model, normalize_model, usage_observer
 
 MAX_HISTORY_MESSAGES = 16
@@ -44,7 +49,7 @@ def resolve_model(model: str | None, settings: Settings) -> str:
 SYSTEM_PROMPT_TEMPLATE = """You are Maestro, a guitar-learning music coach answering questions about ONE song the learner is studying.
 
 Active song: {song_id}
-
+{overview_block}
 Use only the provided SongFactPack tools for this song. The SongFactPack is built from WereCode's stored analysis and per-stem MIDI for the song.
 
 Important behavior:
@@ -65,17 +70,34 @@ def create_agent_runner(
     fact_pack: SongFactPackService,
     song_id: str,
     model: str | None = None,
+    pack: dict[str, Any] | None = None,
 ):
-    """Create a DeepAgents runnable scoped to one song (and one model)."""
+    """Create a DeepAgents runnable scoped to one song (and one model).
+
+    The seeded song overview (0.5) is folded into the static `system_prompt` here,
+    at creation, so it rides OpenAI's prompt cache instead of being re-sent per turn.
+    `pack` is the current fact pack (None when the song has no analysis yet → no
+    overview, but a still-functional agent)."""
     chat_model = make_chat_model(model or settings.agent_model)
     tools = _make_tools(fact_pack, song_id)
     return create_deep_agent(
         model=chat_model,
         tools=tools,
         subagents=_make_subagents(chat_model),
-        system_prompt=SYSTEM_PROMPT_TEMPLATE.format(song_id=song_id),
+        system_prompt=SYSTEM_PROMPT_TEMPLATE.format(song_id=song_id, overview_block=_overview_block(pack)),
         name="song_qna_agent",
     )
+
+
+def _overview_block(pack: dict[str, Any] | None) -> str:
+    """Render the seeded overview for the system prefix, or "" when there is no pack
+    yet. Best-effort: a malformed pack must never block agent creation."""
+    if not pack:
+        return ""
+    try:
+        return "\n" + render_song_overview(build_song_overview(pack)) + "\n"
+    except Exception:
+        return ""
 
 
 def invoke_agent(
@@ -89,12 +111,18 @@ def invoke_agent(
     if not settings.agent_enabled:
         return {"content": "Agent is disabled by MAESTRO_AGENT_ENABLED=0.", "raw": None}
     resolved_model = resolve_model(model, settings)
-    # Cache per (song, model): switching models must not reuse a runner bound to
-    # the old model.
-    cache_key = f"{song_id}|{resolved_model}"
+    # The current pack seeds the overview baked into the cached system prefix; it
+    # also identifies the cache entry (see _agent_cache_key) so a rebuilt pack busts
+    # the stale overview. Fetching it here is the same freshness round-trip the tools
+    # already pay per call.
+    pack = _safe_overview_pack(fact_pack, song_id)
+    # Cache per (song, model, pack identity): switching models must not reuse a
+    # runner bound to the old model, and a rebuilt pack must not reuse a runner whose
+    # prefix baked in the old overview.
+    cache_key = _agent_cache_key(song_id, resolved_model, pack)
     agent = _agent_cache.get(cache_key)
     if agent is None:
-        agent = create_agent_runner(settings, fact_pack, song_id, resolved_model)
+        agent = create_agent_runner(settings, fact_pack, song_id, resolved_model, pack=pack)
         _agent_cache[cache_key] = agent
 
     messages = _build_agent_messages(song_id, message, history or [])
@@ -120,6 +148,28 @@ def invoke_agent(
         }
     )
     return {"content": content, "raw": trace}
+
+
+def _safe_overview_pack(fact_pack: SongFactPackService, song_id: str) -> dict[str, Any] | None:
+    """Fetch the current pack to seed the overview and key the agent cache.
+    Best-effort: a song with no analysis yet (or any fetch error) yields None → a
+    still-functional agent with no seeded overview (the tools degrade on their own)."""
+    try:
+        return fact_pack.ensure_current(song_id)
+    except (FactPackUnavailable, FileNotFoundError):
+        return None
+    except Exception:
+        return None
+
+
+def _agent_cache_key(song_id: str, resolved_model: str, pack: dict[str, Any] | None) -> str:
+    """Cache agents per (song, model, pack identity). The pack identity (version +
+    created_at) busts the cached agent when the pack rebuilds — a FACT_PACK_VERSION
+    bump or a re-analysis — so the overview baked into the stable system prefix never
+    goes stale. No pack (song not analyzed yet) uses a stable 'nopack' sentinel."""
+    if not pack:
+        return f"{song_id}|{resolved_model}|nopack"
+    return f"{song_id}|{resolved_model}|v{pack.get('version')}|{pack.get('created_at')}"
 
 
 def _build_agent_messages(song_id: str, message: str, history: list[dict[str, Any]]) -> list[dict[str, str]]:
