@@ -3,6 +3,7 @@
 import { LogIn, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import type { CSSProperties } from 'react';
 
 import { AuthButton } from '@/components/auth/AuthButton';
 import { SessionProvider, useSession } from '@/components/auth/session-context';
@@ -16,9 +17,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // workbench layout and the contextual coach; bare `/app/studio` is the picker and
   // scrolls like any other page.
   const inSongStudio = pathname.startsWith('/app/studio/');
-  // Maestro is a single-viewport workbench too: it manages its own internal
-  // scroll regions and must not produce a document-level scroll.
-  const fixedViewport = inSongStudio || pathname.startsWith('/app/maestro');
+  // Developer workbenches manage their own internal scroll regions and must not
+  // produce a document-level scroll.
+  const fixedViewport = inSongStudio || pathname.startsWith('/app/pipeline') || pathname.startsWith('/app/maestro');
 
   // Library + Studio are the product. Pipeline and Maestro are developer-only
   // surfaces, each gated by its own flag (auto-on in local dev, hidden on prod),
@@ -102,17 +103,22 @@ function ShellContent({
   const { session } = useSession();
   const locked = Boolean(session && session.authEnabled && !session.user);
   const contentClass = fixedViewport ? 'wc-content wc-content-studio' : 'wc-content';
+  const contentStyle: CSSProperties | undefined =
+    fixedViewport || locked
+      ? {
+          ...(fixedViewport ? { height: 'calc(100vh - 76px)' } : {}),
+          ...(locked
+            ? { filter: 'blur(7px) saturate(0.85)', pointerEvents: 'none', userSelect: 'none' }
+            : {}),
+        }
+      : undefined;
 
   return (
     <>
       <div
         className={contentClass}
         aria-hidden={locked || undefined}
-        style={
-          locked
-            ? { filter: 'blur(7px) saturate(0.85)', pointerEvents: 'none', userSelect: 'none' }
-            : undefined
-        }
+        style={contentStyle}
       >
         {children}
       </div>

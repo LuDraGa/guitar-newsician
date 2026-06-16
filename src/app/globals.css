@@ -122,7 +122,7 @@ textarea {
 
 .wc-content-studio {
   display: flex;
-  height: calc(100vh - 68px);
+  height: calc(100vh - 76px);
   min-height: 0;
   overflow: hidden;
   padding: 0 28px 24px;

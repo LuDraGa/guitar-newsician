@@ -1,19 +1,32 @@
 'use client';
 
-import { Activity, AlertCircle, Check, CheckCircle2, ChevronDown, ChevronRight, Copy, Database, DownloadCloud, RefreshCw, Search, Wand2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertCircle, Check, CheckCircle2, ChevronDown, ChevronRight, Copy, DownloadCloud, RefreshCw, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { CoverArt, PillIcon, statusChipClass, StatusDot } from '@/components/werecode/WereCodePrimitives';
 import { toJobSummary, useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
+import { getStemInfo, stemDisplayLabel } from '@/lib/music/stem-metadata';
 import type { JobRow } from '@/types/werecode';
 import type { AssetSummary, JobSummary, SongSummary } from '@/types/werecode-client';
 import { assetLabel, fetchJson, formatBytes, formatDate, signDownload } from '@/features/studio/studio-utils';
 
 type PipelineTab = 'jobs' | 'assets';
 type FilterOption = { value: string; label: string; meta?: string };
+type JobSyncResult = { job: JobRow; assets?: AssetSummary[] | null };
+type JobTargetContext = {
+  type: 'stem' | 'source';
+  label: string;
+  listLabel: string;
+  copyValue: string;
+  sourceAssetId: string;
+  asset: AssetSummary | null;
+  metadata: Record<string, string | null>;
+};
 
 const NO_SONG_FILTER = '__no_song__';
 const emptyAssetSummaries: AssetSummary[] = [];
+const ACTIVE_JOB_POLL_MS = 4000;
+const ACTIVE_JOB_MAX_TICKS = 120;
 
 export function PipelineClient() {
   const jobs = useWereCodeDataCache((state) => state.jobs);
@@ -26,6 +39,7 @@ export function PipelineClient() {
   const setCachedSongs = useWereCodeDataCache((state) => state.setSongs);
   const setCachedJobDetail = useWereCodeDataCache((state) => state.setJobDetail);
   const setCachedAssetsForSong = useWereCodeDataCache((state) => state.setAssetsForSong);
+  const upsertCachedAssetForSong = useWereCodeDataCache((state) => state.upsertAssetForSong);
   const [selectedJob, setSelectedJob] = useState<JobSummary | null>(null);
   const [selectedSongId, setSelectedSongId] = useState('');
   const [selectedAsset, setSelectedAsset] = useState<AssetSummary | null>(null);
@@ -42,11 +56,71 @@ export function PipelineClient() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const syncingJobsRef = useRef(new Set<string>());
 
   const selectedAssetCache = selectedSongId ? assetsBySongId[selectedSongId] : undefined;
   const assets = selectedAssetCache?.assets ?? emptyAssetSummaries;
   const selectedJobDetail = selectedJob ? (jobDetailsById[selectedJob.id] ?? null) : null;
   const selectedJobId = selectedJob?.id ?? null;
+  const assetById = useMemo(() => {
+    const map = new Map<string, AssetSummary>();
+    for (const entry of Object.values(assetsBySongId)) {
+      for (const asset of entry.assets) {
+        map.set(asset.id, asset);
+      }
+    }
+    return map;
+  }, [assetsBySongId]);
+  const jobTargetsById = useMemo(() => {
+    const map = new Map<string, JobTargetContext>();
+    for (const [jobId, detail] of Object.entries(jobDetailsById)) {
+      const target = buildJobTargetContext(detail, assetById);
+      if (target) {
+        map.set(jobId, target);
+      }
+    }
+    return map;
+  }, [assetById, jobDetailsById]);
+
+  const cacheJobDetail = useCallback((job: JobRow) => {
+    setCachedJobDetail(job);
+    setSelectedJob((current) => (current?.id === job.id ? toJobSummary(job) : current));
+  }, [setCachedJobDetail]);
+
+  const syncActiveJobs = useCallback(async () => {
+    const activeJobs = useWereCodeDataCache.getState().jobs.filter(isActiveJob);
+    const settledSongIds = new Set<string>();
+    let touched = false;
+
+    await Promise.all(
+      activeJobs.map(async (job) => {
+        if (syncingJobsRef.current.has(job.id)) {
+          return;
+        }
+
+        syncingJobsRef.current.add(job.id);
+        try {
+          const payload = await fetchJson<JobSyncResult>(`/api/jobs/${job.id}/sync`, { method: 'POST' });
+          cacheJobDetail(payload.job);
+          touched = true;
+          if (payload.job.song_id && !isActiveJob(payload.job)) {
+            settledSongIds.add(payload.job.song_id);
+          }
+          for (const asset of payload.assets ?? []) {
+            if (asset.song_id) {
+              upsertCachedAssetForSong(asset.song_id, asset);
+            }
+          }
+        } catch {
+          // Best-effort diagnostics poll. The next tick or manual refresh retries.
+        } finally {
+          syncingJobsRef.current.delete(job.id);
+        }
+      })
+    );
+
+    return { touched, settledSongIds };
+  }, [cacheJobDetail, upsertCachedAssetForSong]);
 
   const loadPipeline = useCallback(async (options: { force?: boolean } = {}) => {
     const cache = useWereCodeDataCache.getState();
@@ -136,13 +210,19 @@ export function PipelineClient() {
 
   const refreshPipeline = useCallback(async () => {
     await loadPipeline({ force: true });
+    const syncResult = await syncActiveJobs();
     if (selectedSongId) {
       await loadAssets(selectedSongId, { force: true });
+    }
+    for (const songId of syncResult.settledSongIds) {
+      if (songId && songId !== selectedSongId) {
+        await loadAssets(songId, { force: true });
+      }
     }
     if (selectedJob) {
       await loadJobDetail(selectedJob.id, { force: true });
     }
-  }, [loadAssets, loadJobDetail, loadPipeline, selectedJob, selectedSongId]);
+  }, [loadAssets, loadJobDetail, loadPipeline, selectedJob, selectedSongId, syncActiveJobs]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -176,6 +256,50 @@ export function PipelineClient() {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!jobsLoaded) {
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | undefined;
+    let ticks = 0;
+
+    const poll = async () => {
+      if (cancelled) {
+        return;
+      }
+
+      const activeJobs = useWereCodeDataCache.getState().jobs.filter(isActiveJob);
+      if (activeJobs.length === 0 || ticks >= ACTIVE_JOB_MAX_TICKS) {
+        return;
+      }
+
+      ticks += 1;
+      const result = await syncActiveJobs();
+      if (cancelled) {
+        return;
+      }
+
+      if (selectedSongId && result.settledSongIds.has(selectedSongId)) {
+        void loadAssets(selectedSongId, { force: true });
+      }
+
+      if (useWereCodeDataCache.getState().jobs.some(isActiveJob)) {
+        timer = window.setTimeout(() => void poll(), ACTIVE_JOB_POLL_MS);
+      }
+    };
+
+    timer = window.setTimeout(() => void poll(), 0);
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [jobsLoaded, loadAssets, selectedSongId, syncActiveJobs]);
 
   const selectedSong = useMemo(() => songs.find((song) => song.id === selectedSongId) ?? null, [selectedSongId, songs]);
   const songById = useMemo(() => new Map(songs.map((song) => [song.id, song])), [songs]);
@@ -300,58 +424,49 @@ export function PipelineClient() {
   }
 
   const activeJobs = jobs.filter((job) => job.status === 'queued' || job.status === 'processing').length;
+  const selectedItemLabel = tab === 'jobs'
+    ? selectedJob ? formatJobType(selectedJob.job_type) : 'None'
+    : selectedAsset ? assetLabel(selectedAsset.kind) : 'None';
+  const selectedItemDetail = tab === 'jobs' ? selectedJob?.id : selectedAsset?.id;
 
   return (
-    <section className="wc-rise mx-auto flex max-w-[1180px] flex-col">
-      <header className="pb-6 pt-5">
-        <div className="flex flex-wrap items-end justify-between gap-5">
-          <div>
-            <div className="label mb-3">Diagnostics - Next + Supabase + Modal</div>
-            <h1 className="display text-[clamp(36px,5vw,58px)]">Pipeline</h1>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--muted)]">
-              Inspect workflow jobs, request payloads, storage assets, and signed downloads without leaving the app runtime.
-            </p>
+    <section className="wc-rise flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto py-3 lg:overflow-hidden">
+      <header className="flex shrink-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="min-w-0">
+            <div className="label mb-1">Diagnostics - Next + Supabase + Modal</div>
+            <h1 className="display truncate text-[26px] leading-none">Pipeline</h1>
           </div>
+          <span className="chip shrink-0">dev</span>
         </div>
-      </header>
 
-      {message && (
-        <div className="chip live mb-4 min-h-11 w-full justify-start rounded-[12px] px-4">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>{message}</span>
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto xl:justify-center">
+          <PipelineStat label="Jobs" value={String(jobs.length)} />
+          <PipelineStat label="Active" value={String(activeJobs)} />
+          <PipelineStat label="Assets" value={String(assets.length)} title={selectedSong?.title ?? undefined} />
+          <PipelineStat label="Selected" value={selectedItemLabel} title={selectedItemDetail ?? selectedItemLabel} wide />
         </div>
-      )}
-      {error && (
-        <div className="chip danger mb-4 min-h-11 w-full justify-start rounded-[12px] px-4">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
 
-      <div className="mb-5 grid gap-4 md:grid-cols-3">
-        <MetricCard label="Jobs" value={String(jobs.length)} detail={`${activeJobs} active`} icon={<Activity className="h-4 w-4" />} />
-        <MetricCard label="Assets" value={String(assets.length)} detail={selectedSong?.title ?? 'Select a song'} icon={<Database className="h-4 w-4" />} />
-        <MetricCard label="Selected" value={selectedJob?.job_type ?? 'None'} detail={selectedJob?.id ?? 'No job selected'} icon={<Wand2 className="h-4 w-4" />} />
-      </div>
-
-      <div className="mb-5 grid gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-[260px] flex-1 sm:max-w-[360px]">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--faint)]" />
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className="relative min-w-[220px] flex-1 sm:w-[300px] sm:flex-none">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--faint)]" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={`Search ${tab}`}
-              className="wc-input h-10 pl-11 pr-4 text-sm"
+              className="wc-input h-9 pl-9 pr-3 text-[13px]"
             />
           </div>
-          <button type="button" onClick={() => void refreshPipeline()} disabled={loading} className="pill ghost sm">
-            <PillIcon>
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            </PillIcon>
-            Refresh
+          <button
+            type="button"
+            onClick={() => void refreshPipeline()}
+            disabled={loading}
+            className="iconbtn h-9 w-9 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_1px_var(--line)]"
+            aria-label="Refresh pipeline"
+            title="Refresh pipeline"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
-          <div className="flex-1" />
           <div className="segment bg-[var(--card)] shadow-[inset_0_0_0_1.5px_var(--line)]">
             <button
               type="button"
@@ -375,51 +490,65 @@ export function PipelineClient() {
             </button>
           </div>
         </div>
+      </header>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <MultiSelectFilter label="Song" options={songFilterOptions} selected={songFilters} onToggle={(value) => setSongFilters((current) => toggleFilterValue(current, value))} />
-          <MultiSelectFilter label="Job" options={jobTypeFilterOptions} selected={jobTypeFilters} onToggle={(value) => setJobTypeFilters((current) => toggleFilterValue(current, value))} />
-          <MultiSelectFilter label="Endpoint" options={endpointFilterOptions} selected={endpointFilters} onToggle={(value) => setEndpointFilters((current) => toggleFilterValue(current, value))} />
-          <MultiSelectFilter label="Status" options={statusFilterOptions} selected={statusFilters} onToggle={(value) => setStatusFilters((current) => toggleFilterValue(current, value))} />
-          <label className="inline-flex h-10 items-center gap-2 rounded-full bg-[var(--card)] px-3 shadow-[inset_0_0_0_1px_var(--line)]">
-            <span className="label text-[10px]">Assets</span>
-            <select
-              value={selectedSongId}
-              onChange={(event) => setSelectedSongId(event.target.value)}
-              className="min-w-40 bg-transparent text-sm font-bold outline-none"
-              aria-label="Asset song"
-            >
-              <option value="">No song selected</option>
-              {songs.map((song) => (
-                <option key={song.id} value={song.id}>
-                  {song.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          {hasActiveFilters && (
-            <button
-              type="button"
-              onClick={() => {
-                setSongFilters([]);
-                setJobTypeFilters([]);
-                setEndpointFilters([]);
-                setStatusFilters([]);
-              }}
-              className="chip danger relative z-30"
-            >
-              Clear filters
-            </button>
-          )}
+      {message && (
+        <div className="chip live min-h-9 shrink-0 justify-start rounded-[12px] px-3">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{message}</span>
         </div>
+      )}
+      {error && (
+        <div className="chip danger min-h-9 shrink-0 justify-start rounded-[12px] px-3">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <div className="relative z-20 flex shrink-0 flex-wrap items-center gap-2 lg:flex-nowrap">
+        <MultiSelectFilter label="Song" options={songFilterOptions} selected={songFilters} onToggle={(value) => setSongFilters((current) => toggleFilterValue(current, value))} />
+        <MultiSelectFilter label="Job" options={jobTypeFilterOptions} selected={jobTypeFilters} onToggle={(value) => setJobTypeFilters((current) => toggleFilterValue(current, value))} />
+        <MultiSelectFilter label="Endpoint" options={endpointFilterOptions} selected={endpointFilters} onToggle={(value) => setEndpointFilters((current) => toggleFilterValue(current, value))} />
+        <MultiSelectFilter label="Status" options={statusFilterOptions} selected={statusFilters} onToggle={(value) => setStatusFilters((current) => toggleFilterValue(current, value))} />
+        <label className="inline-flex h-9 shrink-0 items-center gap-2 rounded-full bg-[var(--card)] px-3 shadow-[inset_0_0_0_1px_var(--line)]">
+          <span className="label text-[10px]">Assets</span>
+          <select
+            value={selectedSongId}
+            onChange={(event) => setSelectedSongId(event.target.value)}
+            className="w-44 max-w-[42vw] truncate bg-transparent text-xs font-bold outline-none"
+            aria-label="Asset song"
+          >
+            <option value="">No song selected</option>
+            {songs.map((song) => (
+              <option key={song.id} value={song.id}>
+                {song.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        {hasActiveFilters && (
+          <button
+            type="button"
+            onClick={() => {
+              setSongFilters([]);
+              setJobTypeFilters([]);
+              setEndpointFilters([]);
+              setStatusFilters([]);
+            }}
+            className="chip danger relative z-30 h-9 shrink-0"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
-      <div className="grid min-h-[560px] gap-5 xl:grid-cols-[1fr_380px]">
-        <section className="surface overflow-hidden">
+      <div className="grid min-h-[620px] gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_420px] 2xl:grid-cols-[minmax(0,1fr)_460px]">
+        <section className="surface flex min-h-0 flex-col overflow-hidden">
           {tab === 'jobs' ? (
             <JobList
               jobs={filteredJobs}
               songById={songById}
+              jobTargetsById={jobTargetsById}
               nowMs={nowMs}
               selectedJob={selectedJob}
               loading={loading}
@@ -440,7 +569,7 @@ export function PipelineClient() {
           )}
         </section>
 
-        <aside className="surface overflow-hidden">
+        <aside className="surface flex min-h-0 flex-col overflow-hidden">
           {tab === 'jobs' ? (
             <JobDetail
               job={selectedJob}
@@ -448,6 +577,7 @@ export function PipelineClient() {
               detailLoading={Boolean(selectedJob && jobDetailLoadingId === selectedJob.id)}
               detailError={jobDetailError}
               selectedSong={selectedSong}
+              target={selectedJob ? jobTargetsById.get(selectedJob.id) ?? null : null}
               nowMs={nowMs}
             />
           ) : (
@@ -459,18 +589,17 @@ export function PipelineClient() {
   );
 }
 
-function MetricCard({ label, value, detail, icon }: { label: string; value: string; detail: string; icon: React.ReactNode }) {
+function PipelineStat({ label, value, title, wide = false }: { label: string; value: string; title?: string; wide?: boolean }) {
   return (
-    <div className="surface flex items-center justify-between gap-4 p-5">
-      <div>
-        <div className="label mb-2">{label}</div>
-        <div className="display max-w-[220px] truncate text-2xl">{value}</div>
-        <div className="mono mt-1 truncate text-xs text-[var(--faint)]">{detail}</div>
-      </div>
-      <span className="grid h-10 w-10 place-items-center rounded-[12px] bg-[var(--card-2)] text-[var(--accent-ink)] shadow-[inset_0_0_0_1px_var(--line-2)]">
-        {icon}
+    <span
+      className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-full bg-[var(--card)] px-3 shadow-[inset_0_0_0_1px_var(--line)] ${wide ? 'max-w-[230px]' : ''}`}
+      title={title}
+    >
+      <span className="label text-[9px]">{label}</span>
+      <span className="mono truncate text-xs font-bold text-[var(--ink)]">
+        {value}
       </span>
-    </div>
+    </span>
   );
 }
 
@@ -488,16 +617,16 @@ function MultiSelectFilter({
   const selectedCount = selected.length;
 
   return (
-    <details className="group relative">
+    <details className="group relative shrink-0">
       <summary
-        className={`inline-flex h-10 cursor-pointer list-none items-center gap-2 rounded-full px-3 text-sm font-bold shadow-[inset_0_0_0_1px_var(--line)] [&::-webkit-details-marker]:hidden ${
+        className={`inline-flex h-9 cursor-pointer list-none items-center gap-2 whitespace-nowrap rounded-full px-3 text-xs font-bold shadow-[inset_0_0_0_1px_var(--line)] [&::-webkit-details-marker]:hidden ${
           selectedCount > 0 ? 'bg-[var(--ink)] text-[var(--paper)]' : 'bg-[var(--card)] text-[var(--ink)]'
         }`}
       >
         <span className="label text-[10px] text-current opacity-70">{label}</span>
         <span>{selectedCount > 0 ? `${selectedCount} selected` : 'All'}</span>
       </summary>
-      <div className="absolute left-0 top-[calc(100%+8px)] z-20 w-72 rounded-[16px] bg-[var(--card)] p-2 shadow-[var(--shadow-pop)]">
+      <div className="absolute left-0 top-[calc(100%+8px)] z-20 hidden w-72 rounded-[16px] bg-[var(--card)] p-2 shadow-[var(--shadow-pop)] group-open:block max-md:static max-md:mt-2 max-md:w-[calc(100vw-32px)]">
         <div className="max-h-72 overflow-y-auto pr-1">
           {options.map((option) => {
             const checked = selected.includes(option.value);
@@ -531,6 +660,7 @@ function MultiSelectFilter({
 function JobList({
   jobs,
   songById,
+  jobTargetsById,
   nowMs,
   selectedJob,
   loading,
@@ -538,53 +668,59 @@ function JobList({
 }: {
   jobs: JobSummary[];
   songById: Map<string, SongSummary>;
+  jobTargetsById: Map<string, JobTargetContext>;
   nowMs: number;
   selectedJob: JobSummary | null;
   loading: boolean;
   onSelect: (job: JobSummary) => void;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[660px]">
-      <div className="label grid grid-cols-[minmax(180px,1.35fr)_minmax(100px,0.8fr)_minmax(100px,0.8fr)_minmax(112px,0.8fr)_80px] gap-3 border-b border-[var(--line-2)] px-5 py-3 text-[10px]">
-        <span>Job</span>
-        <span>Endpoint</span>
-        <span>Status</span>
-        <span>Started</span>
-        <span>Duration</span>
-      </div>
-      <div>
-        {jobs.map((job) => (
-          <button
-            key={job.id}
-            type="button"
-            onClick={() => onSelect(job)}
-            className="grid w-full grid-cols-[minmax(180px,1.35fr)_minmax(100px,0.8fr)_minmax(100px,0.8fr)_minmax(112px,0.8fr)_80px] items-center gap-3 border-b border-[var(--line-2)] px-5 py-4 text-left last:border-b-0 hover:bg-[var(--card-2)]"
-            style={selectedJob?.id === job.id ? { boxShadow: 'inset 3px 0 0 var(--accent)', background: 'var(--card-2)' } : undefined}
-          >
-            <span className="min-w-0">
-              <span className="mono block truncate text-sm font-bold">{job.job_type}</span>
-              <span className="mt-1 block truncate text-xs text-[var(--muted)]">
-                {songLabel(songById, job.song_id)} · {job.id}
-              </span>
-            </span>
-            <span className="mono truncate text-[11px] text-[var(--muted)]">{job.modal_endpoint ?? 'next'}</span>
-            <span>
-              <StatusDot status={job.status} />
-              {job.status === 'processing' && (
-                <span className="mt-2 block h-1 overflow-hidden rounded-full bg-[var(--paper-2)]">
-                  <span className="block h-full bg-[var(--accent)]" style={{ width: `${job.progress}%` }} />
-                </span>
-              )}
-            </span>
-            <span className="mono truncate text-[11px] text-[var(--faint)]" title={job.started_at ?? undefined}>
-              {formatJobStarted(job)}
-            </span>
-            <span className="mono text-[11px] font-bold text-[var(--muted)]">{formatJobDuration(job, nowMs)}</span>
-          </button>
-        ))}
-      </div>
-      {!loading && jobs.length === 0 && <div className="p-5 text-sm text-[var(--muted)]">No jobs match this filter.</div>}
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-auto">
+        <div className="min-w-[760px]">
+          <div className="label sticky top-0 z-10 grid grid-cols-[minmax(210px,1.35fr)_minmax(112px,0.8fr)_minmax(116px,0.8fr)_minmax(128px,0.8fr)_80px] gap-3 border-b border-[var(--line-2)] bg-[var(--card)] px-4 py-2.5 text-[10px]">
+            <span>Job</span>
+            <span>Endpoint</span>
+            <span>Status</span>
+            <span>Started</span>
+            <span>Duration</span>
+          </div>
+          <div>
+            {jobs.map((job) => {
+              const target = jobTargetsById.get(job.id) ?? null;
+              return (
+                <button
+                  key={job.id}
+                  type="button"
+                  onClick={() => onSelect(job)}
+                  className="grid w-full grid-cols-[minmax(210px,1.35fr)_minmax(112px,0.8fr)_minmax(116px,0.8fr)_minmax(128px,0.8fr)_80px] items-center gap-3 border-b border-[var(--line-2)] px-4 py-3 text-left last:border-b-0 hover:bg-[var(--card-2)]"
+                  style={selectedJob?.id === job.id ? { boxShadow: 'inset 3px 0 0 var(--accent)', background: 'var(--card-2)' } : undefined}
+                >
+                  <span className="min-w-0">
+                    <span className="mono block truncate text-[13px] font-bold">{job.job_type}</span>
+                    <span className="mt-0.5 block truncate text-[11px] text-[var(--muted)]">
+                      {[songLabel(songById, job.song_id), target?.listLabel, job.id].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                  <span className="mono truncate text-[11px] text-[var(--muted)]">{job.modal_endpoint ?? 'next'}</span>
+                  <span>
+                    <StatusDot status={job.status} />
+                    {job.status === 'processing' && (
+                      <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-[var(--paper-2)]">
+                        <span className="block h-full bg-[var(--accent)]" style={{ width: `${job.progress}%` }} />
+                      </span>
+                    )}
+                  </span>
+                  <span className="mono truncate text-[11px] text-[var(--faint)]" title={job.started_at ?? undefined}>
+                    {formatJobStarted(job)}
+                  </span>
+                  <span className="mono text-[11px] font-bold text-[var(--muted)]">{formatJobDuration(job, nowMs)}</span>
+                </button>
+              );
+            })}
+          </div>
+          {!loading && jobs.length === 0 && <div className="p-4 text-sm text-[var(--muted)]">No jobs match this filter.</div>}
+        </div>
       </div>
     </div>
   );
@@ -602,32 +738,36 @@ function AssetList({
   onSelect: (asset: AssetSummary) => void;
 }) {
   return (
-    <>
-      <div className="label grid grid-cols-[1.6fr_1fr_auto] gap-3 border-b border-[var(--line-2)] px-5 py-3 text-[10px]">
-        <span>Asset</span>
-        <span>Type</span>
-        <span>Size</span>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-auto">
+        <div className="min-w-[620px]">
+          <div className="label sticky top-0 z-10 grid grid-cols-[minmax(250px,1.6fr)_minmax(150px,1fr)_96px] gap-3 border-b border-[var(--line-2)] bg-[var(--card)] px-4 py-2.5 text-[10px]">
+            <span>Asset</span>
+            <span>Type</span>
+            <span>Size</span>
+          </div>
+          <div>
+            {assets.map((asset) => (
+              <button
+                key={asset.id}
+                type="button"
+                onClick={() => onSelect(asset)}
+                className="grid w-full grid-cols-[minmax(250px,1.6fr)_minmax(150px,1fr)_96px] items-center gap-3 border-b border-[var(--line-2)] px-4 py-3 text-left last:border-b-0 hover:bg-[var(--card-2)]"
+                style={selectedAsset?.id === asset.id ? { boxShadow: 'inset 3px 0 0 var(--accent)', background: 'var(--card-2)' } : undefined}
+              >
+                <span className="min-w-0">
+                  <span className="mono block truncate text-[13px] font-bold">{assetLabel(asset.kind)}</span>
+                  <span className="mono mt-0.5 block truncate text-[11px] text-[var(--faint)]">{asset.object_path}</span>
+                </span>
+                <span className="mono truncate text-[11px] text-[var(--muted)]">{asset.content_type ?? '--'}</span>
+                <span className="mono text-[11px] text-[var(--faint)]">{formatBytes(asset.byte_size)}</span>
+              </button>
+            ))}
+          </div>
+          {!loading && assets.length === 0 && <div className="p-4 text-sm text-[var(--muted)]">No assets match this filter.</div>}
+        </div>
       </div>
-      <div>
-        {assets.map((asset) => (
-          <button
-            key={asset.id}
-            type="button"
-            onClick={() => onSelect(asset)}
-            className="grid w-full grid-cols-[1.6fr_1fr_auto] items-center gap-3 border-b border-[var(--line-2)] px-5 py-4 text-left last:border-b-0 hover:bg-[var(--card-2)]"
-            style={selectedAsset?.id === asset.id ? { boxShadow: 'inset 3px 0 0 var(--accent)', background: 'var(--card-2)' } : undefined}
-          >
-            <span className="min-w-0">
-              <span className="mono block truncate text-sm font-bold">{assetLabel(asset.kind)}</span>
-              <span className="mono mt-1 block truncate text-[11px] text-[var(--faint)]">{asset.object_path}</span>
-            </span>
-            <span className="mono truncate text-[11px] text-[var(--muted)]">{asset.content_type ?? '--'}</span>
-            <span className="mono text-[11px] text-[var(--faint)]">{formatBytes(asset.byte_size)}</span>
-          </button>
-        ))}
-      </div>
-      {!loading && assets.length === 0 && <div className="p-5 text-sm text-[var(--muted)]">No assets match this filter.</div>}
-    </>
+    </div>
   );
 }
 
@@ -637,6 +777,7 @@ function JobDetail({
   detailLoading,
   detailError,
   selectedSong,
+  target,
   nowMs,
 }: {
   job: JobSummary | null;
@@ -644,42 +785,56 @@ function JobDetail({
   detailLoading: boolean;
   detailError: string | null;
   selectedSong: SongSummary | null;
+  target: JobTargetContext | null;
   nowMs: number;
 }) {
-  const fullPayload = job ? buildJobCopyPayload(job, jobDetail, nowMs) : null;
+  const fullPayload = job ? buildJobCopyPayload(job, jobDetail, nowMs, target) : null;
+  const jobDuration = job ? formatJobDuration(job, nowMs) : null;
+  const songLabelText = selectedSong
+    ? selectedSong.artist
+      ? `${selectedSong.title} - ${selectedSong.artist}`
+      : selectedSong.title
+    : null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col p-5">
-      <div className="mb-4 border-b border-[var(--line-2)] pb-4">
+    <div className="flex h-full min-h-0 flex-col p-4">
+      <div className="mb-2 shrink-0 border-b border-[var(--line-2)] pb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="label mb-2">Job payload</div>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2 className="min-w-0 truncate text-xl font-semibold">{job?.job_type ?? 'No job selected'}</h2>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="label">Job payload</span>
+              {job ? (
+                <>
+                  <span className="min-w-0 truncate text-base font-semibold">{job.job_type}</span>
+                  {jobDuration && <span className="mono text-[11px] font-bold text-[var(--muted)]">{jobDuration}</span>}
+                </>
+              ) : (
+                <span className="text-base font-semibold">No job selected</span>
+              )}
               {job && <span className={`${statusChipClass(job.status)} shrink-0`}>{job.status}</span>}
             </div>
-            {job && <div className="mono mt-1 truncate text-[11px] text-[var(--faint)]">{job.id}</div>}
           </div>
           {fullPayload && <CopyJsonButton label="Copy full payload" value={fullPayload} />}
         </div>
-        {selectedSong && (
-          <div className="mt-3 flex min-w-0 items-center gap-2">
-            <CoverArt id={selectedSong.id} size={30} title={selectedSong.title} />
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">{selectedSong.title}</div>
-              <div className="truncate text-xs text-[var(--muted)]">{selectedSong.artist ?? 'Unknown artist'}</div>
-            </div>
+        {selectedSong && songLabelText && (
+          <div className="mt-2 grid gap-1.5">
+            <CopyTextRow label="Song" value={songLabelText} />
+            {target && <CopyTextRow label={target.type === 'stem' ? 'Stem' : 'Source'} value={target.copyValue} />}
+            <CopyTextRow label="Song ID" value={selectedSong.id} mono />
           </div>
         )}
         {job?.error_message && (
-          <div className="mt-3 flex items-start gap-2 rounded-[10px] bg-[oklch(0.55_0.16_28_/_0.1)] px-3 py-2 text-sm font-semibold leading-5 text-[var(--danger)]">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{job.error_message}</span>
+          <div
+            className="mt-2 flex h-7 items-center gap-2 rounded-[10px] bg-[oklch(0.55_0.16_28_/_0.1)] px-2.5 text-xs font-semibold text-[var(--danger)]"
+            title={job.error_message}
+          >
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{job.error_message}</span>
           </div>
         )}
       </div>
       {job ? (
-        <JobPayloadExplorer job={job} jobDetail={jobDetail} detailLoading={detailLoading} detailError={detailError} nowMs={nowMs} />
+        <JobPayloadExplorer job={job} jobDetail={jobDetail} detailLoading={detailLoading} detailError={detailError} target={target} nowMs={nowMs} />
       ) : (
         <div className="mono min-h-0 flex-1 rounded-[12px] bg-[var(--paper)] p-4 text-xs leading-6 text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--line-2)]">
           Select a job to inspect its payload.
@@ -694,22 +849,24 @@ function JobPayloadExplorer({
   jobDetail,
   detailLoading,
   detailError,
+  target,
   nowMs,
 }: {
   job: JobSummary;
   jobDetail: JobRow | null;
   detailLoading: boolean;
   detailError: string | null;
+  target: JobTargetContext | null;
   nowMs: number;
 }) {
-  const metadata = buildJobMetadata(job, nowMs);
+  const metadata = buildJobMetadata(job, nowMs, target);
 
   return (
-    <div className="mono flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-0.5 text-xs leading-6 text-[var(--ink)]">
+    <div className="mono flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-0.5 text-xs leading-5 text-[var(--ink)]">
       <JsonSection key={`${job.id}-metadata`} title="metadata" value={metadata} defaultOpen />
       {jobDetail ? (
         <>
-          <JsonSection key={`${job.id}-request`} title="request_payload" value={jobDetail.request_payload} defaultOpen />
+          <JsonSection key={`${job.id}-request`} title="request_payload" value={jobDetail.request_payload} />
           <JsonSection key={`${job.id}-response`} title="response_payload" value={jobDetail.response_payload} />
           <JsonSection key={`${job.id}-diagnostics`} title="diagnostics" value={jobDetail.diagnostics} />
         </>
@@ -722,7 +879,48 @@ function JobPayloadExplorer({
   );
 }
 
-function buildJobMetadata(job: JobSummary, nowMs: number) {
+function CopyTextRow({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const copied = copyState === 'copied';
+  const failed = copyState === 'failed';
+
+  async function copyValue() {
+    try {
+      await writeTextToClipboard(value);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+    window.setTimeout(() => setCopyState('idle'), 1600);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copyValue}
+      className={`grid w-full grid-cols-[56px_minmax(0,1fr)_auto] items-start gap-2 rounded-[10px] bg-[var(--paper)] px-2.5 py-1.5 text-left shadow-[inset_0_0_0_1px_var(--line-2)] transition-colors hover:bg-[var(--card-2)] ${
+        copied ? 'text-[var(--accent-ink)]' : failed ? 'text-[var(--danger)]' : ''
+      }`}
+      title={`Copy ${label.toLowerCase()}`}
+    >
+      <span className="label pt-0.5 text-[8px] leading-none">{label}</span>
+      <span className={`min-w-0 break-words text-[11px] font-bold leading-4 ${mono ? 'mono' : ''}`}>{value}</span>
+      <span className="shrink-0 pt-0.5 text-[10px] font-bold text-[var(--faint)]">
+        {copied ? 'Copied' : failed ? 'Failed' : 'Copy'}
+      </span>
+    </button>
+  );
+}
+
+function buildJobMetadata(job: JobSummary, nowMs: number, target: JobTargetContext | null) {
   return {
     id: job.id,
     song_id: job.song_id,
@@ -730,7 +928,7 @@ function buildJobMetadata(job: JobSummary, nowMs: number) {
     type: job.job_type,
     status: job.status,
     progress: job.progress,
-    endpoint: job.modal_endpoint ?? 'next',
+    ...(target ? { target: target.metadata } : {}),
     message: job.message,
     error: job.error_message,
     started_at: job.started_at,
@@ -739,12 +937,65 @@ function buildJobMetadata(job: JobSummary, nowMs: number) {
   };
 }
 
-function buildJobCopyPayload(job: JobSummary, jobDetail: JobRow | null, nowMs: number) {
+function buildJobCopyPayload(job: JobSummary, jobDetail: JobRow | null, nowMs: number, target: JobTargetContext | null) {
   return {
-    metadata: buildJobMetadata(job, nowMs),
+    metadata: buildJobMetadata(job, nowMs, target),
     request_payload: jobDetail?.request_payload ?? null,
     response_payload: jobDetail?.response_payload ?? null,
     diagnostics: jobDetail?.diagnostics ?? null,
+  };
+}
+
+function buildJobTargetContext(jobDetail: JobRow | null, assetById: Map<string, AssetSummary>): JobTargetContext | null {
+  const requestPayload = asRecord(jobDetail?.request_payload);
+  const sourceAssetId = cleanString(requestPayload?.source_asset_id);
+  if (!sourceAssetId) {
+    return null;
+  }
+
+  const asset = assetById.get(sourceAssetId) ?? null;
+  const isStemTarget = requestPayload?.is_stem === true || asset?.kind.startsWith('stem_') === true;
+  if (isStemTarget) {
+    const stemInfo = asset ? getStemInfo(asset) : null;
+    const label = asset ? stemDisplayLabel(asset) : `Stem asset ${sourceAssetId}`;
+    const role = stemInfo?.role ?? null;
+    const assetKind = asset?.kind ?? null;
+    const copyValue = assetKind ? `${label} · ${assetKind} · ${sourceAssetId}` : `${label} · ${sourceAssetId}`;
+
+    return {
+      type: 'stem',
+      label,
+      listLabel: `Stem: ${label}`,
+      copyValue,
+      sourceAssetId,
+      asset,
+      metadata: {
+        type: 'stem',
+        label,
+        role,
+        source_asset_id: sourceAssetId,
+        asset_kind: assetKind,
+        object_path: asset?.object_path ?? null,
+      },
+    };
+  }
+
+  const label = asset ? assetLabel(asset.kind) : `Source asset ${sourceAssetId}`;
+  return {
+    type: 'source',
+    label,
+    listLabel: `Source: ${label}`,
+    copyValue: asset ? `${label} · ${asset.kind} · ${sourceAssetId}` : `${label}`,
+    sourceAssetId,
+    asset,
+    metadata: {
+      type: 'source',
+      label,
+      role: null,
+      source_asset_id: sourceAssetId,
+      asset_kind: asset?.kind ?? null,
+      object_path: asset?.object_path ?? null,
+    },
   };
 }
 
@@ -798,8 +1049,8 @@ function JsonSection({ title, value, defaultOpen = false }: { title: string; val
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <section className="overflow-hidden rounded-[12px] bg-[var(--paper)] shadow-[inset_0_0_0_1px_var(--line-2)]">
-      <div className="flex items-center justify-between gap-2 px-2">
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-[12px] bg-[var(--paper)] shadow-[inset_0_0_0_1px_var(--line-2)]">
+      <div className="flex shrink-0 items-center justify-between gap-2 px-2">
         <button
           type="button"
           onClick={() => setOpen((current) => !current)}
@@ -813,7 +1064,7 @@ function JsonSection({ title, value, defaultOpen = false }: { title: string; val
         <CopyJsonButton label={`Copy ${title}`} value={value} />
       </div>
       {open && (
-        <div className="overflow-x-auto border-t border-[var(--line-2)] py-2">
+        <div className="max-h-80 overflow-auto border-t border-[var(--line-2)] py-2">
           <JsonNode value={value} path={title} depth={0} defaultExpandedDepth={1} />
         </div>
       )}
@@ -1003,43 +1254,48 @@ function AssetDetail({
   onOpenAsset: (asset: AssetSummary) => void;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col p-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <div className="label mb-2">Asset detail</div>
-          <h2 className="font-semibold">{asset ? assetLabel(asset.kind) : 'No asset selected'}</h2>
-        </div>
-      </div>
-      {selectedSong && (
-        <div className="mb-4 flex items-center gap-3 rounded-[12px] bg-[var(--card-2)] p-3 shadow-[inset_0_0_0_1px_var(--line-2)]">
-          <CoverArt id={selectedSong.id} size={38} title={selectedSong.title} />
+    <div className="flex h-full min-h-0 flex-col p-4">
+      <div className="mb-3 shrink-0 border-b border-[var(--line-2)] pb-3">
+        <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">{selectedSong.title}</div>
-            <div className="truncate text-xs text-[var(--muted)]">{selectedSong.artist ?? 'Unknown artist'}</div>
+            <div className="label mb-1">Asset detail</div>
+            <h2 className="truncate text-base font-semibold">{asset ? assetLabel(asset.kind) : 'No asset selected'}</h2>
+            {asset && <div className="mono mt-1 truncate text-[11px] text-[var(--faint)]">{asset.id}</div>}
           </div>
         </div>
-      )}
-      {asset ? (
-        <div className="grid gap-4">
-          <DetailRow label="Kind" value={asset.kind} />
-          <DetailRow label="MIME" value={asset.content_type ?? '--'} />
-          <DetailRow label="Size" value={formatBytes(asset.byte_size)} />
-          <DetailRow label="Created" value={formatDate(asset.created_at)} />
-          <div>
-            <div className="label mb-2">Storage path</div>
-            <code className="mono block break-all rounded-[12px] bg-[var(--paper)] p-4 text-xs leading-6 shadow-[inset_0_0_0_1px_var(--line-2)]">
-              {asset.object_path}
-            </code>
+        {selectedSong && (
+          <div className="mt-2 flex min-w-0 items-center gap-2">
+            <CoverArt id={selectedSong.id} size={24} title={selectedSong.title} />
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-semibold">{selectedSong.title}</div>
+              <div className="truncate text-[11px] text-[var(--muted)]">{selectedSong.artist ?? 'Unknown artist'}</div>
+            </div>
           </div>
-          <button type="button" onClick={() => onOpenAsset(asset)} className="pill w-fit">
-            <PillIcon>
-              <DownloadCloud className="h-3.5 w-3.5" />
-            </PillIcon>
-            Signed URL
-          </button>
+        )}
+      </div>
+      {asset ? (
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="grid gap-3">
+            <DetailRow label="Kind" value={asset.kind} />
+            <DetailRow label="MIME" value={asset.content_type ?? '--'} />
+            <DetailRow label="Size" value={formatBytes(asset.byte_size)} />
+            <DetailRow label="Created" value={formatDate(asset.created_at)} />
+            <div>
+              <div className="label mb-2">Storage path</div>
+              <code className="mono block break-all rounded-[12px] bg-[var(--paper)] p-3 text-xs leading-5 shadow-[inset_0_0_0_1px_var(--line-2)]">
+                {asset.object_path}
+              </code>
+            </div>
+            <button type="button" onClick={() => onOpenAsset(asset)} className="pill w-fit">
+              <PillIcon>
+                <DownloadCloud className="h-3.5 w-3.5" />
+              </PillIcon>
+              Signed URL
+            </button>
+          </div>
         </div>
       ) : (
-        <div className="text-sm text-[var(--muted)]">Select an asset to inspect its storage metadata.</div>
+        <div className="min-h-0 flex-1 text-sm text-[var(--muted)]">Select an asset to inspect its storage metadata.</div>
       )}
     </div>
   );
@@ -1047,7 +1303,7 @@ function AssetDetail({
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-4 border-b border-[var(--line-2)] pb-3 text-sm">
+    <div className="flex justify-between gap-4 border-b border-[var(--line-2)] pb-2 text-sm">
       <span className="text-[var(--muted)]">{label}</span>
       <span className="mono text-right font-semibold">{value}</span>
     </div>
@@ -1064,6 +1320,21 @@ function selectionMatches(selected: string[], value: string) {
 
 function textMatches(query: string, values: Array<string | null | undefined>) {
   return !query || values.some((value) => value?.toLowerCase().includes(query));
+}
+
+function isActiveJob(job: Pick<JobSummary, 'status'> | Pick<JobRow, 'status'>) {
+  return job.status === 'queued' || job.status === 'processing';
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function cleanString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 function formatJobStarted(job: JobSummary) {
