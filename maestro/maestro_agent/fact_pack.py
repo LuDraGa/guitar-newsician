@@ -14,13 +14,17 @@ import statistics
 import time
 from typing import Any
 
-from maestro_agent.midi import summarize_midi_bytes
+from maestro_agent.midi import note_activity_by_window, summarize_midi_bytes
 from maestro_agent.werecode_data import AnalysisUnavailable, WereCodeSongData
 
 FACT_PACK_SCHEMA = "maestro.song_fact_pack.v1"
-FACT_PACK_VERSION = 2
+# v3 (2026-06-16, Slice 0): stems carry precise identity (label/tags), their own
+# bounded chord progression + sections, and per-section activity. Bumping forces
+# ensure_current to rebuild older packs so the role axis is populated.
+FACT_PACK_VERSION = 3
 MAX_TOOL_CHORDS = 64
 MAX_TRANSPOSE_PREVIEW = 96
+MAX_STEM_PROGRESSION = 64
 KEY_FIT_TIE_WINDOW = 0.06
 
 PITCH_CLASS_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -74,11 +78,13 @@ class SongFactPackService:
 
         analyses = mix_analysis.get("response", {}).get("analyses", {})
         midi_summary = _safe_midi_bytes(self.data.download_full_midi_bytes(song_id), "source_midi", max_notes=128)
-        stems = self.data.list_stems(song_id)
-        stem_summaries = [self._stem_summary(song_id, stem, max_notes=32) for stem in stems]
-
         created_at = _now_iso()
+        # Sections are computed before stems so each stem can roll its note onsets
+        # into the section windows (the Section × Role activity, 0.4).
         sections = _build_sections(analyses)
+        stems = self.data.list_stems(song_id)
+        stem_summaries = [self._stem_summary(song_id, stem, max_notes=32, sections=sections) for stem in stems]
+
         bar_grid = _build_bar_grid(analyses, midi_summary)
         chords = _build_chords(analyses)
         tempo = _build_tempo(analyses)
@@ -129,12 +135,22 @@ class SongFactPackService:
             },
         }
 
-    def _stem_summary(self, song_id: str, stem: dict[str, Any], *, max_notes: int) -> dict[str, Any]:
+    def _stem_summary(
+        self,
+        song_id: str,
+        stem: dict[str, Any],
+        *,
+        max_notes: int,
+        sections: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         stem_id = str(stem["stem_id"])
         summary: dict[str, Any] = {
             "stem_id": stem_id,
-            "inst_class": stem.get("inst_class"),
+            # 0.1 — precise identity carried through from the adapter.
+            "label": stem.get("label"),
             "role": stem.get("role"),
+            "tags": stem.get("tags") or [],
+            "inst_class": stem.get("inst_class"),
             "midi_program_name": stem.get("midi_program_name"),
             "program_num": stem.get("program_num"),
             "is_drum": bool(stem.get("is_drum")),
@@ -146,17 +162,28 @@ class SongFactPackService:
         midi_bytes = self.data.download_stem_midi_bytes(song_id, stem_id) if stem.get("has_midi") else None
         summary["midi"] = _compact_midi_summary(_safe_midi_bytes(midi_bytes, f"stem:{stem_id}", max_notes=max_notes))
 
+        # 0.4 — per-section note activity (the deterministic Section × Role rollup).
+        if sections and midi_bytes:
+            summary["activity_by_section"] = _stem_activity_by_section(midi_bytes, sections)
+
         analysis = self.data.get_stem_analysis(song_id, stem_id)
         if analysis is None:
             summary["analysis"] = {"status": "missing"}
         else:
             analyses = analysis.get("response", {}).get("analyses", {})
+            # 0.2 — keep the stem's own progression + sections, not just a count, so
+            # questions like "does the bass follow the mix's chords?" are answerable.
+            stem_chords = _build_chords(analyses)
             summary["analysis"] = {
                 "status": analysis.get("response", {}).get("status"),
                 "keys": list(analyses.keys()),
                 "tempo": _build_tempo(analyses),
-                "key": _build_key(analyses),
-                "chord_progression_count": len(analyses.get("chords", {}).get("data", {}).get("progression") or []),
+                "key": _build_key(analyses, stem_chords),
+                "chord_progression_count": stem_chords["progression_count"],
+                "chord_mean_conf": stem_chords["mean_conf"],
+                "chords": stem_chords["progression"][:MAX_STEM_PROGRESSION],
+                "chords_truncated": stem_chords["progression_count"] > MAX_STEM_PROGRESSION,
+                "sections": _build_sections(analyses),
             }
         return summary
 
@@ -225,6 +252,98 @@ class SongFactPackQueries:
             "all_src": _midi_tool_summary(midi.get("all_src", {})),
             "stems": [_stem_tool_summary(stem) for stem in midi.get("stems", [])],
             "evidence": {"source": "song_fact_pack.midi"},
+        }
+
+    def get_stems(self) -> dict[str, Any]:
+        """Lightweight stem roster (identity only) — the cheap entry point before
+        drilling into one part with get_stem."""
+        pack = self._pack()
+        stems = pack.get("midi", {}).get("stems", [])
+        return {
+            "song_id": self.song_id,
+            "stem_count": len(stems),
+            "stems": [
+                {
+                    "stem_id": stem.get("stem_id"),
+                    "label": stem.get("label"),
+                    "role": stem.get("role"),
+                    "tags": stem.get("tags") or [],
+                    "is_drum": stem.get("is_drum"),
+                    "has_midi": stem.get("has_midi"),
+                    "has_analysis": (stem.get("analysis") or {}).get("status") not in (None, "missing"),
+                    "integrated_loudness": stem.get("integrated_loudness"),
+                }
+                for stem in stems
+            ],
+            "evidence": {"source": "song_fact_pack.midi.stems"},
+        }
+
+    def get_stem(self, stem_id: str) -> dict[str, Any]:
+        """Full detail for one stem/part: identity + MIDI summary + its own analysis
+        (key/tempo/chords/sections) + per-section activity."""
+        pack = self._pack()
+        stems = pack.get("midi", {}).get("stems", [])
+        target = next((stem for stem in stems if str(stem.get("stem_id")) == str(stem_id)), None)
+        if target is None:
+            return {
+                "song_id": self.song_id,
+                "error": f"No stem '{stem_id}' for this song.",
+                "available": [stem.get("stem_id") for stem in stems],
+            }
+        return {
+            "song_id": self.song_id,
+            "stem": _stem_detail(target),
+            "evidence": {"source": "song_fact_pack.midi.stems[stem_id]"},
+        }
+
+    def get_section_activity(
+        self,
+        section_index: int | None = None,
+        start_sec: float | None = None,
+        end_sec: float | None = None,
+    ) -> dict[str, Any]:
+        """Which stems play in a section (or time range) and a compact part summary
+        for each — the time × role cross. Defaults to all sections if unscoped."""
+        pack = self._pack()
+        sections = pack.get("sections", [])
+        stems = pack.get("midi", {}).get("stems", [])
+        targets = _select_sections(sections, section_index, start_sec, end_sec)
+        activity: list[dict[str, Any]] = []
+        for section in targets:
+            index = section.get("index")
+            parts: list[dict[str, Any]] = []
+            for stem in stems:
+                act = _activity_for_index(stem, index)
+                if act is None:
+                    continue
+                parts.append(
+                    {
+                        "stem_id": stem.get("stem_id"),
+                        "label": stem.get("label"),
+                        "role": stem.get("role"),
+                        "active": act.get("active"),
+                        "note_count": act.get("note_count"),
+                        "pitch_range": act.get("pitch_range"),
+                        "mean_velocity": act.get("mean_velocity"),
+                    }
+                )
+            activity.append(
+                {
+                    "section_index": index,
+                    "label": section.get("label"),
+                    "section": section.get("section"),
+                    "start_sec": section.get("start_sec"),
+                    "end_sec": section.get("end_sec"),
+                    "active_stems": [part for part in parts if part["active"]],
+                    "all_parts": parts,
+                }
+            )
+        return {
+            "song_id": self.song_id,
+            "sections_returned": len(activity),
+            "activity": activity,
+            "stems_without_midi": [stem.get("stem_id") for stem in stems if not stem.get("has_midi")],
+            "evidence": {"source": "song_fact_pack.midi.stems[].activity_by_section"},
         }
 
     def get_song_slice(self, start_sec: float, end_sec: float) -> dict[str, Any]:
@@ -580,8 +699,10 @@ def _stem_tool_summary(stem: dict[str, Any]) -> dict[str, Any]:
     midi = stem.get("midi") or {}
     return {
         "stem_id": stem.get("stem_id"),
-        "inst_class": stem.get("inst_class"),
+        "label": stem.get("label"),
         "role": stem.get("role"),
+        "tags": stem.get("tags") or [],
+        "inst_class": stem.get("inst_class"),
         "midi_program_name": stem.get("midi_program_name"),
         "program_num": stem.get("program_num"),
         "is_drum": stem.get("is_drum"),
@@ -596,6 +717,68 @@ def _stem_tool_summary(stem: dict[str, Any]) -> dict[str, Any]:
             "key": analysis.get("key"),
             "chord_progression_count": analysis.get("chord_progression_count"),
         },
+    }
+
+
+def _stem_activity_by_section(midi_bytes: bytes, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per-section note activity for one stem: bucket its onsets into the song's
+    section windows. Kept deterministic so it is Slice 1's graph-rollup input."""
+    windows = [(_float(section.get("start_sec")), _float(section.get("end_sec"))) for section in sections]
+    try:
+        activity = note_activity_by_window(midi_bytes, windows)
+    except Exception:  # a bad stem MIDI must not break the whole fact pack
+        return []
+    rolled: list[dict[str, Any]] = []
+    for section, act in zip(sections, activity):
+        rolled.append(
+            {
+                "section_index": section.get("index"),
+                "label": section.get("label"),
+                "section": section.get("section"),
+                "start_sec": section.get("start_sec"),
+                "end_sec": section.get("end_sec"),
+                **act,
+            }
+        )
+    return rolled
+
+
+def _activity_for_index(stem: dict[str, Any], section_index: Any) -> dict[str, Any] | None:
+    for act in stem.get("activity_by_section") or []:
+        if act.get("section_index") == section_index:
+            return act
+    return None
+
+
+def _select_sections(
+    sections: list[dict[str, Any]],
+    section_index: int | None,
+    start_sec: float | None,
+    end_sec: float | None,
+) -> list[dict[str, Any]]:
+    if section_index is not None:
+        return [section for section in sections if section.get("index") == int(section_index)]
+    if start_sec is not None or end_sec is not None:
+        return _filter_range(sections, start_sec, end_sec)
+    return sections
+
+
+def _stem_detail(stem: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "stem_id": stem.get("stem_id"),
+        "label": stem.get("label"),
+        "role": stem.get("role"),
+        "tags": stem.get("tags") or [],
+        "inst_class": stem.get("inst_class"),
+        "midi_program_name": stem.get("midi_program_name"),
+        "program_num": stem.get("program_num"),
+        "is_drum": stem.get("is_drum"),
+        "has_audio": stem.get("has_audio"),
+        "has_midi": stem.get("has_midi"),
+        "integrated_loudness": stem.get("integrated_loudness"),
+        "midi": _midi_tool_summary(stem.get("midi") or {}),
+        "analysis": stem.get("analysis") or {"status": "missing"},
+        "activity_by_section": stem.get("activity_by_section") or [],
     }
 
 

@@ -159,6 +159,22 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         """Return MIDI track and per-stem summaries for the active song (no audio)."""
         return _safe_fact_query(query.get_midi_tracks)
 
+    def get_stems() -> dict[str, Any]:
+        """Return a lightweight stem/instrument roster (id, label, role, tags, has_midi, has_analysis, loudness). Start here before drilling into one part."""
+        return _safe_fact_query(query.get_stems)
+
+    def get_stem(stem_id: str) -> dict[str, Any]:
+        """Return full detail for ONE stem/part by id: identity, MIDI summary, its own key/tempo/chords/sections, and per-section activity."""
+        return _safe_fact_query(query.get_stem, stem_id)
+
+    def get_section_activity(
+        section_index: int | None = None,
+        start_sec: float | None = None,
+        end_sec: float | None = None,
+    ) -> dict[str, Any]:
+        """Return which stems are active (and a compact per-part summary) in a section, by section_index or a time range. Use for 'what is each instrument doing here / what should the guitar play in this section'."""
+        return _safe_fact_query(query.get_section_activity, section_index, start_sec, end_sec)
+
     def get_song_slice(start_sec: float, end_sec: float) -> dict[str, Any]:
         """Return sections, bars, chords, key, tempo, and MIDI summaries overlapping a time range."""
         return _safe_fact_query(query.get_song_slice, start_sec, end_sec)
@@ -167,7 +183,18 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         """Return a transposed key and chord progression preview for the active song."""
         return _safe_fact_query(query.transpose_song, semitones, target_key)
 
-    return [get_sections, get_bar_grid, get_chords, get_key, get_midi_tracks, get_song_slice, transpose_song]
+    return [
+        get_sections,
+        get_bar_grid,
+        get_chords,
+        get_key,
+        get_midi_tracks,
+        get_stems,
+        get_stem,
+        get_section_activity,
+        get_song_slice,
+        transpose_song,
+    ]
 
 
 def describe_tools(fact_pack: SongFactPackService) -> list[dict[str, Any]]:

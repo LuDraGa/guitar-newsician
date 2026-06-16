@@ -27,6 +27,58 @@ def summarize_midi_bytes(data: bytes, *, source: str = "<bytes>", max_notes: int
     return _summarize(mido.MidiFile(file=io.BytesIO(data)), source=source, max_notes=max_notes)
 
 
+def note_activity_by_window(data: bytes, windows: list[tuple[float, float]]) -> list[dict[str, Any]]:
+    """Bucket a MIDI's note onsets into time windows (the deterministic Section ×
+    Role rollup that Slice 1 consumes).
+
+    Walks the merged track stream once (so tempo changes apply globally, unlike
+    the per-track `_summarize`) and assigns each note-on to the window its onset
+    falls in. Returns one summary per input window, in order: `active`,
+    `note_count`, `pitch_range`, `mean_velocity`."""
+
+    midi = mido.MidiFile(file=io.BytesIO(data))
+    buckets = [{"note_count": 0, "pitch_min": None, "pitch_max": None, "velocity_sum": 0} for _ in windows]
+    tempo = 500_000
+    seconds = 0.0
+    for message in mido.merge_tracks(midi.tracks):
+        seconds += mido.tick2second(message.time, midi.ticks_per_beat, tempo)
+        if message.type == "set_tempo":
+            tempo = message.tempo
+            continue
+        if message.type != "note_on" or int(getattr(message, "velocity", 0)) <= 0:
+            continue
+        index = _window_index(windows, seconds)
+        if index is None:
+            continue
+        bucket = buckets[index]
+        pitch = int(message.note)
+        bucket["note_count"] += 1
+        bucket["velocity_sum"] += int(message.velocity)
+        bucket["pitch_min"] = pitch if bucket["pitch_min"] is None else min(bucket["pitch_min"], pitch)
+        bucket["pitch_max"] = pitch if bucket["pitch_max"] is None else max(bucket["pitch_max"], pitch)
+
+    result: list[dict[str, Any]] = []
+    for bucket in buckets:
+        count = bucket["note_count"]
+        result.append(
+            {
+                "active": count > 0,
+                "note_count": count,
+                "pitch_range": {"min": bucket["pitch_min"], "max": bucket["pitch_max"]},
+                "mean_velocity": round(bucket["velocity_sum"] / count, 1) if count else None,
+            }
+        )
+    return result
+
+
+def _window_index(windows: list[tuple[float, float]], time_sec: float) -> int | None:
+    last = len(windows) - 1
+    for index, (start, end) in enumerate(windows):
+        if time_sec >= start and (time_sec < end or (index == last and time_sec <= end)):
+            return index
+    return None
+
+
 def _summarize(midi: "mido.MidiFile", *, source: str, max_notes: int) -> dict[str, Any]:
     notes: list[dict[str, Any]] = []
     programs: dict[str, set[int]] = {}

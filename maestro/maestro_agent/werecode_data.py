@@ -18,6 +18,7 @@ The fact pack persists back as an `analysis_results` row (analyzer
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from supabase import create_client
@@ -90,25 +91,29 @@ class WereCodeSongData:
 
     def list_stems(self, song_id: str) -> list[dict[str, Any]]:
         assets = self._assets(song_id)
-        midi_stem_ids = {self._stem_id(a) for a in assets if a["kind"] in STEM_MIDI_KINDS}
+        midi_stem_ids = {_stem_info(a)["id"] for a in assets if a["kind"] in STEM_MIDI_KINDS}
         stems: list[dict[str, Any]] = []
-        for asset in sorted(assets, key=lambda a: self._stem_id(a) or ""):
+        for asset in sorted(assets, key=lambda a: _stem_info(a)["id"]):
             if asset["kind"] not in STEM_AUDIO_KINDS:
                 continue
             meta = asset.get("metadata") or {}
-            stem_id = self._stem_id(asset)
+            info = _stem_info(asset)
             stems.append(
                 {
-                    "stem_id": stem_id,
+                    "stem_id": info["id"],
+                    # Precise identity (the Prep A metadata) — what the agent reads
+                    # to tell "Lead Guitar" from "Rhythm Guitar" / "Synth Pad".
+                    "label": info["label"],
+                    "role": info["role"],
+                    "tags": info["tags"],
                     "inst_class": meta.get("inst_class"),
-                    "role": meta.get("role") or asset["kind"].removeprefix("stem_"),
                     "is_drum": bool(meta.get("is_drum")),
                     "midi_program_name": meta.get("midi_program_name"),
                     "program_num": meta.get("program_num"),
                     "plugin_name": meta.get("plugin_name"),
                     "integrated_loudness": meta.get("integrated_loudness"),
                     "has_audio": True,
-                    "has_midi": stem_id in midi_stem_ids,
+                    "has_midi": info["id"] in midi_stem_ids,
                     "kind": asset["kind"],
                 }
             )
@@ -237,6 +242,130 @@ class WereCodeSongData:
         )
         rows = resp.data or []
         return rows[0]["data"] if rows else None
+
+
+# --- stem identity (Python port of src/lib/music/stem-metadata.ts getStemInfo) ---
+# The Prep A upload work writes precise stem identity (a nested `stem` object +
+# `stem_label`/`stem_tags`); older seeds carry only top-level `stem_id`/`role`/
+# `inst_class`. This mirrors the TS precedence so the agent gets the same identity
+# the Studio shows, on both old seeds and new uploads.
+
+STEM_ROLES = ("vocals", "guitar", "bass", "drums", "piano", "other")
+
+
+def _clean_str(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _first_clean(*values: Any) -> str | None:
+    for value in values:
+        cleaned = _clean_str(value)
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _to_stem_role(value: Any) -> str | None:
+    text = _clean_str(value)
+    if text is None:
+        return None
+    normalized = text.lower().removeprefix("stem_").removeprefix("midi_")
+    return normalized if normalized in STEM_ROLES else None
+
+
+def _role_from_kind(kind: str) -> str | None:
+    if kind.startswith("stem_midi_"):
+        return _to_stem_role(kind[len("stem_midi_") :])
+    if kind.startswith("stem_"):
+        return _to_stem_role(kind[len("stem_") :])
+    return None
+
+
+def _label_from_value(value: Any) -> str | None:
+    cleaned = _clean_str(value)
+    if not cleaned:
+        return None
+    text = re.sub(r"^stem[_-]", "", cleaned, flags=re.IGNORECASE)
+    text = re.sub(r"^stem midi[_-]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"[_-]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\b\w", lambda m: m.group(0).upper(), text)
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _unique_tags(values: list[Any]) -> list[str]:
+    tags: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        tag = _clean_str(value)
+        if not tag:
+            continue
+        normalized = tag.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        tags.append(tag)
+    return tags
+
+
+def _object_identity(asset: dict[str, Any]) -> str | None:
+    path = asset.get("object_path")
+    if not isinstance(path, str):
+        return None
+    parts = [part for part in path.split("/") if part]
+    if not parts:
+        return None
+    return _clean_str(re.sub(r"\.[^.]+$", "", parts[-1]))
+
+
+def _stem_info(asset: dict[str, Any]) -> dict[str, Any]:
+    metadata = asset.get("metadata") or {}
+    nested = metadata.get("stem") if isinstance(metadata.get("stem"), dict) else {}
+    role = (
+        _to_stem_role(nested.get("role"))
+        or _to_stem_role(metadata.get("stem_role"))
+        or _to_stem_role(metadata.get("role"))
+        or _role_from_kind(str(asset.get("kind") or ""))
+        or "other"
+    )
+    stem_id = (
+        _first_clean(nested.get("id"), metadata.get("stem_id"), metadata.get("stem_key"), metadata.get("id"))
+        or _object_identity(asset)
+        or role
+    )
+    label = (
+        _first_clean(nested.get("label"), metadata.get("stem_label"), metadata.get("label"))
+        or _label_from_value(
+            _first_clean(metadata.get("inst_class"), metadata.get("midi_program_name"), metadata.get("plugin_name"))
+        )
+        or _label_from_value(stem_id)
+        or _label_from_value(role)
+        or "Other"
+    )
+    tags = [
+        tag
+        for tag in _unique_tags(
+            [
+                role,
+                *_string_list(nested.get("tags")),
+                *_string_list(metadata.get("stem_tags")),
+                *_string_list(metadata.get("tags")),
+                _first_clean(metadata.get("inst_class")),
+                _first_clean(metadata.get("midi_program_name")),
+                _first_clean(metadata.get("plugin_name")),
+            ]
+        )
+        if tag.lower() != label.lower()
+    ]
+    return {"id": stem_id, "role": role, "label": label, "tags": tags}
 
 
 def _current_asset_ids(assets: list[dict[str, Any]], kind: str, *, stem_id: str | None = None) -> set[str]:
