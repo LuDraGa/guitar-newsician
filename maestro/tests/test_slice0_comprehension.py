@@ -269,3 +269,47 @@ def test_get_section_activity_surfaces_dominant_pitch_classes_per_part():
     section = _queries().get_section_activity(section_index=1)["activity"][0]
     lead = next(part for part in section["active_stems"] if part["stem_id"] == "S05")
     assert [pc["note"] for pc in lead["dominant_pitch_classes"]] == ["C", "G", "A#"]
+
+
+# --- 0.3: retrieval discipline — roster-and-drill, no default dumping (Seam B) -
+
+
+_ROSTER_FIELDS = {"stem_id", "label", "role", "tags", "is_drum", "has_midi", "has_analysis", "integrated_loudness"}
+
+
+def test_get_midi_tracks_returns_roster_not_per_stem_dump():
+    # The MIDI tool keeps the mix-level summary but stops embedding every per-stem
+    # MIDI/analysis block; it hands back a roster + a drill hint instead.
+    result = _queries().get_midi_tracks()
+    assert "all_src" in result  # mix-level MIDI is still the point of this tool
+    assert result["stem_count"] == 2
+    assert "hint" in result
+    lead = next(stem for stem in result["stems"] if stem["stem_id"] == "S05")
+    assert set(lead) == _ROSTER_FIELDS
+    assert lead["has_midi"] is True and lead["has_analysis"] is True
+    # the heavy per-stem detail must NOT ride along by default
+    assert "midi" not in lead and "analysis" not in lead and "chords" not in lead
+
+
+def test_get_song_slice_lists_parts_as_roster_not_full_summaries():
+    # A slice is a musical passage view: it keeps tempo/key/chords/sections and now
+    # references the cast as a lightweight `parts` roster (not the old midi_tracks dump).
+    result = _queries().get_song_slice(0.0, 8.0)
+    assert "chords" in result and "key" in result and result["sections"]
+    assert "midi_tracks" not in result  # the heavy dump is gone
+    assert "hint" in result
+    parts = result["parts"]
+    # ALL parts are present (has_midi distinguishes which carry MIDI), per the design call.
+    assert {part["stem_id"] for part in parts} == {"S05", "S02"}
+    for part in parts:
+        assert set(part) == _ROSTER_FIELDS
+        assert "analysis" not in part and "midi" not in part
+    by_id = {part["stem_id"]: part for part in parts}
+    assert by_id["S05"]["has_midi"] is True
+    assert by_id["S02"]["has_midi"] is False
+
+
+def test_get_stems_roster_matches_shared_entry_shape():
+    # get_stems / get_midi_tracks / get_song_slice all share one roster shape.
+    stems = _queries().get_stems()["stems"]
+    assert all(set(stem) == _ROSTER_FIELDS for stem in stems)

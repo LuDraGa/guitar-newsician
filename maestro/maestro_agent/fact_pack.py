@@ -289,12 +289,18 @@ class SongFactPackQueries:
         return {"song_id": self.song_id, **pack.get("key", {})}
 
     def get_midi_tracks(self) -> dict[str, Any]:
+        """Mix-level MIDI summary + a lightweight stem roster. Per-stem MIDI detail
+        is NOT embedded by default (0.3 retrieval discipline) — reference the roster,
+        then drill into one part with get_stem(stem_id)."""
         pack = self._pack()
         midi = pack.get("midi", {})
+        stems = midi.get("stems", [])
         return {
             "song_id": self.song_id,
             "all_src": _midi_tool_summary(midi.get("all_src", {})),
-            "stems": [_stem_tool_summary(stem) for stem in midi.get("stems", [])],
+            "stem_count": len(stems),
+            "stems": [_stem_roster_entry(stem) for stem in stems],
+            "hint": "Per-stem MIDI/notes are not included here. Call get_stem(stem_id) for one part's full MIDI detail.",
             "evidence": {"source": "song_fact_pack.midi"},
         }
 
@@ -306,19 +312,7 @@ class SongFactPackQueries:
         return {
             "song_id": self.song_id,
             "stem_count": len(stems),
-            "stems": [
-                {
-                    "stem_id": stem.get("stem_id"),
-                    "label": stem.get("label"),
-                    "role": stem.get("role"),
-                    "tags": stem.get("tags") or [],
-                    "is_drum": stem.get("is_drum"),
-                    "has_midi": stem.get("has_midi"),
-                    "has_analysis": (stem.get("analysis") or {}).get("status") not in (None, "missing"),
-                    "integrated_loudness": stem.get("integrated_loudness"),
-                }
-                for stem in stems
-            ],
+            "stems": [_stem_roster_entry(stem) for stem in stems],
             "evidence": {"source": "song_fact_pack.midi.stems"},
         }
 
@@ -399,6 +393,7 @@ class SongFactPackQueries:
         if end < start:
             start, end = end, start
         pack = self._pack()
+        stems = pack.get("midi", {}).get("stems", [])
         return {
             "song_id": self.song_id,
             "range": {"start_sec": start, "end_sec": end},
@@ -407,7 +402,10 @@ class SongFactPackQueries:
             "sections": _filter_range(pack.get("sections", []), start, end),
             "bars": _filter_range(pack.get("bar_grid", {}).get("bars", []), start, end),
             "chords": self.get_chords(start, end, limit=MAX_TOOL_CHORDS),
-            "midi_tracks": [_stem_tool_summary(stem) for stem in pack.get("midi", {}).get("stems", [])],
+            # 0.3 — a lightweight roster of parts (has_midi flags which carry MIDI),
+            # not a full per-stem dump. Drill via get_section_activity / get_stem.
+            "parts": [_stem_roster_entry(stem) for stem in stems],
+            "hint": "Parts are listed as a roster (has_midi shows which carry MIDI). Call get_section_activity for what each part plays in this range, or get_stem(stem_id) for one part's detail.",
         }
 
     def transpose_song(self, semitones: int | None = None, target_key: str | None = None) -> dict[str, Any]:
@@ -741,29 +739,20 @@ def _midi_tool_summary(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _stem_tool_summary(stem: dict[str, Any]) -> dict[str, Any]:
-    analysis = stem.get("analysis") or {}
-    midi = stem.get("midi") or {}
+def _stem_roster_entry(stem: dict[str, Any]) -> dict[str, Any]:
+    """Identity-only roster entry — the cheap, shared reference used by get_stems,
+    get_midi_tracks, and get_song_slice (0.3 retrieval discipline). Carries enough
+    to choose a part (id/label/role/tags, has_midi, has_analysis, loudness) without
+    embedding the heavy per-stem MIDI/analysis detail; drill via get_stem(stem_id)."""
     return {
         "stem_id": stem.get("stem_id"),
         "label": stem.get("label"),
         "role": stem.get("role"),
         "tags": stem.get("tags") or [],
-        "inst_class": stem.get("inst_class"),
-        "midi_program_name": stem.get("midi_program_name"),
-        "program_num": stem.get("program_num"),
         "is_drum": stem.get("is_drum"),
-        "has_audio": stem.get("has_audio"),
         "has_midi": stem.get("has_midi"),
+        "has_analysis": (stem.get("analysis") or {}).get("status") not in (None, "missing"),
         "integrated_loudness": stem.get("integrated_loudness"),
-        "midi": _midi_tool_summary(midi),
-        "analysis": {
-            "status": analysis.get("status"),
-            "keys": analysis.get("keys", []),
-            "tempo": analysis.get("tempo"),
-            "key": analysis.get("key"),
-            "chord_progression_count": analysis.get("chord_progression_count"),
-        },
     }
 
 

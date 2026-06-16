@@ -156,7 +156,7 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         return _safe_fact_query(query.get_key)
 
     def get_midi_tracks() -> dict[str, Any]:
-        """Return MIDI track and per-stem summaries for the active song (no audio)."""
+        """Return the mix-level MIDI summary plus a lightweight stem roster (no per-stem MIDI by default). To get one part's full MIDI/notes, call get_stem(stem_id)."""
         return _safe_fact_query(query.get_midi_tracks)
 
     def get_stems() -> dict[str, Any]:
@@ -176,7 +176,7 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         return _safe_fact_query(query.get_section_activity, section_index, start_sec, end_sec)
 
     def get_song_slice(start_sec: float, end_sec: float) -> dict[str, Any]:
-        """Return sections, bars, chords, key, tempo, and MIDI summaries overlapping a time range."""
+        """Return sections, bars, chords, key, and tempo overlapping a time range, plus a lightweight roster of the parts (has_midi flags which carry MIDI). For what each part plays in the range, call get_section_activity; for one part's detail, get_stem(stem_id)."""
         return _safe_fact_query(query.get_song_slice, start_sec, end_sec)
 
     def transpose_song(semitones: int | None = None, target_key: str | None = None) -> dict[str, Any]:
