@@ -14,6 +14,24 @@ from typing import Any
 
 import mido
 
+# Standard (sharp) spelling of the 12 pitch classes. The agent compares these to
+# chord roots, so the *index* is what matters; spelling is just for readability.
+PITCH_CLASS_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def dominant_pitch_classes(histogram: list[int], *, top_n: int = 3) -> list[dict[str, Any]]:
+    """Top pitch classes (by note count) from a 12-bin histogram.
+
+    Lets a stem with MIDI but no per-stem chord analysis still be compared to the
+    mix's chord roots: its dominant pitch classes ~= the notes it leans on. Sorted
+    by count desc, then pitch-class index for determinism; zero-count bins drop."""
+
+    ranked = sorted(
+        ((pc, int(count)) for pc, count in enumerate(histogram) if count),
+        key=lambda item: (-item[1], item[0]),
+    )
+    return [{"pc": pc, "note": PITCH_CLASS_NAMES[pc], "count": count} for pc, count in ranked[: max(0, top_n)]]
+
 
 def summarize_midi(path: Path, *, max_notes: int = 64) -> dict[str, Any]:
     """Return a compact JSON-safe summary of a MIDI file on disk."""
@@ -34,10 +52,15 @@ def note_activity_by_window(data: bytes, windows: list[tuple[float, float]]) -> 
     Walks the merged track stream once (so tempo changes apply globally, unlike
     the per-track `_summarize`) and assigns each note-on to the window its onset
     falls in. Returns one summary per input window, in order: `active`,
-    `note_count`, `pitch_range`, `mean_velocity`."""
+    `note_count`, `pitch_range`, `mean_velocity`, plus a 12-bin
+    `pitch_class_histogram` and its `dominant_pitch_classes` (so a stem with no
+    per-stem chord analysis is still comparable to the mix's chord roots)."""
 
     midi = mido.MidiFile(file=io.BytesIO(data))
-    buckets = [{"note_count": 0, "pitch_min": None, "pitch_max": None, "velocity_sum": 0} for _ in windows]
+    buckets = [
+        {"note_count": 0, "pitch_min": None, "pitch_max": None, "velocity_sum": 0, "pc_counts": [0] * 12}
+        for _ in windows
+    ]
     tempo = 500_000
     seconds = 0.0
     for message in mido.merge_tracks(midi.tracks):
@@ -54,6 +77,7 @@ def note_activity_by_window(data: bytes, windows: list[tuple[float, float]]) -> 
         pitch = int(message.note)
         bucket["note_count"] += 1
         bucket["velocity_sum"] += int(message.velocity)
+        bucket["pc_counts"][pitch % 12] += 1
         bucket["pitch_min"] = pitch if bucket["pitch_min"] is None else min(bucket["pitch_min"], pitch)
         bucket["pitch_max"] = pitch if bucket["pitch_max"] is None else max(bucket["pitch_max"], pitch)
 
@@ -66,6 +90,8 @@ def note_activity_by_window(data: bytes, windows: list[tuple[float, float]]) -> 
                 "note_count": count,
                 "pitch_range": {"min": bucket["pitch_min"], "max": bucket["pitch_max"]},
                 "mean_velocity": round(bucket["velocity_sum"] / count, 1) if count else None,
+                "pitch_class_histogram": bucket["pc_counts"],
+                "dominant_pitch_classes": dominant_pitch_classes(bucket["pc_counts"]),
             }
         )
     return result

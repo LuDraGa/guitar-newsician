@@ -72,6 +72,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except FactPackUnavailable as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.get("/fact-pack/{song_id}/status")
+    def fact_pack_status(song_id: str) -> dict[str, Any]:
+        # Cheap read-only freshness check (no MIDI download, no rebuild) — drives
+        # the chat-window staleness signal.
+        try:
+            return fact_pack.status(song_id)
+        except SongNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.post("/chat")
     def chat(request: ChatRequest) -> dict[str, Any]:
         if not settings.agent_enabled:

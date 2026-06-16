@@ -87,3 +87,14 @@ export type MaestroTool = {
   description: string;
   params: MaestroToolParam[];
 };
+
+/** Whether the latest fact pack still reflects the song's current inputs. */
+export type MaestroFactPackStatus = {
+  songId: string;
+  hasPack: boolean;
+  stale: boolean;
+  version: number | null;
+  currentVersion: number;
+  builtAt: string | null;
+  reasons: string[];
+};

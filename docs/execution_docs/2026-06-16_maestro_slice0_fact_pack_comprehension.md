@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Date** | 2026-06-16 |
-| **Status** | 🟢 Building — data-core (0.1 / 0.2 / 0.4 + `get_stems`) done, 14/14 pytest green; awaiting live try-it before the discipline layer |
+| **Status** | 🟢 Building — data-core (0.1 / 0.2 / 0.4 + `get_stems`) + **0.2b** (per-section pitch-class content) done, **20/20 pytest green**; awaiting live try-it before the discipline layer |
 | **Branch** | `maestro/agent-buildout` |
 | **Owner** | Claude (Opus 4.8) |
 | **Grounds on** | [maestro-coach-prd.md](../maestro/maestro-coach-prd.md) · [maestro-agent-architecture.md](../maestro/maestro-agent-architecture.md) · [maestro-build-flow.md](../maestro/maestro-build-flow.md) |
@@ -175,13 +175,15 @@ Paste each into `/app/maestro` against the seeded multi-stem song (`efcbb636-…
 | Slice plan grounded vs PRD/architecture | ✅ | Slice 0 = Prep A → Slice 1 bridge |
 | 0.1 stem identity | ✅ | `_stem_info` port in `werecode_data.py`; `list_stems` surfaces id/label/role/tags; carried through `_stem_summary` + `_stem_tool_summary` |
 | 0.2 per-stem detail + `get_stem` | ✅ | `_stem_summary` keeps stem chords (≤64) + sections; new `get_stem(id)` query + tool |
+| 0.2b per-section pitch-class content | ✅ | `note_activity_by_window` accumulates a 12-bin PC histogram + dominant PCs; surfaced per section (`get_section_activity` parts) and as a stem-level `pitch_class_profile` (`get_stem`); `FACT_PACK_VERSION`→4. Makes "does the bass follow the progression?" answerable with no per-stem analysis |
+| Fact Pack Freshness | ✅ (built) | inserted before 0.3 from the 0.2b live finding (re-analysis didn't invalidate the pack). Staleness signal + chat banner/confirm — see [2026-06-16_maestro_fact_pack_freshness.md](2026-06-16_maestro_fact_pack_freshness.md). `FACT_PACK_VERSION`→5. Awaiting live try-it. |
 | 0.3 roster + discipline | 🟡 | `get_stems()` roster shipped with the data-core; **default-dump trimming of `get_song_slice`/`get_midi_tracks` still pending** |
 | 0.4 `get_section_activity` | ✅ | `note_activity_by_window` (merge_tracks) → per-section rollup stored in pack; `get_section_activity` query + tool; `FACT_PACK_VERSION`→3 |
 | 0.5 seeded overview | ⬜ | bake into stable system prefix (cacheable) |
 | 0.6 prompt + parts specialist | ⬜ | stem-first discipline; `parts_agent` |
 | 0.7 basic_stats | ⬜ | optional |
 | 0.8 next-step CTAs | ⬜ | cheap-model suggestion strip; Next/TS + `/api/maestro/suggestions`; rides on 0.5 |
-| Tests (Seam A/B) — data-core | ✅ | `tests/test_slice0_comprehension.py`: identity precedence, MIDI bucketing, roster/detail/activity views — **14/14 green** |
+| Tests (Seam A/B) — data-core + 0.2b | ✅ | `tests/test_slice0_comprehension.py`: identity precedence, MIDI bucketing, roster/detail/activity views, + 0.2b PC histogram / dominant-PC ranking / stem PC profile / surfacing — **20/20 green** |
 | Try-it (stage prompts) | 🟡 | live + inspection-based; data-core ready to try on the seeded song (+ guitar) |
 | Slice 1 — Section×Role briefing | ⬜ | next coaching verb; lifts 0.4 into a store |
 
@@ -199,4 +201,11 @@ Paste each into `/app/maestro` against the seeded multi-stem song (`efcbb636-…
 ### 2026-06-16 — live finding: bass with MIDI but no per-stem analysis → expose pitch-class content (0.2b)
 - **Try-it 0.2** ("what chords does the bass play, do they match the progression?") behaved correctly but hit a data gap: 0.1 named the stem "Bass" ✅, the agent called `get_stem(S03)` ✅, and it stayed honest (no bluff) ✅ — but the bass stem has **MIDI without per-stem chord analysis** (only 2/10 seeded stems are analyzed), and `_compact_midi_summary` **drops the note events** (`notes_sample_omitted`), so the bass's actual notes (≈ the chord roots) are unreachable. The agent even offered a "note-to-chord" path that would fail because the notes aren't in any tool output.
 - **Fix (0.2b — completes 0.2/0.4 for the no-analysis case, deterministic):** accumulate a 12-bin **pitch-class histogram** in `note_activity_by_window`; surface **dominant pitch classes per section** (and a stem-level PC profile) in `activity_by_section` + `get_stem`. Then "does the bass follow the progression?" is answerable by comparing bass dominant-PC-per-section to the mix chord roots, with no per-stem analysis. 0.6's prompt will instruct the agent to use it.
-- **Status:** proposed, awaiting go (recommended before the discipline layer, since it finishes the 0.2 promise the live test exercised).
+- **Status:** ✅ **built (approved), 20/20 pytest green — awaiting live try-it.**
+
+### 2026-06-16 — 0.2b built, pytest 20/20 green
+- **`midi.py`**: `note_activity_by_window` now accumulates a per-window 12-bin `pc_counts` (`pitch % 12`) and emits `pitch_class_histogram` + `dominant_pitch_classes` (new shared helper `dominant_pitch_classes(histogram, top_n=3)` — count desc, then PC index for determinism, zero bins dropped; sharp-spelled names via `PITCH_CLASS_NAMES`, index is the comparison key).
+- **`fact_pack.py`**: histogram/dominant flow through `_stem_activity_by_section` (already `**act`). `_stem_summary` computes a stem-level `pitch_class_profile` (new helper `_stem_pitch_class_profile` sums the section histograms → aggregate dominant PCs + note_count). `get_section_activity` part summaries gain `dominant_pitch_classes` (top-3 only, not the full 12 bins — token-conscious); `get_stem`'s `_stem_detail` surfaces `pitch_class_profile` (and the full per-section histograms ride along in `activity_by_section`). `FACT_PACK_VERSION`→**4** (forces a clean rebuild of the seeded pack on next query).
+- **Tests**: +6 in `test_slice0_comprehension.py` — per-window histogram + tie-ordering, `dominant_pitch_classes` ranking/cap/empty, `_stem_pitch_class_profile` sum + empty, and Seam-B surfacing on `get_stem` / `get_section_activity`. `uv run pytest` → **20 passed**. No live LLM. No new agent tools; no schema/Next changes.
+- **Deferred to 0.6 (flagged, not done):** the `get_stem` / `get_section_activity` tool *descriptions* and the system prompt still don't explicitly name the new pitch-class fields — the data is now in the tool JSON (discoverable), but the explicit "compare bass dominant PCs to the chord roots" instruction lands with 0.6's stem-first prompt. Worth watching in the live try-it: if the agent doesn't reach for it unprompted, that confirms the 0.6 nudge is needed.
+- **Next**: ⏸ live try-it on the seeded song (restart the local agent first — `FACT_PACK_VERSION` bumped, so the pack rebuilds on next query), then 0.3 trim → 0.5 overview → 0.6 prompt/specialist → 0.8 CTAs (Ask→Explain→Approve→Implement for those).

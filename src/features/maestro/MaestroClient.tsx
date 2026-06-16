@@ -27,7 +27,7 @@ import remarkGfm from 'remark-gfm';
 import { PillIcon, ReadinessChips } from '@/components/werecode/WereCodePrimitives';
 import { JsonViewer } from '@/features/maestro/JsonViewer';
 import { useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
-import type { MaestroFactPack, MaestroTool, SongSummary } from '@/types/werecode-client';
+import type { MaestroFactPack, MaestroFactPackStatus, MaestroTool, SongSummary } from '@/types/werecode-client';
 
 /**
  * Maestro: the in-product guitar-learning coach (developer surface).
@@ -196,6 +196,13 @@ export function MaestroClient() {
   const [factPack, setFactPack] = useState<MaestroFactPack | null>(null);
   const [factPackBusy, setFactPackBusy] = useState<'idle' | 'building' | 'loading'>('idle');
   const [factPackError, setFactPackError] = useState<string | null>(null);
+  // Freshness: is the persisted pack still in sync with the song's inputs?
+  const [factPackStatus, setFactPackStatus] = useState<MaestroFactPackStatus | null>(null);
+  // The staleness the user chose to live with (its reasons key), so the blocking
+  // send-confirm stops nagging until a *new* staleness appears or a rebuild lands.
+  const [ackedReasons, setAckedReasons] = useState<string | null>(null);
+  // A message held back by the blocking confirm (null = no confirm open).
+  const [pendingStaleSend, setPendingStaleSend] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -251,6 +258,22 @@ export function MaestroClient() {
     [setCachedMaestroFactPack]
   );
 
+  // Cheap, read-only freshness check (no rebuild). Drives the stale banner + the
+  // blocking send-confirm. Failures degrade silently to "no signal".
+  const loadFactPackStatus = useCallback(async (songId: string) => {
+    try {
+      const response = await fetch(`/api/maestro/fact-pack/${songId}/status`, { cache: 'no-store' });
+      if (!response.ok) {
+        setFactPackStatus(null);
+        return;
+      }
+      const body = await response.json();
+      setFactPackStatus((body.status ?? null) as MaestroFactPackStatus | null);
+    } catch {
+      setFactPackStatus(null);
+    }
+  }, []);
+
   // Switching songs restores that song's most recent conversation (if any) and
   // loads its fact pack. Reads conversations via a ref so the callback stays
   // stable (the library-load effect depends on it).
@@ -266,9 +289,13 @@ export function MaestroClient() {
       setChatError(null);
       setPinnedTurn(null);
       setDrawer(null);
+      // New song context: forget any prior staleness acknowledgement.
+      setAckedReasons(null);
+      setPendingStaleSend(null);
       void loadLatestPack(songId);
+      void loadFactPackStatus(songId);
     },
-    [loadLatestPack]
+    [loadLatestPack, loadFactPackStatus]
   );
 
   const loadSongs = useCallback(
@@ -433,6 +460,9 @@ export function MaestroClient() {
       const nextFactPack = (body.factPack ?? null) as MaestroFactPack | null;
       setCachedMaestroFactPack(selectedSongId, nextFactPack);
       setFactPack(nextFactPack);
+      // A fresh build clears the staleness; re-check so the banner disappears.
+      setAckedReasons(null);
+      void loadFactPackStatus(selectedSongId);
     } catch (error) {
       setFactPackError(error instanceof Error ? error.message : 'Could not build the fact pack');
     } finally {
@@ -440,8 +470,20 @@ export function MaestroClient() {
     }
   }
 
-  async function send(messageText: string) {
+  // Guard the send: if the pack is stale and the user hasn't acknowledged *this*
+  // staleness, hold the message and open the blocking confirm instead of sending.
+  function send(messageText: string) {
     const text = messageText.trim();
+    if (!text || !selectedSongId || chatBusy) return;
+    const reasonsKey = factPackStatus?.stale ? factPackStatus.reasons.join('|') : null;
+    if (factPack && reasonsKey && reasonsKey !== ackedReasons) {
+      setPendingStaleSend(text);
+      return;
+    }
+    void runSend(text);
+  }
+
+  async function runSend(text: string) {
     if (!text || !selectedSongId || chatBusy) return;
 
     const convId = activeConvId ?? makeId();
@@ -469,11 +511,33 @@ export function MaestroClient() {
       ];
       setMessages(withAnswer);
       rememberConversationCosts(upsertConversation(convId, selectedSongId, withAnswer));
+      // The turn may have spanned a re-analysis; refresh the freshness signal.
+      void loadFactPackStatus(selectedSongId);
     } catch (error) {
       setChatError(error instanceof Error ? error.message : 'Could not reach Maestro');
     } finally {
       setChatBusy(false);
     }
+  }
+
+  // Resolve the blocking confirm: rebuild then send, or send anyway (and stop
+  // nagging for this staleness).
+  function updateAndSend() {
+    const text = pendingStaleSend;
+    setPendingStaleSend(null);
+    if (!text) return;
+    void (async () => {
+      await buildPack();
+      await runSend(text);
+    })();
+  }
+
+  function skipAndSend() {
+    const text = pendingStaleSend;
+    const reasonsKey = factPackStatus?.stale ? factPackStatus.reasons.join('|') : null;
+    setAckedReasons(reasonsKey);
+    setPendingStaleSend(null);
+    if (text) void runSend(text);
   }
 
   const songs = useMemo(() => cachedSongs.filter((song) => song.has_analysis), [cachedSongs]);
@@ -495,6 +559,10 @@ export function MaestroClient() {
   const totalCost = useMemo(() => sumCostEntries(costLedger), [costLedger]);
   const summary = useMemo(() => summarizeFactPack(factPack), [factPack]);
   const hasPack = Boolean(factPack);
+  // Staleness surfacing: the banner is always shown while stale; the blocking
+  // confirm (pendingStaleSend) is the escalation at send time.
+  const showStaleBanner = Boolean(factPackStatus?.stale && hasPack);
+  const staleReasons = factPackStatus?.reasons ?? [];
 
   const activeTurn = useMemo(() => {
     if (pinnedTurn != null && messages[pinnedTurn]?.trace) return pinnedTurn;
@@ -655,7 +723,11 @@ export function MaestroClient() {
                   type="button"
                   className="pill ghost sm"
                   disabled={!selectedSongId || factPackBusy !== 'idle'}
-                  onClick={() => selectedSongId && loadLatestPack(selectedSongId, { force: true })}
+                  onClick={() => {
+                    if (!selectedSongId) return;
+                    void loadLatestPack(selectedSongId, { force: true });
+                    void loadFactPackStatus(selectedSongId);
+                  }}
                   title="Load the latest persisted fact pack"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${factPackBusy === 'loading' ? 'animate-spin' : ''}`} />
@@ -791,6 +863,30 @@ export function MaestroClient() {
             </div>
           </div>
 
+          {showStaleBanner && (
+            <div className="flex shrink-0 items-start gap-2 border-b border-[var(--hair)] bg-[var(--accent-soft)] px-4 py-2.5 text-[12px] leading-5">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-[var(--ink)]">
+                  This song changed since Maestro last studied it.
+                </p>
+                {staleReasons.length > 0 && (
+                  <p className="mt-0.5 text-[var(--muted)]">{staleReasons.join(' ')}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                className="pill sm shrink-0"
+                disabled={factPackBusy !== 'idle'}
+                onClick={buildPack}
+                title="Rebuild the fact pack from the latest analysis"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${factPackBusy === 'building' ? 'animate-spin' : ''}`} />
+                {factPackBusy === 'building' ? 'Updating…' : 'Update'}
+              </button>
+            </div>
+          )}
+
           <div ref={transcriptRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {messages.length === 0 && !chatBusy && (
               <div className="text-[13px] leading-6 text-[var(--muted)]">
@@ -889,6 +985,46 @@ export function MaestroClient() {
       </div>
 
       <RuntimeDrawer content={drawer} onClose={() => setDrawer(null)} />
+
+      {pendingStaleSend !== null && (
+        <div className="fixed inset-0 z-50 grid place-items-center p-4">
+          <button
+            type="button"
+            aria-label="Cancel"
+            className="absolute inset-0 bg-[var(--ink)]/40"
+            onClick={() => setPendingStaleSend(null)}
+          />
+          <div className="surface relative z-10 w-[min(420px,92vw)] p-5">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
+              <div className="min-w-0">
+                <h3 className="display text-[15px]">Fact pack is out of date</h3>
+                <p className="mt-1 text-[12px] leading-5 text-[var(--muted)]">
+                  {staleReasons.length > 0
+                    ? staleReasons.join(' ')
+                    : 'The song changed since Maestro last studied it.'}{' '}
+                  Update it so the coach answers from the latest analysis, or skip and answer from the
+                  current pack.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button type="button" className="pill ghost sm" onClick={skipAndSend}>
+                Skip &amp; send
+              </button>
+              <button
+                type="button"
+                className="pill sm"
+                disabled={factPackBusy !== 'idle'}
+                onClick={updateAndSend}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${factPackBusy === 'building' ? 'animate-spin' : ''}`} />
+                {factPackBusy === 'building' ? 'Updating…' : 'Update & send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

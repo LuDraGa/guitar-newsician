@@ -126,6 +126,43 @@ export function getFactPack(songId: string): Promise<MaestroFactPack> {
   return maestroFetch<MaestroFactPack>(`/fact-pack/${encodeURIComponent(songId)}`);
 }
 
+/** Whether the latest pack still reflects the song's current inputs (assets +
+ * analysis rows). Cheap, read-only — never triggers a rebuild. */
+export type MaestroFactPackStatus = {
+  songId: string;
+  hasPack: boolean;
+  stale: boolean;
+  version: number | null;
+  currentVersion: number;
+  builtAt: string | null;
+  reasons: string[];
+};
+
+type MaestroFactPackStatusWire = {
+  song_id: string;
+  has_pack: boolean;
+  stale: boolean;
+  version: number | null;
+  current_version: number;
+  built_at: string | null;
+  reasons: string[];
+};
+
+export async function getFactPackStatus(songId: string): Promise<MaestroFactPackStatus> {
+  const wire = await maestroFetch<MaestroFactPackStatusWire>(
+    `/fact-pack/${encodeURIComponent(songId)}/status`
+  );
+  return {
+    songId: wire.song_id,
+    hasPack: Boolean(wire.has_pack),
+    stale: Boolean(wire.stale),
+    version: wire.version ?? null,
+    currentVersion: wire.current_version,
+    builtAt: wire.built_at ?? null,
+    reasons: Array.isArray(wire.reasons) ? wire.reasons : [],
+  };
+}
+
 export function chatWithMaestro(input: {
   songId: string;
   message: string;

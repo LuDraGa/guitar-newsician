@@ -14,14 +14,19 @@ import statistics
 import time
 from typing import Any
 
-from maestro_agent.midi import note_activity_by_window, summarize_midi_bytes
+from maestro_agent.midi import dominant_pitch_classes, note_activity_by_window, summarize_midi_bytes
 from maestro_agent.werecode_data import AnalysisUnavailable, WereCodeSongData
 
 FACT_PACK_SCHEMA = "maestro.song_fact_pack.v1"
-# v3 (2026-06-16, Slice 0): stems carry precise identity (label/tags), their own
-# bounded chord progression + sections, and per-section activity. Bumping forces
-# ensure_current to rebuild older packs so the role axis is populated.
-FACT_PACK_VERSION = 3
+# v5 (2026-06-16, Freshness): the pack stores a `dependency_fingerprint` (asset
+# checksums + current analysis-row identities) so a re-analysis is detectable for
+# the staleness signal. Bumping rebuilds every pack once so the field is present.
+# v4 (Slice 0.2b): per-section activity carries a 12-bin pitch-class histogram +
+# dominant pitch classes, and each stem gains an aggregate pitch_class_profile.
+# v3: stems carry precise identity (label/tags), their own bounded chord
+# progression + sections, and per-section activity. Bumping forces ensure_current
+# to rebuild older packs so the role axis is populated.
+FACT_PACK_VERSION = 5
 MAX_TOOL_CHORDS = 64
 MAX_TRANSPOSE_PREVIEW = 96
 MAX_STEM_PROGRESSION = 64
@@ -69,6 +74,38 @@ class SongFactPackService:
     def query(self, song_id: str) -> "SongFactPackQueries":
         return SongFactPackQueries(self, song_id)
 
+    def status(self, song_id: str) -> dict[str, Any]:
+        """Cheap, read-only freshness check: does the latest pack still reflect
+        the song's current inputs? Recomputes the dependency fingerprint from
+        metadata only (no MIDI, no rebuild) and diffs it against the stored one.
+        Drives the chat-window staleness signal; never triggers a build."""
+        latest = self.data.get_latest_fact_pack(song_id)
+        if latest is None:
+            return {
+                "song_id": song_id,
+                "has_pack": False,
+                "stale": True,
+                "version": None,
+                "current_version": FACT_PACK_VERSION,
+                "built_at": None,
+                "reasons": ["Maestro hasn't studied this song yet."],
+            }
+        version = latest.get("version")
+        current = self.data.dependency_signature(song_id)
+        stored = latest.get("dependency_fingerprint")
+        reasons = _fingerprint_reasons(stored, current)
+        if version != FACT_PACK_VERSION:
+            reasons = [f"Maestro's analysis format changed (v{version} → v{FACT_PACK_VERSION})."] + reasons
+        return {
+            "song_id": song_id,
+            "has_pack": True,
+            "stale": bool(reasons),
+            "version": version,
+            "current_version": FACT_PACK_VERSION,
+            "built_at": latest.get("created_at"),
+            "reasons": reasons,
+        }
+
     def _build_pack(self, song_id: str) -> dict[str, Any]:
         song = self.data.get_song(song_id)
         try:
@@ -106,6 +143,9 @@ class SongFactPackService:
                 "stems": stems,
             },
             "source_hashes": source_hashes,
+            # Full input fingerprint (assets + analysis rows) for the staleness
+            # signal — broader than source_hashes, which drives ensure_current.
+            "dependency_fingerprint": self.data.dependency_signature(song_id),
             "source_artifacts": self.data.asset_manifest(song_id),
             "analysis_versions": _analysis_versions(mix_analysis, stem_summaries),
             "tool_versions": {"song_fact_pack": str(FACT_PACK_VERSION), "midi_summary": "1"},
@@ -163,8 +203,12 @@ class SongFactPackService:
         summary["midi"] = _compact_midi_summary(_safe_midi_bytes(midi_bytes, f"stem:{stem_id}", max_notes=max_notes))
 
         # 0.4 — per-section note activity (the deterministic Section × Role rollup).
+        # 0.2b — and an aggregate pitch-class profile so a stem without per-stem
+        # chord analysis is still comparable to the mix's chord roots.
         if sections and midi_bytes:
-            summary["activity_by_section"] = _stem_activity_by_section(midi_bytes, sections)
+            activity = _stem_activity_by_section(midi_bytes, sections)
+            summary["activity_by_section"] = activity
+            summary["pitch_class_profile"] = _stem_pitch_class_profile(activity)
 
         analysis = self.data.get_stem_analysis(song_id, stem_id)
         if analysis is None:
@@ -325,6 +369,9 @@ class SongFactPackQueries:
                         "note_count": act.get("note_count"),
                         "pitch_range": act.get("pitch_range"),
                         "mean_velocity": act.get("mean_velocity"),
+                        # 0.2b — what notes this part leans on here, so it can be
+                        # compared to the section's chords without per-stem analysis.
+                        "dominant_pitch_classes": act.get("dominant_pitch_classes") or [],
                     }
                 )
             activity.append(
@@ -743,6 +790,22 @@ def _stem_activity_by_section(midi_bytes: bytes, sections: list[dict[str, Any]])
     return rolled
 
 
+def _stem_pitch_class_profile(activity_by_section: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate one stem's pitch content across all sections (sum of the
+    per-section histograms) → a song-wide PC profile + its dominant notes. Lets
+    "what notes does the bass lean on?" be answered even with no chord analysis."""
+    histogram = [0] * 12
+    for act in activity_by_section:
+        bins = act.get("pitch_class_histogram") or []
+        for pc, count in enumerate(bins[:12]):
+            histogram[pc] += int(count or 0)
+    return {
+        "pitch_class_histogram": histogram,
+        "dominant_pitch_classes": dominant_pitch_classes(histogram),
+        "note_count": sum(histogram),
+    }
+
+
 def _activity_for_index(stem: dict[str, Any], section_index: Any) -> dict[str, Any] | None:
     for act in stem.get("activity_by_section") or []:
         if act.get("section_index") == section_index:
@@ -779,7 +842,61 @@ def _stem_detail(stem: dict[str, Any]) -> dict[str, Any]:
         "midi": _midi_tool_summary(stem.get("midi") or {}),
         "analysis": stem.get("analysis") or {"status": "missing"},
         "activity_by_section": stem.get("activity_by_section") or [],
+        # 0.2b — aggregate pitch classes across the stem (sum of section histograms).
+        "pitch_class_profile": stem.get("pitch_class_profile"),
     }
+
+
+def _fingerprint_reasons(stored: dict[str, Any] | None, current: dict[str, Any]) -> list[str]:
+    """Human-readable diff between a pack's stored dependency fingerprint and the
+    song's current one. Empty list == fresh. Pure (no I/O) so it is unit-tested
+    directly. A missing stored fingerprint (pre-v5 pack) yields no reasons here —
+    the version-mismatch check in `status()` covers those."""
+    if not stored:
+        return []
+    reasons: list[str] = []
+
+    stored_assets = stored.get("assets") or {}
+    current_assets = current.get("assets") or {}
+    for key in sorted(set(stored_assets) | set(current_assets)):
+        if stored_assets.get(key) != current_assets.get(key):
+            reasons.append(_asset_change_reason(key, key in stored_assets, key in current_assets))
+
+    stored_an = stored.get("analyses") or {}
+    current_an = current.get("analyses") or {}
+    seen_scopes: set[str] = set()
+    for key in sorted(set(stored_an) | set(current_an)):
+        if stored_an.get(key) == current_an.get(key):
+            continue
+        scope = key.rsplit(":", 1)[0] if ":" in key else key
+        if scope not in seen_scopes:
+            seen_scopes.add(scope)
+            reasons.append(_analysis_scope_reason(scope))
+
+    return _cap_reasons(reasons)
+
+
+def _asset_change_reason(key: str, was_present: bool, is_present: bool) -> str:
+    label = key.split(":", 1)[0].replace("_", " ")
+    if not was_present:
+        return f"New asset: {label}."
+    if not is_present:
+        return f"Removed asset: {label}."
+    return f"Updated asset: {label}."
+
+
+def _analysis_scope_reason(scope: str) -> str:
+    if scope.startswith("stem:"):
+        return f"Stem {scope[len('stem:') :]} was re-analyzed."
+    if scope == "mix":
+        return "The mix analysis was re-run."
+    return f"{scope} was re-analyzed."
+
+
+def _cap_reasons(reasons: list[str], limit: int = 6) -> list[str]:
+    if len(reasons) <= limit:
+        return reasons
+    return reasons[:limit] + [f"…and {len(reasons) - limit} more change(s)."]
 
 
 def _safe_midi_bytes(data: bytes | None, source: str, *, max_notes: int) -> dict[str, Any]:

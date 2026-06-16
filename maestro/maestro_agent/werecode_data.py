@@ -140,6 +140,40 @@ class WereCodeSongData:
                 hashes[f"{asset['kind']}:{self._stem_id(asset) or asset['object_path']}"] = checksum
         return hashes
 
+    def analysis_signatures(self, song_id: str) -> dict[str, str]:
+        """Identity (version + created_at) of the current, non-synthetic analysis
+        rows the fact pack consumes, keyed by scope. A re-analysis writes a new
+        `is_current` row (new created_at) against the *same* `stem_analysis_json`
+        asset, so it never moves an asset checksum — this is what makes such an
+        update detectable for staleness."""
+        assets_by_id = {asset.get("id"): asset for asset in self._assets(song_id)}
+        resp = (
+            self._table("analysis_results")
+            .select("asset_id,analyzer_name,analyzer_version,created_at")
+            .eq("song_id", song_id)
+            .eq("is_current", True)
+            .execute()
+        )
+        signatures: dict[str, str] = {}
+        for row in resp.data or []:
+            name = row.get("analyzer_name")
+            if not isinstance(name, str) or not name or name in SYNTHETIC_ANALYZERS:
+                continue
+            asset = assets_by_id.get(row.get("asset_id")) or {}
+            stem_id = (asset.get("metadata") or {}).get("stem_id")
+            scope = f"stem:{stem_id}" if stem_id else "mix"
+            signatures[f"{scope}:{name}"] = f"{row.get('analyzer_version')}|{row.get('created_at')}"
+        return signatures
+
+    def dependency_signature(self, song_id: str) -> dict[str, Any]:
+        """The fact pack's full input fingerprint: the assets it reads + the
+        analysis rows it consumes. Stored at build, recomputed cheaply for the
+        staleness check (metadata only — no MIDI download, no rebuild)."""
+        return {
+            "assets": self.asset_checksums(song_id),
+            "analyses": self.analysis_signatures(song_id),
+        }
+
     # ---- analysis ----------------------------------------------------------
 
     def get_mix_analysis(self, song_id: str) -> dict[str, Any]:
