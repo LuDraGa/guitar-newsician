@@ -7,6 +7,7 @@ import {
   ChevronDown,
   Clock,
   Cpu,
+  DollarSign,
   Flag,
   Hammer,
   KeyRound,
@@ -15,6 +16,7 @@ import {
   Search,
   Send,
   Sparkles,
+  Trash2,
   Users,
   Wrench,
   X,
@@ -56,6 +58,25 @@ type ChatConversation = {
   messages: ChatMessage[];
 };
 
+type UsageSummary = {
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costUsd: number;
+};
+
+type CostLedgerEntry = UsageSummary & {
+  id: string;
+  songId: string;
+  conversationId: string;
+  conversationTitle: string;
+  assistantMessageIndex: number;
+  model: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
 type ModelOption = { id: string; name: string; hint: string };
 type DrawerContent = { title: string; subtitle: string; detail: unknown } | null;
 
@@ -73,6 +94,7 @@ const DEFAULT_MODEL_ID = 'gpt-5.4-nano';
 
 const SUGGESTED_PROMPTS = ['What key should I trust?', 'What sections are detected?', 'Transpose to G'];
 const STORAGE_KEY = 'maestro:conversations:v1';
+const COST_LEDGER_KEY = 'maestro:cost-ledger:v1';
 
 async function readError(response: Response, fallback: string): Promise<string> {
   try {
@@ -106,6 +128,26 @@ function saveConversations(list: ChatConversation[]) {
     } catch {
       /* give up silently; history is best-effort */
     }
+  }
+}
+
+function loadCostLedger(): CostLedgerEntry[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(COST_LEDGER_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed as CostLedgerEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCostLedger(entries: CostLedgerEntry[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(COST_LEDGER_KEY, JSON.stringify(entries));
+  } catch {
+    /* cost history is best-effort until it moves to durable storage */
   }
 }
 
@@ -163,6 +205,7 @@ export function MaestroClient() {
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const conversationsRef = useRef<ChatConversation[]>([]);
+  const [costLedger, setCostLedger] = useState<CostLedgerEntry[]>([]);
 
   const [toolsError, setToolsError] = useState<string | null>(null);
 
@@ -279,7 +322,12 @@ export function MaestroClient() {
     (async () => {
       await Promise.resolve();
       if (cancelled) return;
-      setConversations(loadConversations());
+      const loadedConversations = loadConversations();
+      const loadedLedger = mergeCostLedgerEntries(loadCostLedger(), conversationsToCostLedger(loadedConversations));
+      setConversations(loadedConversations);
+      setCostLedger(loadedLedger);
+      conversationsRef.current = loadedConversations;
+      saveCostLedger(loadedLedger);
       if (useWereCodeDataCache.getState().maestroToolsLoaded) {
         return;
       }
@@ -322,17 +370,52 @@ export function MaestroClient() {
 
   // Upsert + persist a conversation. Called from the send handler (not an effect)
   // so it never trips the set-state-in-effect rule.
-  function upsertConversation(id: string, songId: string, msgs: ChatMessage[]) {
+  function upsertConversation(id: string, songId: string, msgs: ChatMessage[]): ChatConversation {
+    const now = nowMs();
+    const existing = conversationsRef.current.find((c) => c.id === id);
+    const record: ChatConversation = existing
+      ? { ...existing, messages: msgs, title: existing.title || deriveTitle(msgs), updatedAt: now }
+      : { id, songId, title: deriveTitle(msgs), createdAt: now, updatedAt: now, messages: msgs };
     setConversations((prev) => {
-      const now = nowMs();
-      const existing = prev.find((c) => c.id === id);
-      const record: ChatConversation = existing
-        ? { ...existing, messages: msgs, title: existing.title || deriveTitle(msgs), updatedAt: now }
+      const prevExisting = prev.find((c) => c.id === id);
+      const nextRecord = prevExisting
+        ? { ...prevExisting, messages: msgs, title: prevExisting.title || deriveTitle(msgs), updatedAt: now }
         : { id, songId, title: deriveTitle(msgs), createdAt: now, updatedAt: now, messages: msgs };
-      const next = existing ? prev.map((c) => (c.id === id ? record : c)) : [record, ...prev];
+      const next = prevExisting ? prev.map((c) => (c.id === id ? nextRecord : c)) : [nextRecord, ...prev];
       saveConversations(next);
+      conversationsRef.current = next;
       return next;
     });
+    return record;
+  }
+
+  function rememberConversationCosts(conversation: ChatConversation) {
+    const entries = conversationToCostLedger(conversation);
+    if (entries.length === 0) return;
+    setCostLedger((prev) => {
+      const next = mergeCostLedgerEntries(prev, entries);
+      saveCostLedger(next);
+      return next;
+    });
+  }
+
+  function deleteConversation(id: string) {
+    const conversation = conversationsRef.current.find((c) => c.id === id);
+    if (!conversation) return;
+    rememberConversationCosts(conversation);
+    const confirmed = window.confirm('Delete this chat transcript? Its recorded cost stays in the totals.');
+    if (!confirmed) return;
+
+    setConversations((prev) => {
+      const next = prev.filter((c) => c.id !== id);
+      saveConversations(next);
+      conversationsRef.current = next;
+      return next;
+    });
+
+    if (activeConvId === id) {
+      newChat();
+    }
   }
 
   async function buildPack() {
@@ -385,7 +468,7 @@ export function MaestroClient() {
         { role: 'assistant', content: body.content ?? '(no answer)', trace: body.raw ?? null },
       ];
       setMessages(withAnswer);
-      upsertConversation(convId, selectedSongId, withAnswer);
+      rememberConversationCosts(upsertConversation(convId, selectedSongId, withAnswer));
     } catch (error) {
       setChatError(error instanceof Error ? error.message : 'Could not reach Maestro');
     } finally {
@@ -406,6 +489,10 @@ export function MaestroClient() {
     () => conversations.filter((c) => c.songId === selectedSongId).sort((a, b) => b.updatedAt - a.updatedAt),
     [conversations, selectedSongId]
   );
+  const activeChatCost = useMemo(() => sumMessageCosts(messages), [messages]);
+  const costBySongId = useMemo(() => groupCostsBySong(costLedger), [costLedger]);
+  const selectedSongCost = selectedSongId ? (costBySongId[selectedSongId] ?? emptyCost()) : emptyCost();
+  const totalCost = useMemo(() => sumCostEntries(costLedger), [costLedger]);
   const summary = useMemo(() => summarizeFactPack(factPack), [factPack]);
   const hasPack = Boolean(factPack);
 
@@ -522,6 +609,7 @@ export function MaestroClient() {
               <ul className="flex flex-col gap-1.5">
                 {filteredSongs.map((song) => {
                   const active = song.id === selectedSongId;
+                  const songCost = costBySongId[song.id];
                   return (
                     <li key={song.id}>
                       <button
@@ -534,7 +622,7 @@ export function MaestroClient() {
                         {song.artist && (
                           <p className="mt-0.5 truncate text-[11px] text-[var(--muted)]">{song.artist}</p>
                         )}
-                        <div className="mt-1.5">
+                        <div className="mt-1.5 flex items-center justify-between gap-1.5">
                           <ReadinessChips
                             items={[
                               { label: 'Stems', ready: song.has_stems },
@@ -542,6 +630,14 @@ export function MaestroClient() {
                               { label: 'Analysis', ready: song.has_analysis },
                             ]}
                           />
+                          {songCost && hasAnyUsage(songCost) && (
+                            <span
+                              className="chip shrink-0 text-[10px]"
+                              title={`${formatTokens(songCost.totalTokens)} tokens tracked for this song`}
+                            >
+                              {formatUsd(songCost.costUsd)}
+                            </span>
+                          )}
                         </div>
                       </button>
                     </li>
@@ -622,11 +718,16 @@ export function MaestroClient() {
         {/* Center: chat */}
         <section className="surface flex min-h-0 flex-col p-0">
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--hair)] px-4 py-2">
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <PillIcon>
                 <KeyRound className="h-3.5 w-3.5" />
               </PillIcon>
               <p className="display truncate text-[14px]">{selectedSong ? selectedSong.title : 'Maestro'}</p>
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <CostPill label="Chat" total={activeChatCost} title="Current visible chat" />
+                <CostPill label="Song" total={selectedSongCost} title="Selected song, including deleted chats" />
+                <CostPill label="All" total={totalCost} title="All local Maestro chats, including deleted chats" icon />
+              </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               <Popover
@@ -645,23 +746,37 @@ export function MaestroClient() {
                   <ul className="flex max-h-72 flex-col overflow-y-auto">
                     {songConversations.map((conv) => {
                       const active = conv.id === activeConvId;
+                      const convCost = sumMessageCosts(conv.messages);
                       return (
-                        <li key={conv.id}>
+                        <li key={conv.id} className="group flex items-start gap-1 rounded-lg hover:bg-[var(--card)]">
                           <button
                             type="button"
                             onClick={() => {
                               loadConversation(conv.id);
                               close();
                             }}
-                            className="flex w-full items-start gap-2 rounded-lg p-2 text-left hover:bg-[var(--card)]"
+                            className="flex min-w-0 flex-1 items-start gap-2 rounded-lg p-2 text-left"
                           >
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-[13px]">{conv.title}</span>
                               <span className="block text-[11px] text-[var(--muted)]">
                                 {relTime(conv.updatedAt)} · {conv.messages.length} msgs
+                                {hasAnyUsage(convCost) ? ` · ${formatUsd(convCost.costUsd)}` : ''}
                               </span>
                             </span>
                             {active && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              deleteConversation(conv.id);
+                              close();
+                            }}
+                            className="mt-1.5 grid h-7 w-7 shrink-0 place-items-center rounded-full text-[var(--muted)] opacity-70 hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] group-hover:opacity-100"
+                            title="Delete chat"
+                            aria-label={`Delete ${conv.title}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </li>
                       );
@@ -853,7 +968,7 @@ function RuntimeRail({
             {usage?.total_tokens != null && (
               <span className="chip">{Number(usage.total_tokens).toLocaleString()} tok</span>
             )}
-            {usage?.cost_usd != null && <span className="chip">${Number(usage.cost_usd).toFixed(4)}</span>}
+            {usage?.cost_usd != null && <span className="chip">{formatUsd(Number(usage.cost_usd))}</span>}
             {elapsed != null && <span className="chip">{(elapsed / 1000).toFixed(1)}s</span>}
           </div>
         ) : (
@@ -913,6 +1028,29 @@ function RuntimeRail({
         )}
       </div>
     </aside>
+  );
+}
+
+function CostPill({
+  label,
+  total,
+  title,
+  icon,
+}: {
+  label: string;
+  total: UsageSummary;
+  title: string;
+  icon?: boolean;
+}) {
+  return (
+    <span
+      className="flex min-w-0 items-center gap-1.5 rounded-full border border-[var(--hair)] bg-[var(--paper)] px-2.5 py-1 text-[11px]"
+      title={`${title}: ${formatUsd(total.costUsd)}, ${formatTokens(total.totalTokens)}, ${total.calls} calls`}
+    >
+      {icon && <DollarSign className="h-3 w-3 shrink-0 text-[var(--muted)]" />}
+      <span className="uppercase tracking-wide text-[var(--muted)]">{label}</span>
+      <span className="font-medium">{formatUsd(total.costUsd)}</span>
+    </span>
   );
 }
 
@@ -1071,6 +1209,103 @@ function actionIcon(kind: string | null): typeof Wrench {
   return Wrench;
 }
 
+function emptyCost(): UsageSummary {
+  return { calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, costUsd: 0 };
+}
+
+function hasAnyUsage(total: UsageSummary): boolean {
+  return total.costUsd > 0 || total.totalTokens > 0 || total.calls > 0;
+}
+
+function usageFromTrace(trace: ChatTrace): UsageSummary | null {
+  const usage = asRecord(trace?.usage);
+  if (!usage) return null;
+
+  const summary: UsageSummary = {
+    calls: numberValue(usage.calls) ?? 0,
+    promptTokens: numberValue(usage.prompt_tokens) ?? 0,
+    completionTokens: numberValue(usage.completion_tokens) ?? 0,
+    totalTokens: numberValue(usage.total_tokens) ?? 0,
+    costUsd: numberValue(usage.cost_usd) ?? 0,
+  };
+
+  return hasAnyUsage(summary) ? summary : null;
+}
+
+function conversationToCostLedger(conversation: ChatConversation): CostLedgerEntry[] {
+  return conversation.messages.flatMap((message, index) => {
+    if (message.role !== 'assistant') return [];
+    const usage = usageFromTrace(message.trace ?? null);
+    if (!usage) return [];
+    return [
+      {
+        id: `${conversation.id}:${index}`,
+        songId: conversation.songId,
+        conversationId: conversation.id,
+        conversationTitle: conversation.title,
+        assistantMessageIndex: index,
+        model: stringValue(message.trace?.model),
+        createdAt: conversation.createdAt,
+        updatedAt: conversation.updatedAt,
+        ...usage,
+      },
+    ];
+  });
+}
+
+function conversationsToCostLedger(conversations: ChatConversation[]): CostLedgerEntry[] {
+  return conversations.flatMap(conversationToCostLedger);
+}
+
+function mergeCostLedgerEntries(existing: CostLedgerEntry[], additions: CostLedgerEntry[]): CostLedgerEntry[] {
+  if (additions.length === 0) return existing;
+  const byId = new Map<string, CostLedgerEntry>();
+  for (const entry of existing) byId.set(entry.id, entry);
+  for (const entry of additions) byId.set(entry.id, { ...byId.get(entry.id), ...entry });
+  return [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function sumMessageCosts(messages: ChatMessage[]): UsageSummary {
+  return messages.reduce((total, message) => addUsage(total, usageFromTrace(message.trace ?? null)), emptyCost());
+}
+
+function sumCostEntries(entries: CostLedgerEntry[]): UsageSummary {
+  return entries.reduce((total, entry) => addUsage(total, entry), emptyCost());
+}
+
+function groupCostsBySong(entries: CostLedgerEntry[]): Record<string, UsageSummary> {
+  return entries.reduce<Record<string, UsageSummary>>((acc, entry) => {
+    acc[entry.songId] = addUsage(acc[entry.songId] ?? emptyCost(), entry);
+    return acc;
+  }, {});
+}
+
+function addUsage(total: UsageSummary, usage: UsageSummary | null): UsageSummary {
+  if (!usage) return total;
+  return {
+    calls: total.calls + usage.calls,
+    promptTokens: total.promptTokens + usage.promptTokens,
+    completionTokens: total.completionTokens + usage.completionTokens,
+    totalTokens: total.totalTokens + usage.totalTokens,
+    costUsd: roundCost(total.costUsd + usage.costUsd),
+  };
+}
+
+function roundCost(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+function formatUsd(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '$0.0000';
+  if (value < 0.0001) return '<$0.0001';
+  if (value < 1) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(2)}`;
+}
+
+function formatTokens(value: number): string {
+  return `${Math.round(value).toLocaleString()} tok`;
+}
+
 type FactPackSummary = {
   teachingKey: string;
   detectedKey: string;
@@ -1111,4 +1346,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function numberValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
