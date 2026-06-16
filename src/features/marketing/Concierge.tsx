@@ -48,7 +48,7 @@ function tokens(s: string): string[] {
    ("what's the weather"). Generous on purpose; routing, not gatekeeping. */
 const DOMAIN = new Set(
   (
-    'music song songs track tracks recording recordings audio sound guitar guitars bass vocal vocals voice singer drums drum keys keyboard piano synth instrument instruments chord chords tab tabs note notes scale scales mode tempo bpm rhythm timing beat pitch capo transpose transposition stem stems mix mixing master lyric lyrics verse chorus bridge intro outro riff riffs solo solos lick licks progression practice practise learn learning teach teaching lesson play playing player players perform performance ear theory transcribe transcription transcribing sheet notation score midi octave octavia studio waitlist price pricing cost costs subscription subscribe plan plans account signup login upload uploads analyze analysis separate isolate mute loop slow speed feel arrangement band cover daw ableton logic reaper key keys soft launch invite seat seats demo browser file format'
+    'music song songs track tracks recording recordings audio sound guitar guitars bass vocal vocals voice singer drums drum keys keyboard piano synth instrument instruments chord chords tab tabs note notes scale scales mode tempo bpm rhythm timing beat pitch capo transpose transposition stem stems mix mixing master lyric lyrics verse chorus bridge intro outro riff riffs solo solos lick licks progression practice practise learn learning teach teaching lesson play playing player players perform performance ear theory transcribe transcription transcribing sheet notation score midi octave octavia maestro songbook waitlist beta release access price pricing cost costs subscription subscribe plan plans account signup login upload uploads analyze analysis separate isolate mute loop slow speed feel arrangement band cover daw ableton logic reaper key keys invite seat seats demo browser file format'
   ).split(/\s+/),
 );
 
@@ -104,24 +104,24 @@ function answerFor(query: string): Message {
   if (isOutOfGuardrails(q))
     return {
       role: 'bot',
-      text: "Octave is for learning from music you own, so I can't help with pirating, ripping to redistribute, or reselling recordings. If you own the audio and want to take it apart and actually play it, that's exactly what it's built for.",
+      text: "Octave is for learning from music you own, so I can't help with pirating, ripping to redistribute, or reselling recordings. If you own the audio and want Maestro to help you understand it and play it on guitar, that's exactly what it's built for.",
       sources: [],
     };
 
   if (/^(hi|hey|hello|yo|sup|howdy|gm|good (morning|evening|afternoon))\b/.test(q))
     return {
       role: 'bot',
-      text: "Hey. Ask me how Octave works, what it transcribes, who it's for, what it'll cost, or anything music-side (theory, transcription, the analysis under the hood).",
+      text: "Hey. Ask me how Octave works, what Maestro does, who it's for, what the access tracks mean, or anything music-side like theory and transcription.",
       sources: [],
     };
   if (/(thank|thanks|cheers|appreciate|ty)\b/.test(q))
-    return { role: 'bot', text: "Anytime. When you're ready, the waitlist button up top saves your spot.", sources: [] };
+    return { role: 'bot', text: "Anytime. When you're ready, the access section lets you choose beta shaping or release-ready access.", sources: [] };
 
   // Wants a person, not me — hand off to the team before trying the KB.
   if (wantsHuman(q))
     return {
       role: 'bot',
-      text: `Of course. The team's the right people for that. They read everything during the soft launch; reach them through the links in the footer, or at ${BRAND.email}.`,
+      text: `Of course. The team's the right people for that. They read everything during private access; reach them through the links in the footer, or at ${BRAND.email}.`,
       sources: [],
       cta: 'contact',
     };
@@ -149,17 +149,17 @@ function answerFor(query: string): Message {
   // Off-topic and harmless → say what I actually cover.
   return {
     role: 'bot',
-    text: "I stick to Octave and the music side of it: how it works, what it transcribes, who it's for, pricing, and the analysis under the hood. Ask me anything there and I've got you.",
+    text: "I stick to Octave and the music side of it: how it works, what Maestro does, who it's for, pricing, access, and the analysis under the hood. Ask me anything there and I've got you.",
     sources: [],
   };
 }
 
 const STARTERS = [
   'What is Octave?',
+  'What does Maestro do?',
   'Is this for beginners?',
-  'Can it transpose to another key?',
+  'Which access track fits me?',
   'What instruments does it support?',
-  'What will it cost?',
 ];
 
 function Bubble({ m, onContact }: { m: Message; onContact: () => void }) {
@@ -192,7 +192,7 @@ function Bubble({ m, onContact }: { m: Message; onContact: () => void }) {
       )}
       {bot && m.sources && m.sources.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', paddingLeft: 2 }}>
-          <span className="mono" style={{ fontSize: 10, color: 'var(--faint)', letterSpacing: '0.04em' }}>
+          <span className="mono" style={{ fontSize: 10, color: 'var(--faint)' }}>
             retrieved
           </span>
           {m.sources.map((s) => (
@@ -222,7 +222,7 @@ export function Concierge() {
   const [msgs, setMsgs] = useState<Message[]>([
     {
       role: 'bot',
-      text: "Hey. Ask me anything about Octave: how it works, what it transcribes, who it's for, what it'll cost. What do you want to know?",
+      text: "Hey. Ask me anything about Octave: how it works, what Maestro does, who it's for, and which access track fits you. What do you want to know?",
       sources: [],
     },
   ]);
@@ -266,6 +266,7 @@ export function Concierge() {
     <>
       {/* launcher (ink, not accent — the waitlist owns the one accent action) */}
       <button
+        className="concierge-launcher"
         onClick={() => setOpen((o) => !o)}
         aria-label="Ask about Octave"
         style={{
@@ -328,7 +329,7 @@ export function Concierge() {
               />
             </span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 15.5, fontWeight: 700, letterSpacing: '-0.01em' }}>Ask Octave</div>
+              <div style={{ fontSize: 15.5, fontWeight: 700 }}>Ask Octave</div>
               <div style={{ fontSize: 12, color: 'var(--muted)' }}>Product questions, answered</div>
             </div>
             <button className="iconbtn" onClick={() => setOpen(false)} aria-label="Close" style={{ width: 34, height: 34 }}>

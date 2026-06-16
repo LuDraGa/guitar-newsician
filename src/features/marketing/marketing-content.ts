@@ -28,6 +28,23 @@ export interface Capability {
   line: string;
 }
 
+export interface MaestroBand {
+  icon: IconName;
+  title: string;
+  body: string;
+  prompt: string;
+}
+
+export interface AccessTrack {
+  eyebrow: string;
+  title: string;
+  body: string;
+  source: 'beta' | 'release';
+  button: string;
+  note: string;
+  live?: boolean;
+}
+
 export interface ChatChip {
   icon?: IconName;
   text: string;
@@ -65,86 +82,124 @@ export interface KbEntry {
 export const BRAND: Brand = {
   name: 'Octave',
   domain: 'octave.studio',
-  tagline: 'Take any song to the musical workstation.',
+  tagline: 'A guitar-first system for turning recordings into structured practice with Maestro.',
   // email: 'hello@octave.studio',
   email: 'abhirooprasad@gmail.com',
 };
 
 /* ---------- hero (scene 1: the gap) ---------- */
 export const HERO = {
-  eyebrow: 'For players past the basics',
-  // headline is composed in the component so "onto your guitar" can carry the accent
-  sub: 'The tab, the voicings, the band: they’re all inside the song. Drop in a recording you own, and Octave gets them out.',
-  reassure: 'Soft launch. No spam, just your invite.',
+  eyebrow: 'Maestro by Octave',
+  sub: 'You know the song by ear. Maestro studies the full recording, finds the musical evidence, and turns it into a structured path toward guitar.',
+  reassure: 'Private access. Built slowly for serious players.',
 };
 
-/* ---------- the bench (scene 2: three moves) ---------- */
+/* ---------- songbook (scene 2: three moves) ---------- */
 export const BENCH_MOVES: BenchMove[] = [
   {
     n: '01',
-    title: 'Bring a song',
-    body: 'Upload a recording you own. That’s the whole setup.',
+    title: 'Bring the recording',
+    body: 'Upload audio you own. Octave treats the whole mix as musical context for the guitarist.',
   },
   {
     n: '02',
-    title: 'It comes apart',
-    body: 'Stems split out. Chords, words, and structure show up on screen. Minutes, not weekends.',
+    title: 'Maestro reads the music',
+    body: 'Sections, roles, harmony, rhythm, and confidence become a map instead of a guess.',
   },
   {
     n: '03',
-    title: 'Play it in',
-    body: 'Solo your part. Slow the hard bar. Loop it until it sits. Then bring the band back in.',
+    title: 'Keep the songbook',
+    body: 'Stems, chords, tab, lyrics, sheet music, and MIDI stay ready for loops, review, and follow-up questions.',
   },
 ];
 
 /* ---------- the ladder (scene 2: how deep one recording goes) ---------- */
 export const JOURNEY = {
-  label: 'One song, three depths',
-  steps: ['Strum along with the words', 'Pick up the lead lines', 'The whole song on one guitar'],
-  coda: 'Maestro coaches every stage.',
+  label: 'One song, one path',
+  steps: ['Decode the recording', 'Find the guitar route', 'Grow into the arrangement'],
+  coda: 'The evidence stays in your songbook.',
 };
 
-/* ---------- the bench (scene 2: what's on it) ---------- */
+/* ---------- songbook (scene 2: what's on it) ---------- */
 export const CAPABILITIES: Capability[] = [
   {
     icon: 'scissors',
     tag: 'Stems',
-    line: 'Mute the singer. Pull the bass forward. Hear only your part.',
+    line: 'Solo the guitar, mute vocals, or hear the rhythm section as the context around your part.',
   },
   {
     icon: 'guitar',
     tag: 'Chords + tab',
-    line: 'Written out over the bars, right where you need them.',
+    line: 'Playable shapes and lines written over the bars where they belong.',
   },
   {
     icon: 'type',
     tag: 'Lyrics',
-    line: 'Words locked to the music, so you never lose your place.',
+    line: 'Words aligned to the music so the form, cues, and chord movement stay connected.',
   },
   {
     icon: 'sheet',
-    tag: 'Notation',
-    line: 'Clean sheet music, one instrument at a time.',
+    tag: 'Sheet music',
+    line: 'Staff notation for the moments where tab alone is not enough.',
   },
   {
     icon: 'gauge',
-    tag: 'Speed + loop',
-    line: 'Slow it down without changing pitch. Loop the bars that fight you.',
+    tag: 'MIDI / piano roll',
+    line: 'A timing-first view of notes, entrances, and rhythmic density.',
   },
   {
     icon: 'loop',
-    tag: 'Key',
-    line: 'Move it to fit your voice or your capo.',
+    tag: 'Loop + tempo',
+    line: 'Slow a phrase without changing pitch, then repeat the exact bars that need work.',
   },
 ];
 
+export const FEEL_TRANSFORM = {
+  title: 'Then ask for a different feel.',
+  body: 'Once Maestro understands the song, arrangement becomes musical instruction. Ask for the guitar to push a pop track toward a slower blues retreat, keep the vocal contour, and show the voicings that make the mood change believable.',
+  chips: ['Pop pulse', 'Blues pocket', 'Single-guitar arrangement'],
+};
+
 /* ---------- maestro (scene 3: the coach) ---------- */
 export const MAESTRO = {
-  title: 'Stuck? Ask Maestro.',
+  title: 'Maestro leads the session.',
   intro:
-    'Maestro is the personalized AI coach inside the Studio. Ask in plain words. It answers like a musician; and sets up the workstation for you.',
-  capture: 'Maestro personalizes to every learner.',
+    'Maestro is the AI music coach inside Octave. It understands the recording as sections, roles, harmony, rhythm, and evidence, then teaches the guitar path proactively: what to learn first, where to loop, when to simplify, and how to grow into the arrangement.',
+  capture: 'Structured guidance from the music itself.',
 };
+
+export const MAESTRO_BANDS: MaestroBand[] = [
+  {
+    icon: 'search',
+    title: 'Decode the song',
+    body: 'Name the form, harmony, tempo, instrument roles, and the moments that make the recording work.',
+    prompt: 'Why does that chord feel tense?',
+  },
+  {
+    icon: 'guitar',
+    title: 'Find the guitar path',
+    body: 'Separate what the guitar should play from everything else happening in the full mix.',
+    prompt: 'What should I play first?',
+  },
+  {
+    icon: 'loop',
+    title: 'Practice intelligently',
+    body: 'Choose the next useful move: simplify a voicing, slow a bar, loop a transition, or explain the count.',
+    prompt: 'I have twenty minutes.',
+  },
+  {
+    icon: 'sheet',
+    title: 'Arrange the music',
+    body: 'Turn chords, melody, bass motion, and fills into a single-guitar version that can grow in difficulty.',
+    prompt: 'Can I play this alone?',
+  },
+  {
+    icon: 'wand',
+    title: 'Shape the feel',
+    body: 'Change the guitar part so the same song can lean brighter, darker, softer, or more blues-driven.',
+    prompt: 'Make this feel slower and smoky.',
+  },
+];
 
 /* The transport chips before Maestro has done anything */
 export const MAESTRO_BASE_CHIPS: ChatChip[] = [{ text: 'Key B♭' }, { text: '100 bpm' }];
@@ -211,8 +266,8 @@ export const MAESTRO_CHATS: MaestroChat[] = [
       { role: 'you', text: 'Can I play this without the band?' },
       {
         role: 'maestro',
-        thinking: 'Pulling the stems apart…',
-        text: 'Yes. I took the parts apart and wrote a guitar-only arrangement: melody on top, bass notes on the beat. It reads as tab and notation.',
+        thinking: 'Reading the instrument roles…',
+        text: 'Yes. The guitar-only arrangement keeps melody on top and bass notes on the beat. It reads as tab and notation.',
         action: {
           label: 'Open the arrangement',
           icon: 'sheet',
@@ -232,7 +287,7 @@ export const MAESTRO_CHATS: MaestroChat[] = [
   },
   {
     id: 'key',
-    label: 'Your key',
+    label: 'Capo path',
     turns: [
       { role: 'you', text: 'What’s happening in the chorus?' },
       {
@@ -243,8 +298,8 @@ export const MAESTRO_CHATS: MaestroChat[] = [
       { role: 'you', text: 'Put it in a key I can sing.' },
       {
         role: 'maestro',
-        thinking: 'Trying keys against your range…',
-        text: 'C fits your voice, and capo 2 keeps your open shapes. Want me to move it?',
+        thinking: 'Checking open-shape options…',
+        text: 'Try C with capo 2. It keeps the open shapes friendly and drops the chorus into a more singable guitar register. Want me to move the chart?',
         action: {
           label: 'Move it to C, capo 2',
           icon: 'wand',
@@ -280,8 +335,8 @@ export const MAESTRO_CHATS: MaestroChat[] = [
       { role: 'you', text: 'I’ve got twenty minutes. What should I work on?' },
       {
         role: 'maestro',
-        thinking: 'Finding where you left off…',
-        text: 'The pre-chorus push is still rushing. Give it ten minutes at 0.6×, then run the full chorus twice at tempo. I can queue the loops.',
+        thinking: 'Ranking the hard spots…',
+        text: 'Start with the pre-chorus push. Give it ten minutes at 0.6×, then run the full chorus twice at tempo. I can queue those loops.',
         action: {
           label: 'Queue the loops',
           icon: 'loop',
@@ -295,26 +350,27 @@ export const MAESTRO_CHATS: MaestroChat[] = [
       { role: 'you', text: 'And if it still rushes?' },
       {
         role: 'maestro',
-        thinking: 'Counting your last takes…',
+        thinking: 'Breaking down the count…',
         text: 'Then we drop to half speed and you clap it before you play it. Rushing lives in the count, not the fingers.',
       },
     ],
   },
   {
-    id: 'chord',
-    label: 'That chord',
+    id: 'feel',
+    label: 'Change the feel',
     turns: [
-      { role: 'you', text: 'That chord at 1:12 sounds strange. What is it?' },
+      { role: 'you', text: 'Can this feel darker and slower on guitar?' },
       {
         role: 'maestro',
-        thinking: 'Listening at 1:12…',
-        text: 'F♯m7♭5, a half-diminished passing chord: 2 x 2 2 1 x on guitar. It resolves to B7, then E minor. A minor two-five-one.',
+        thinking: 'Testing harmony and groove…',
+        text: 'Yes. Keep the vocal contour, move the guitar into a slower minor-blues pocket, and let the bass imply the turnaround. The song stays recognizable; the room changes.',
         action: {
-          label: 'Jump to 1:12',
-          icon: 'play',
+          label: 'Open blues arrangement',
+          icon: 'wand',
           result: [
-            { icon: 'play', text: '1:12' },
-            { icon: 'loop', text: 'Bar 24', variant: 'accent' },
+            { icon: 'guitar', text: 'Blues guitar', variant: 'live' },
+            { icon: 'sheet', text: 'New voicings' },
+            { icon: 'loop', text: 'Slow pocket', variant: 'accent' },
           ],
         },
       },
@@ -325,14 +381,15 @@ export const MAESTRO_CHATS: MaestroChat[] = [
 /* ---------- who it's for (scene 4) ---------- */
 export const WHO: { forYou: string[]; notYet: string[] } = {
   forYou: [
-    'You can play open chords and a scale or two.',
-    'You learn by ear or by tab, and want both lined up with the recording.',
-    'You teach, and want clean parts to hand to a student.',
-    'You write, and want to lift a feel or a progression.',
+    'You can change chords, follow tab, and hear when the recording is asking for more than a shape.',
+    'You learn by ear, tab, or notation, and want those views lined up with the same recording.',
+    'You teach, and want clean song artifacts plus a structured explanation to hand to a student.',
+    'You write or arrange, and want to study how a feel, progression, or guitar role works.',
   ],
   notYet: [
-    'You’ve never held the instrument. Learn the basics first. We’ll be here.',
-    'You want karaoke or a streaks game. That’s not this.',
+    'You are learning how to hold the guitar or make your first chord change. Start with the fundamentals first; Octave will make more sense after that.',
+    'You want karaoke, streaks, or a mascot-led lesson game. Octave is a focused music room.',
+    'You want real-time grading of your playing. Maestro teaches from the song and your questions today, not from a recording of your performance.',
   ],
 };
 
@@ -340,15 +397,23 @@ export const WHO: { forYou: string[]; notYet: string[] } = {
 export const FAQS: Faq[] = [
   {
     q: 'What does Octave do?',
-    a: 'You give it a recording you own. It splits out the parts, finds the key and tempo, syncs the words, and writes out chords, tab, and notation. Then you learn the song piece by piece, and play along.',
+    a: 'You give Octave a recording you own. It analyzes the music, separates useful parts, finds structure, aligns lyrics, and creates chords, tab, sheet music, and MIDI or piano-roll views. Maestro uses that same evidence to teach the guitar path through the song.',
+  },
+  {
+    q: 'What is Maestro?',
+    a: 'Maestro is the AI music coach inside Octave. It understands the song as music: sections, harmony, rhythm, instrument roles, difficulty, and evidence. It can explain what is happening, choose what to learn first, set up focused practice, and help build a guitar arrangement.',
   },
   {
     q: 'Is it for beginners?',
-    a: 'Not yet. If you can change between open chords and play a simple scale, you’re in. If it’s day one, learn the basics first. Octave will be here.',
+    a: 'It is for guitar players past the basics. If you can change chords, read some tab, and follow a song form, you are in the right zone. If it is day one, learn the fundamentals first; Octave will be here when real songs start calling.',
+  },
+  {
+    q: 'Does Maestro listen to me play?',
+    a: 'Not today. Maestro does not record or grade your performance. The guidance comes from the song analysis and from what you ask, doubt, or want to work on inside the session.',
   },
   {
     q: 'Which instruments does it cover?',
-    a: 'Strongest on guitar, bass, vocals, keys, and drums today. More instruments land through the soft launch.',
+    a: 'Octave studies the full recording because the guitar part only makes sense in context. The public promise is guitar-first: bass, drums, vocals, and keys help Maestro explain the role, rhythm, harmony, and arrangement for the guitarist.',
   },
   {
     q: 'Do I upload my own music?',
@@ -356,16 +421,36 @@ export const FAQS: Faq[] = [
   },
   {
     q: 'What will it cost?',
-    a: 'Not final yet. Early invitees get in first and help set the price. Join the waitlist and you’ll hear from us as seats open.',
+    a: 'Pricing is not final yet. Octave is opening slowly while the product is tuned. Join the shaping track if you want active beta access and feedback loops, or the release track if you want the polished version when it is ready.',
   },
 ];
 
 /* ---------- final CTA (scene 5) ---------- */
 export const FINAL_CTA = {
-  eyebrow: 'Seats opening through the soft launch',
-  title: 'Pick the song you’ve always wanted to play.',
-  sub: 'Join the waitlist. We’ll bring you in as seats open.',
+  eyebrow: 'Private access',
+  title: 'Octave is opening slowly.',
+  sub: 'Choose the track that fits your relationship to the craft: help shape the beta, or wait for the release-ready room.',
 };
+
+export const ACCESS_TRACKS: AccessTrack[] = [
+  {
+    eyebrow: 'Active beta',
+    title: 'I want to shape it.',
+    body: 'For players and teachers who are comfortable with rough edges. Test Maestro early, push the songbook surfaces, and give direct feedback while Octave is still being tuned.',
+    source: 'beta',
+    button: 'Help shape the beta',
+    note: 'Best if you want access plus a feedback loop.',
+    live: true,
+  },
+  {
+    eyebrow: 'Release track',
+    title: 'I just want to play.',
+    body: 'For players who want the premium experience when it is ready. Leave your email and we will invite you when Octave is polished enough to become part of your practice.',
+    source: 'release',
+    button: 'Reserve V1 access',
+    note: 'Best if you want the quieter, finished version.',
+  },
+];
 
 /* ---------- waitlist options ---------- */
 export const INSTRUMENTS = ['Guitar', 'Bass', 'Vocals', 'Keys', 'Drums', 'Other'];
@@ -381,74 +466,74 @@ export const KB: KbEntry[] = [
     id: 'kb/overview',
     topic: 'What Octave is',
     kw: 'what is octave do product about overview purpose explain summary work works working how learn learning use',
-    a: 'Octave turns a recording into a workbench. It splits out the parts, finds key, tempo, and structure, syncs the words, and writes out chords, tab, and notation, all in one Studio where you isolate parts, slow things down, loop, and play along.',
+    a: 'Octave is a guitar-first system around a recording you own. It analyzes the song, creates stems, chords, tab, lyrics, sheet music, and MIDI or piano-roll views, then Maestro uses that same evidence to teach a structured path toward playing it on guitar.',
   },
   {
     id: 'kb/maestro',
     topic: 'Maestro, the in-app coach',
     kw: 'maestro coach assistant agent ai help guide explain natural language ask question chat studio app in-app inside product voicing pattern',
-    a: 'Maestro is the coach inside the Studio. Ask it to explain a voicing, name a pattern, walk you through tab, move a song to a new key, or simplify a busy part. It answers in plain words, anchored to where you are in the song.',
+    a: 'Maestro is the music coach inside Octave. It understands the song as sections, harmony, rhythm, instrument roles, and evidence. Ask it to explain a voicing, choose what to learn first, simplify a busy part, set up a loop, or build toward a guitar arrangement.',
   },
   {
     id: 'kb/concierge',
     topic: 'The site concierge',
     kw: 'octavia concierge you who are this bot site help talking here assistant name',
-    a: 'I’m Octavia, the site concierge. I answer what Octave does, who it’s for, and what it’ll cost. Inside the Studio, the coach you’ll actually work with is Maestro.',
+    a: 'I’m Octavia, the product concierge for this site. I answer questions about Octave, access, fit, and pricing. Inside Octave, the music coach you work with is Maestro.',
   },
   {
     id: 'kb/stems',
     topic: 'Stem separation',
     kw: 'stems separate isolate mute solo vocals bass drums guitar parts track split',
-    a: 'Stem separation splits the mix into parts: vocals, bass, drums, and more. Solo the line you’re learning, or mute the singer. You hear exactly the part you need, nothing else.',
+    a: 'Stem separation gives the songbook useful surfaces: vocals, guitar, bass, drums, and more. Solo the guitar, mute vocals, or hear the rhythm section around the part you are learning.',
   },
   {
     id: 'kb/transcription',
     topic: 'Transcription accuracy',
     kw: 'transcription accurate accuracy correct chords tab notation midi automatic amt',
-    a: 'Automatic transcription gives you chords, tab, and notation good enough to learn from. Chords and structure are reliable; dense or lo-fi mixes are harder. Anything off, you fix in the editor, and the fix sticks.',
+    a: 'Automatic transcription gives you chords, tab, sheet music, and MIDI or piano-roll views to learn from. Dense or lo-fi mixes are harder, so Octave pairs the artifacts with editing and Maestro’s evidence-aware explanations instead of pretending every guess is perfect.',
   },
   {
     id: 'kb/transpose',
     topic: 'Key, tempo, feel',
     kw: 'transpose key change tempo slow speed pitch capo mood feel transposition',
-    a: 'You can slow a passage without changing pitch, loop a bar, and move the song to fit your voice or your capo. Tell Maestro what you want and it sets up the transport for you.',
+    a: 'You can slow a passage without changing pitch, loop a bar, and move the song for a capo or easier guitar shapes. Maestro can explain the musical tradeoff and set up the next practice move.',
   },
   {
     id: 'kb/instruments',
     topic: 'Supported instruments',
     kw: 'instrument support guitar bass vocals keys piano drums what which play',
-    a: 'Today it’s strongest on guitar, bass, vocals, keys, and drums, with tab and chords leaning guitar-forward. More instruments arrive through the soft launch.',
+    a: 'Octave studies guitar, bass, vocals, keys, drums, and the surrounding mix, but the public promise is guitar-first. Other instruments matter because they explain the harmony, rhythm, and role the guitarist needs to understand.',
   },
   {
     id: 'kb/beginner',
     topic: 'Who it’s for',
     kw: 'beginner beginners skill level intermediate advanced who for new start novice experienced fit right',
-    a: 'Octave is for players past the basics who want to learn real songs faster. If you’ve never held the instrument, learn the fundamentals first. This is a bench for taking songs apart, not a first lesson.',
+    a: 'Octave is for guitar players past the basics: people who can change chords, read some tab, and want real songs explained more deeply. If you have never held the instrument, learn the fundamentals first; Octave will make more sense once songs start calling.',
   },
   {
     id: 'kb/upload',
     topic: 'Bringing your own audio',
     kw: 'upload song audio file own catalog where source import bring',
-    a: 'You bring the audio you own and Octave does the analysis. It’s not a streaming catalog. It’s the bench you take your own material to.',
+    a: 'You bring audio you own and Octave analyzes it for your practice. It is not a streaming catalog, and it does not host or redistribute your files.',
   },
   {
     id: 'kb/pricing',
     topic: 'Pricing & access',
     kw: 'price pricing cost free trial subscription pay money plan waitlist access',
-    a: 'Pricing isn’t locked yet. Early invitees get in first and help set where it lands. Join the waitlist and we’ll bring you in as seats open.',
+    a: 'Pricing is not locked yet. Access is split into two tracks: an active beta for people who want to shape the product with feedback, and a release track for people who want the polished version when it is ready.',
   },
   {
     id: 'kb/legal',
     topic: 'Rights & legality',
     kw: 'legal copyright rights law allowed legitimate own redistribute host',
-    a: 'Learning from music you own, for your own practice, is exactly the use we’re built for. You’re responsible for the rights to what you upload; we don’t host or redistribute copyrighted recordings.',
+    a: 'Learning from music you own, for your own practice, is exactly the use Octave is built for. You are responsible for the rights to what you upload; Octave does not host or redistribute copyrighted recordings.',
   },
   {
     id: 'kb/theory',
     topic: 'Music theory (general)',
     general: true,
     kw: 'theory chord scale key mode interval progression diatonic circle fifths harmony ii turnaround cadence resolve voicing',
-    a: 'Happy to talk theory in general terms: a major scale’s diatonic chords, a ii–V–I, relative minors, the circle of fifths. Inside the Studio, Maestro ties it to the actual song: which chord you’re on and why it pulls where it does.',
+    a: 'Happy to talk theory in general terms: a major scale’s diatonic chords, a ii–V–I, relative minors, the circle of fifths. Inside Octave, Maestro ties theory to the actual song: which chord you are on and why it pulls where it does.',
   },
   {
     id: 'kb/mir',

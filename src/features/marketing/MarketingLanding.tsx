@@ -2,8 +2,8 @@
 
 /* ============================================================
    Marketing landing — the public front door at "/".
-   Five scenes on the lamplit-bench (dark) theme: hero → the bench
-   → Maestro → fit + FAQ → final CTA, with contact folded into the
+   Five scenes on the premium dark theme: hero → Maestro → songbook
+   → fit + FAQ → final CTA, with contact folded into the
    footer. Inline email captures join the waitlist immediately and
    then open the modal on its success state for the optional
    profile questions; nav/footer open the modal at the email step.
@@ -38,8 +38,8 @@ export function MarketingLanding() {
       <MarketingNav onJoin={openWaitlist} />
       <main>
         <MarketingHero onJoined={openJoined} />
-        <TheBench />
         <MaestroScene onJoined={openJoined} />
+        <TheBench />
         <FitAndFaq />
         <FinalCTA onJoined={openJoined} />
       </main>

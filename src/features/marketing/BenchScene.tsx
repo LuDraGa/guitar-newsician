@@ -13,7 +13,7 @@
    ============================================================ */
 import { useRef } from 'react';
 
-import { BENCH_MOVES, CAPABILITIES, JOURNEY } from './marketing-content';
+import { BENCH_MOVES, CAPABILITIES, FEEL_TRANSFORM, JOURNEY } from './marketing-content';
 import { Icon } from './MarketingIcon';
 import { Reveal, SectionHead, waveBars } from './MarketingPrimitives';
 import { ScrollTrigger, gsap, useGSAP } from './gsap';
@@ -235,18 +235,21 @@ export function TheBench() {
   );
 
   return (
-    <section id="bench" ref={scope} style={{ position: 'relative' }}>
+    <section id="songbook" ref={scope} style={{ position: 'relative' }}>
       <div className="bench-pin">
         <div className="wrap">
-          <SectionHead title="The song comes apart." intro="Three steps between hearing it and playing it." />
+          <SectionHead
+            title="The music becomes a songbook."
+            intro="Maestro teaches from evidence you can still use directly: stems, chords, tab, lyrics, sheet music, and MIDI."
+          />
           <div className="bench-grid">
             <ol className="bench-moves" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 28 }}>
               {BENCH_MOVES.map((s) => (
                 <li key={s.n} className="bench-move" style={{ borderTop: '1px solid var(--line)', paddingTop: 16 }}>
-                  <span className="mono" style={{ fontSize: 13, fontWeight: 500, letterSpacing: '0.06em', color: 'var(--accent-ink)' }}>
+                  <span className="mono" style={{ fontSize: 13, fontWeight: 500, color: 'var(--accent-ink)' }}>
                     {s.n}
                   </span>
-                  <h3 style={{ margin: '8px 0 0', fontSize: 21, fontWeight: 700, letterSpacing: '-0.02em' }}>{s.title}</h3>
+                  <h3 style={{ margin: '8px 0 0', fontSize: 21, fontWeight: 700 }}>{s.title}</h3>
                   <p style={{ margin: '8px 0 0', fontSize: 16, lineHeight: 1.6, color: 'var(--muted)' }}>{s.body}</p>
                 </li>
               ))}
@@ -256,7 +259,7 @@ export function TheBench() {
         </div>
       </div>
 
-      {/* what's on the bench — compact, one line per tool */}
+      {/* what's in the songbook — compact, one line per tool */}
       <div className="wrap section" style={{ paddingTop: 56 }}>
         {/* the ladder — how deep one recording goes */}
         <Reveal>
@@ -322,7 +325,25 @@ export function TheBench() {
           ))}
         </div>
 
-        {/* product film slot — the HeyGen Studio capture lands here (Phase 2+) */}
+        <Reveal delay={120} className="feel-transform" style={{ marginTop: 22 }}>
+          <div className="surface-flat" style={{ padding: '24px 24px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 22, alignItems: 'center' }}>
+            <div>
+              <span className="eyebrow live">{FEEL_TRANSFORM.title}</span>
+              <p style={{ margin: '14px 0 0', fontSize: 17, lineHeight: 1.58, color: 'var(--muted)', maxWidth: 760 }}>
+                {FEEL_TRANSFORM.body}
+              </p>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end', maxWidth: 260 }}>
+              {FEEL_TRANSFORM.chips.map((chip) => (
+                <span key={chip} className="chip accent" style={{ height: 30 }}>
+                  {chip}
+                </span>
+              ))}
+            </div>
+          </div>
+        </Reveal>
+
+        {/* product film slot — the HeyGen/Hyperframes capture lands here when produced */}
       </div>
     </section>
   );

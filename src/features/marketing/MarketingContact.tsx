@@ -5,29 +5,43 @@
    Contact lives in the footer now (#contact): email, a call link,
    and the support form. No separate contact section.
    ============================================================ */
-import { BRAND, FINAL_CTA } from './marketing-content';
+import { ACCESS_TRACKS, BRAND, FINAL_CTA } from './marketing-content';
 import { EmailCapture, Logo, Reveal } from './MarketingPrimitives';
 import { Icon } from './MarketingIcon';
 
 /* ---------- final CTA ---------- */
 export function FinalCTA({ onJoined }: { onJoined: (email: string) => void }) {
   return (
-    <section className="section" style={{ paddingTop: 40 }}>
+    <section id="access" className="section" style={{ paddingTop: 40 }}>
       <div className="wrap">
-        <Reveal className="surface" style={{ padding: 'clamp(36px, 6vw, 72px)', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
+        <Reveal style={{ textAlign: 'center' }}>
           <span className="eyebrow live" style={{ justifyContent: 'center', display: 'inline-flex' }}>
             {FINAL_CTA.eyebrow}
           </span>
-          <h2 className="display" style={{ fontSize: 'clamp(34px, 5vw, 60px)', margin: '18px auto 0', maxWidth: 720 }}>
+          <h2 className="display final-title" style={{ margin: '18px auto 0', maxWidth: 720 }}>
             {FINAL_CTA.title}
           </h2>
-          <p style={{ margin: '18px auto 0', fontSize: 18, color: 'var(--muted)', maxWidth: 480, lineHeight: 1.55 }}>
+          <p style={{ margin: '18px auto 0', fontSize: 18, color: 'var(--muted)', maxWidth: 620, lineHeight: 1.55 }}>
             {FINAL_CTA.sub}
           </p>
-          <div style={{ marginTop: 30, display: 'flex', justifyContent: 'center' }}>
-            <EmailCapture onJoined={onJoined} source="final" align="center" />
-          </div>
         </Reveal>
+        <div className="access-grid" style={{ marginTop: 34, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+          {ACCESS_TRACKS.map((track, i) => (
+            <Reveal key={track.source} delay={i * 80} className={track.live ? 'surface' : 'surface-flat'} style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <div>
+                <span className={`eyebrow ${track.live ? 'live' : ''}`.trim()}>{track.eyebrow}</span>
+                <h3 className="display" style={{ margin: '14px 0 0', fontSize: 30 }}>
+                  {track.title}
+                </h3>
+                <p style={{ margin: '14px 0 0', fontSize: 16.5, lineHeight: 1.58, color: 'var(--muted)' }}>{track.body}</p>
+              </div>
+              <div style={{ marginTop: 'auto' }}>
+                <EmailCapture onJoined={onJoined} source={track.source} buttonLabel={track.button} placeholder="email for this track" />
+                <p style={{ margin: '12px 0 0', fontSize: 13.5, color: 'var(--faint)' }}>{track.note}</p>
+              </div>
+            </Reveal>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -39,10 +53,11 @@ export function Footer({ onJoin }: { onJoin: () => void }) {
     [
       'Product',
       [
-        ['How it works', '#bench'],
         ['Maestro', '#maestro'],
+        ['Songbook', '#songbook'],
         ["Who it's for", '#fit'],
         ['FAQ', '#faq'],
+        ['Access', '#access'],
       ],
     ],
     [
@@ -60,16 +75,16 @@ export function Footer({ onJoin }: { onJoin: () => void }) {
         <div className="footer-brand">
           <Logo size={28} />
           <p style={{ marginTop: 16, fontSize: 15, color: 'var(--muted)', maxWidth: 280, lineHeight: 1.5 }}>
-            {BRAND.tagline} A bench for players who already play.
+            {BRAND.tagline}
           </p>
           <p style={{ marginTop: 10, fontSize: 13.5, color: 'var(--faint)', maxWidth: 280, lineHeight: 1.5 }}>
-            During the soft launch you’re talking straight to the makers. We read everything.
+            During private access, the product opens deliberately. The active beta gets direct feedback loops; the release track gets the polished room.
           </p>
           <button className="pill ghost sm" style={{ marginTop: 18 }} onClick={onJoin}>
             <span className="dot">
               <Icon name="arrowR" size={13} strokeWidth={2.1} />
             </span>
-            Join the waitlist
+            Request access
           </button>
         </div>
         {cols.map(([title, links]) => (

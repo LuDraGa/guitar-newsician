@@ -124,7 +124,7 @@ export function MaestroChatPlayer() {
   // SSR / no-JS / reduced motion: render the selected conversation complete
   // and static, derived at render time (no state sync, no hydration flash)
   const isStatic = reduced !== false;
-  const visibleTurns = isStatic ? chat.turns : chat.turns.slice(0, shown);
+  const visibleTurns = isStatic ? chat.turns : chat.turns.slice(0, Math.max(shown, 1));
   const actedMap = isStatic ? allActed(chat) : acted;
   const shownChips = isStatic ? finalChips(chat) : chips;
   const playing = !isStatic && inView && !hoverHeld && !focusHeld && !docHidden;

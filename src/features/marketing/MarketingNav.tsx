@@ -8,8 +8,8 @@ import { useEffect, useState } from 'react';
 import { Logo, Pill } from './MarketingPrimitives';
 
 const LINKS: [string, string][] = [
-  ['#bench', 'How it works'],
   ['#maestro', 'Maestro'],
+  ['#songbook', 'Songbook'],
   ['#fit', "Who it's for"],
   ['#faq', 'FAQ'],
 ];
@@ -66,7 +66,7 @@ export function MarketingNav({ onJoin }: { onJoin: () => void }) {
         </nav>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Pill icon="arrowR" variant="accent" className="sm" onClick={onJoin}>
-            Join the waitlist
+            Request access
           </Pill>
         </div>
       </div>

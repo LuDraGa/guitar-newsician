@@ -2,7 +2,7 @@
    email; a later POST with the same email merges optional profile fields
    into the existing row (the route only writes provided columns). */
 
-export type WaitlistSource = 'hero' | 'maestro' | 'final' | 'nav' | 'footer' | 'modal';
+export type WaitlistSource = 'hero' | 'maestro' | 'final' | 'nav' | 'footer' | 'modal' | 'beta' | 'release';
 
 export interface WaitlistPayload {
   email: string;

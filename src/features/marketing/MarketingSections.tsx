@@ -1,16 +1,15 @@
 'use client';
 
 /* ============================================================
-   Marketing landing — middle scenes 3 and 4 (scene 2, TheBench,
-   lives in BenchScene.tsx with its pinned scroll sequence):
+   Marketing landing — middle scenes:
    3. MaestroScene — the coach, shown as a living chat (seven
       conversations that play out in MaestroChat.tsx), with the
       mid-page capture moment.
-   4. FitAndFaq — who it's for + five questions.
+   4. FitAndFaq — who it's for + FAQ.
    ============================================================ */
 import { useState } from 'react';
 
-import { FAQS, MAESTRO, WHO } from './marketing-content';
+import { FAQS, MAESTRO, MAESTRO_BANDS, WHO } from './marketing-content';
 import { Icon } from './MarketingIcon';
 import { MaestroChatPlayer } from './MaestroChat';
 import { EmailCapture, Reveal, SectionHead } from './MarketingPrimitives';
@@ -19,53 +18,84 @@ import { OPEN_CONCIERGE_EVENT } from './marketing-events';
 export function MaestroScene({ onJoined }: { onJoined: (email: string) => void }) {
   return (
     <section id="maestro" className="section" style={{ background: 'var(--paper-2)' }}>
-      <div
-        className="wrap maestro-grid"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-          gap: 56,
-          alignItems: 'center',
-        }}
-      >
-        <div>
-          <SectionHead title={MAESTRO.title} intro={MAESTRO.intro} />
-          <Reveal delay={80} style={{ marginTop: -8 }}>
-            <EmailCapture onJoined={onJoined} source="maestro" />
-            <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 9, fontSize: 13, color: 'var(--faint)' }}>
-              <Icon name="sparkles" size={15} style={{ color: 'var(--accent-ink)' }} /> {MAESTRO.capture}
+      <div className="wrap">
+        <div
+          className="maestro-grid"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+            gap: 56,
+            alignItems: 'center',
+          }}
+        >
+          <div>
+            <SectionHead title={MAESTRO.title} intro={MAESTRO.intro} />
+            <Reveal delay={80} style={{ marginTop: -8 }}>
+              <EmailCapture onJoined={onJoined} source="maestro" buttonLabel="Request Maestro access" />
+              <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 9, fontSize: 13, color: 'var(--faint)' }}>
+                <Icon name="sparkles" size={15} style={{ color: 'var(--accent-ink)' }} /> {MAESTRO.capture}
+              </div>
+            </Reveal>
+          </div>
+
+          <Reveal delay={120}>
+            <div className="surface" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 11, paddingBottom: 14, borderBottom: '1px solid var(--line-2)' }}>
+                <span
+                  style={{
+                    position: 'relative',
+                    width: 36,
+                    height: 36,
+                    borderRadius: 99,
+                    background: 'var(--ink)',
+                    color: 'var(--paper)',
+                    display: 'grid',
+                    placeItems: 'center',
+                  }}
+                >
+                  <Icon name="sparkles" size={17} />
+                  <span
+                    style={{ position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: 99, background: 'var(--live)', boxShadow: '0 0 0 2.5px var(--card)' }}
+                  />
+                </span>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700 }}>Maestro</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>In Octave, beside the songbook</div>
+                </div>
+              </div>
+              <MaestroChatPlayer />
             </div>
           </Reveal>
         </div>
 
-        <Reveal delay={120}>
-          <div className="surface" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 11, paddingBottom: 14, borderBottom: '1px solid var(--line-2)' }}>
-              <span
-                style={{
-                  position: 'relative',
-                  width: 36,
-                  height: 36,
-                  borderRadius: 99,
-                  background: 'var(--ink)',
-                  color: 'var(--paper)',
-                  display: 'grid',
-                  placeItems: 'center',
-                }}
-              >
-                <Icon name="sparkles" size={17} />
+        <div className="maestro-bands" style={{ marginTop: 52, display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
+          {MAESTRO_BANDS.map((band, i) => (
+            <Reveal key={band.title} delay={(i % 5) * 45}>
+              <div className="surface-flat" style={{ padding: 18, height: '100%', display: 'flex', flexDirection: 'column', gap: 14 }}>
                 <span
-                  style={{ position: 'absolute', right: -1, bottom: -1, width: 10, height: 10, borderRadius: 99, background: 'var(--live)', boxShadow: '0 0 0 2.5px var(--card)' }}
-                />
-              </span>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>Maestro</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>In the Studio, next to the transport</div>
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    display: 'grid',
+                    placeItems: 'center',
+                    background: 'var(--card-2)',
+                    color: 'var(--accent-ink)',
+                  }}
+                >
+                  <Icon name={band.icon} size={17} strokeWidth={1.8} />
+                </span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{band.title}</h3>
+                  <p style={{ margin: '8px 0 0', fontSize: 14.5, lineHeight: 1.5, color: 'var(--muted)' }}>{band.body}</p>
+                </div>
+                <span className="chip" style={{ marginTop: 'auto', height: 28, justifyContent: 'center', fontSize: 11.5 }}>
+                  {band.prompt}
+                </span>
               </div>
-            </div>
-            <MaestroChatPlayer />
-          </div>
-        </Reveal>
+            </Reveal>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -85,9 +115,8 @@ function FAQItem({ item, open, onToggle }: { item: { q: string; a: string }; ope
           alignItems: 'center',
           gap: 16,
           padding: '22px 4px',
-          fontSize: 'clamp(17px, 2vw, 20px)',
+          fontSize: 19,
           fontWeight: 650,
-          letterSpacing: '-0.01em',
           color: 'var(--ink)',
         }}
       >
@@ -125,12 +154,12 @@ export function FitAndFaq() {
   return (
     <section id="fit" className="section">
       <div className="wrap">
-        <SectionHead title="Is it for you?" />
+        <SectionHead title="Is Octave right for you?" />
         <div className="fit-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
           <Reveal className="surface" style={{ padding: 28 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18, paddingLeft:28}}>
               <span className="label" style={{ color: 'var(--live-ink)' }}>
-                Yes, if
+                Ready if
               </span>
             </div>
             <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -144,7 +173,7 @@ export function FitAndFaq() {
           </Reveal>
           <Reveal delay={80} className="surface-flat" style={{ padding: 28 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18, paddingLeft:28}}>
-              <span className="label">Not yet, if</span>
+              <span className="label">Better later if</span>
             </div>
             <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 14 }}>
               {WHO.notYet.map((x, i) => (

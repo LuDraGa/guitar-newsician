@@ -69,7 +69,7 @@ export function Logo({ size = 30 }: { size?: number }) {
           }}
         />
       </span>
-      <span className="display" style={{ fontSize: size * 0.63, letterSpacing: '-0.03em' }}>
+      <span className="display" style={{ fontSize: size * 0.63 }}>
         {BRAND.name}
       </span>
     </span>
@@ -210,10 +210,14 @@ export function EmailCapture({
   onJoined,
   source,
   align = 'left',
+  buttonLabel = 'Reserve a seat',
+  placeholder = 'you@email.com',
 }: {
   onJoined: (email: string) => void;
   source: WaitlistSource;
   align?: 'left' | 'center';
+  buttonLabel?: string;
+  placeholder?: string;
 }) {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -252,14 +256,14 @@ export function EmailCapture({
         required
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        placeholder="you@email.com"
+        placeholder={placeholder}
         aria-label="Email address"
         className="field"
         disabled={busy}
         style={{ flex: '1 1 220px', minWidth: 0 }}
       />
       <Pill icon="arrowR" variant="accent" type="submit" disabled={busy}>
-        {busy ? 'Joining…' : 'Join the waitlist'}
+        {busy ? 'Joining...' : buttonLabel}
       </Pill>
       {failed && (
         <span role="alert" style={{ flexBasis: '100%', fontSize: 13.5, color: 'oklch(0.75 0.13 40)' }}>

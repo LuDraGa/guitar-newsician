@@ -137,7 +137,7 @@ export function WaitlistModal({
         className="surface wl-pop"
         role="dialog"
         aria-modal="true"
-        aria-label="Join the waitlist"
+        aria-label="Request Octave access"
         style={{ width: '100%', maxWidth: 540, padding: 0, overflow: 'hidden' }}
       >
         {phase === 'joined' ? (
@@ -163,13 +163,13 @@ export function WaitlistModal({
               <p style={{ margin: '10px auto 0', fontSize: 15, color: 'var(--muted)', maxWidth: 380, lineHeight: 1.55 }}>
                 {"We'll email "}
                 <strong style={{ color: 'var(--ink)' }}>{email}</strong>
-                {' when your seat opens. Invites go out in order, through the soft launch.'}
+                {' when your access opens. Invites go out deliberately while Octave is tuned.'}
               </p>
             </div>
 
             <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
               <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)', lineHeight: 1.5 }}>
-                Want your first session tailored? Tap what fits. Every field is optional.
+                Want us to understand the kind of player you are before your invite? Tap what fits. Every field is optional.
               </p>
               <Labeled label="Main instrument">
                 <ChoiceRow options={INSTRUMENTS} value={d.instrument} onChange={set('instrument')} />
@@ -189,7 +189,7 @@ export function WaitlistModal({
               {detailsSaved ? (
                 <>
                   <span className="chip live" style={{ height: 34, fontSize: 13.5 }}>
-                    <Icon name="check" size={14} /> Saved. See you at the bench.
+                    <Icon name="check" size={14} /> Saved. See you inside Octave.
                   </span>
                   <Pill variant="ghost" className="sm" type="button" onClick={onClose}>
                     Done
@@ -212,12 +212,12 @@ export function WaitlistModal({
           <form onSubmit={submitEmail}>
             <div style={{ padding: '26px 28px 18px', display: 'flex', alignItems: 'flex-start', gap: 14, borderBottom: '1px solid var(--line-2)' }}>
               <div style={{ flex: 1 }}>
-                <span className="eyebrow live">Soft launch</span>
+                <span className="eyebrow live">Private access</span>
                 <h2 className="display" style={{ fontSize: 28, margin: '12px 0 0' }}>
-                  Save your spot.
+                  Request access.
                 </h2>
                 <p style={{ margin: '8px 0 0', fontSize: 14.5, color: 'var(--muted)', lineHeight: 1.5 }}>
-                  One field. You can tell us more after, or never.
+                  One field here. The access section lets you choose beta shaping or release-ready access.
                 </p>
               </div>
               <button type="button" className="iconbtn" onClick={onClose} aria-label="Close" style={{ marginTop: -4 }}>
@@ -241,9 +241,9 @@ export function WaitlistModal({
 
             <div style={{ padding: '18px 24px 24px', borderTop: '1px solid var(--line-2)', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
               <Pill icon="arrowR" variant="accent" type="submit" disabled={busy}>
-                {busy ? 'Joining…' : 'Join the waitlist'}
+                {busy ? 'Joining...' : 'Request access'}
               </Pill>
-              {failed ? <ErrorNote /> : <span style={{ fontSize: 13, color: 'var(--faint)' }}>No spam. Just your invite when a seat opens.</span>}
+              {failed ? <ErrorNote /> : <span style={{ fontSize: 13, color: 'var(--faint)' }}>No spam. Just your invite when access opens.</span>}
             </div>
           </form>
         )}

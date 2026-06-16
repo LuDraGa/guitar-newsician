@@ -1,71 +1,57 @@
 /* ============================================================
    Marketing landing — scoped styles NOT already in globals.css.
 
-   THE LAMPLIT BENCH (landing-only theme): the same luthier's bench
-   as the app, after dark. The landing re-declares the shared design
-   tokens under `.marketing`, so every token-driven primitive from
-   globals.css (.pill / .chip / .surface / .label / fields) re-themes
-   itself without forking the system. The app keeps daylight; the
-   front door is the workshop at night — Rosin reads as lamplight,
-   Verdigris as patina glow. Deliberate, documented exception to the
-   "never dark mode" app doctrine (see execution doc 2026-06-11).
+   PREMIUM DARK (landing-only theme): the landing re-declares shared
+   design tokens under `.marketing`, so token-driven primitives from
+   globals.css (.pill / .chip / .surface / .label / fields) re-theme
+   themselves without forking the system. The page should feel like a
+   quiet, precise music room, not a workstation.
 
    Every selector is scoped under .marketing so nothing leaks into
    the app shell.
    ============================================================ */
 
 .marketing {
-  /* field: near-black warm ebony, two depths */
-  --paper: oklch(0.16 0.01 55);
-  --paper-2: oklch(0.14 0.01 55);
-  /* raised wood surfaces */
-  --card: oklch(0.205 0.012 58);
-  --card-2: oklch(0.245 0.014 60);
-  /* text: pale spruce inks */
-  --ink: oklch(0.95 0.008 80);
-  --ink-2: oklch(0.89 0.01 78);
-  --muted: oklch(0.74 0.014 72);
-  --faint: oklch(0.57 0.014 68);
-  /* light-derived hairlines */
-  --line: oklch(0.95 0.01 80 / 0.13);
-  --line-2: oklch(0.95 0.01 80 / 0.08);
-  --hair: oklch(0.95 0.01 80 / 0.17);
-  /* rosin as lamplight */
-  --accent: oklch(0.7 0.14 58);
-  --accent-soft: oklch(0.7 0.14 58 / 0.16);
-  --accent-ink: oklch(0.8 0.12 68);
-  --accent-strong: oklch(0.8 0.12 68);
-  /* verdigris glow */
-  --live: oklch(0.72 0.11 168);
-  --live-soft: oklch(0.72 0.11 168 / 0.16);
-  --live-ink: oklch(0.8 0.09 168);
-  /* deeper, still warm-tinted shadows for the dark field */
-  --shadow-card: 0 1px 2px oklch(0.07 0.01 60 / 0.5), 0 10px 30px oklch(0.07 0.01 60 / 0.42);
-  --shadow-pop: 0 16px 48px oklch(0.05 0.01 60 / 0.58), 0 2px 10px oklch(0.05 0.01 60 / 0.46);
+  --paper: oklch(0.125 0.006 85);
+  --paper-2: oklch(0.105 0.006 95);
+  --card: oklch(0.18 0.008 90);
+  --card-2: oklch(0.225 0.01 92);
+  --ink: oklch(0.96 0.006 85);
+  --ink-2: oklch(0.88 0.008 86);
+  --muted: oklch(0.72 0.012 90);
+  --faint: oklch(0.55 0.012 92);
+  --line: oklch(0.96 0.008 85 / 0.13);
+  --line-2: oklch(0.96 0.008 85 / 0.08);
+  --hair: oklch(0.96 0.008 85 / 0.17);
+  --accent: oklch(0.73 0.11 63);
+  --accent-soft: oklch(0.73 0.11 63 / 0.14);
+  --accent-ink: oklch(0.82 0.09 68);
+  --accent-strong: oklch(0.82 0.09 68);
+  --live: oklch(0.72 0.1 166);
+  --live-soft: oklch(0.72 0.1 166 / 0.15);
+  --live-ink: oklch(0.8 0.08 166);
+  --shadow-card: 0 1px 2px oklch(0.04 0.006 90 / 0.55), 0 18px 44px oklch(0.04 0.006 90 / 0.36);
+  --shadow-pop: 0 18px 54px oklch(0.03 0.006 90 / 0.6), 0 2px 10px oklch(0.03 0.006 90 / 0.46);
 
   color: var(--ink);
   color-scheme: dark;
   min-height: 100vh;
-  /* the room: a faint grain over two pools of light — the lamp (rosin,
-     upper left) and a whisper of patina (verdigris, upper right) */
   background-color: var(--paper);
   background-image:
-    radial-gradient(oklch(0.96 0.02 80 / 0.022) 1px, transparent 1.4px),
-    radial-gradient(1100px 720px at 16% -6%, oklch(0.27 0.04 58 / 0.55), transparent 62%),
-    radial-gradient(1000px 640px at 88% 2%, oklch(0.23 0.03 168 / 0.28), transparent 58%);
+    radial-gradient(oklch(0.96 0.02 80 / 0.018) 1px, transparent 1.4px),
+    linear-gradient(180deg, oklch(0.16 0.01 90), var(--paper) 32%, var(--paper-2));
   background-size:
     22px 22px,
-    auto,
     auto;
 }
 
 /* overscroll / rubber-band shows the same night field, not the app's daylight */
 html:has(.marketing) {
-  background: oklch(0.14 0.01 55);
+  background: oklch(0.105 0.006 95);
 }
 
-/* the accent pill carries dark ink on lamplight amber (the light theme's
-   near-white text would sit at ~3:1 here) */
+/* the accent pill carries dark ink on amber (the light theme's
+   near-white text would sit too low here) */
 .marketing .pill.accent {
   color: oklch(0.17 0.03 60);
 }
@@ -91,6 +77,12 @@ html:has(.marketing) {
   .marketing .wrap {
     padding: 0 18px;
   }
+  .marketing .hero-title {
+    font-size: 42px;
+  }
+  .marketing .final-title {
+    font-size: 38px;
+  }
 }
 
 /* eyebrow tag with leading dot */
@@ -99,7 +91,7 @@ html:has(.marketing) {
   align-items: center;
   gap: 9px;
   font-size: 11px;
-  letter-spacing: 0.13em;
+  letter-spacing: 0;
   text-transform: uppercase;
   font-weight: 650;
   color: var(--muted);
@@ -117,7 +109,7 @@ html:has(.marketing) {
   background: var(--live);
 }
 
-/* faint annotation pill (luthier-bench motif) — dark glass under the lamp */
+/* faint annotation pill */
 .marketing .annot {
   display: inline-flex;
   align-items: center;
@@ -133,6 +125,55 @@ html:has(.marketing) {
     inset 0 0 0 1px var(--line),
     0 6px 18px oklch(0.06 0.01 60 / 0.4);
   backdrop-filter: blur(6px);
+}
+
+.marketing .hero-title {
+  font-size: 62px;
+  line-height: 0.98;
+}
+
+.marketing .final-title {
+  font-size: 56px;
+  line-height: 1;
+}
+
+.marketing .hero-proof {
+  isolation: isolate;
+}
+
+.marketing .hero-proof-media {
+  background:
+    linear-gradient(180deg, oklch(0.2 0.012 90 / 0.78), transparent 44%),
+    linear-gradient(135deg, oklch(0.16 0.012 166 / 0.46), oklch(0.16 0.01 90 / 0.1) 46%, oklch(0.22 0.015 64 / 0.2));
+}
+
+.marketing .hero-proof-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(160px, 0.85fr);
+  gap: 18px;
+  padding-top: 4px;
+}
+
+.marketing .hero-step {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 99px;
+  background: var(--card-2);
+  color: var(--accent-ink);
+  font-size: 11px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.marketing .hero-maestro-bubble {
+  margin-top: auto;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 15px 16px;
+  border-top: 1px solid var(--line);
+  background: oklch(0.14 0.008 90 / 0.64);
 }
 
 /* form fields */
@@ -230,7 +271,7 @@ html:has(.marketing) {
   }
 }
 
-/* bench scene (scene 2) — pinned + scrubbed on desktop, stacked on mobile */
+/* songbook scene — pinned + scrubbed on desktop, stacked on mobile */
 .marketing .bench-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
@@ -258,7 +299,7 @@ html:has(.marketing) {
   }
 }
 
-/* atmosphere film layer — graded toward warm-lamplight-on-near-black.
+/* atmosphere film layer — graded toward premium near-black.
    Hidden on small screens (bandwidth) and under reduced motion. */
 .marketing .film-layer {
   position: absolute;
@@ -279,8 +320,8 @@ html:has(.marketing) {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(120% 90% at 20% 0%, transparent 30%, oklch(0.14 0.01 55 / 0.88) 78%),
-    linear-gradient(oklch(0.14 0.01 55 / 0.45), oklch(0.14 0.01 55 / 0.92));
+    linear-gradient(90deg, transparent 0%, oklch(0.12 0.006 85 / 0.72) 62%),
+    linear-gradient(oklch(0.12 0.006 85 / 0.45), oklch(0.105 0.006 95 / 0.92));
 }
 
 @media (max-width: 860px), (prefers-reduced-motion: reduce) {
@@ -309,6 +350,18 @@ html:has(.marketing) {
   .marketing .fit-grid {
     grid-template-columns: 1fr !important;
   }
+  .marketing .maestro-bands {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .marketing .access-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .marketing .feel-transform > div {
+    grid-template-columns: 1fr !important;
+  }
+  .marketing .feel-transform .chip {
+    justify-content: center;
+  }
 }
 
 @media (max-width: 680px) {
@@ -320,6 +373,22 @@ html:has(.marketing) {
   }
   .marketing .footer-brand {
     grid-column: 1 / -1;
+  }
+  .marketing .hero-proof-media {
+    min-height: 0 !important;
+  }
+  .marketing .hero-proof-split {
+    grid-template-columns: 1fr;
+  }
+  .marketing .maestro-bands {
+    grid-template-columns: 1fr !important;
+  }
+  .marketing .concierge-launcher {
+    width: 54px !important;
+    padding: 0 !important;
+  }
+  .marketing .concierge-launcher span {
+    display: none;
   }
 }
 

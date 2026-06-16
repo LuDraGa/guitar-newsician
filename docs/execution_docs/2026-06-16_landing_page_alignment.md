@@ -25,10 +25,23 @@ The alignment source is the Gemini chat in `/Users/abhiroopprasad/Downloads/Octa
 - [x] Resolve the hero promise structure.
 - [x] Resolve the primary audience.
 - [x] Resolve the guitar-first stance.
-- [ ] Resolve the hero copy direction.
+- [x] Resolve the hero copy direction.
 - [x] Resolve the landing-page flow.
-- [ ] Resolve the waitlist segmentation and CTA language.
-- [ ] Convert the aligned direction into implementation tasks.
+- [x] Resolve the waitlist segmentation and CTA direction.
+- [x] Resolve artifact/songbook role.
+- [x] Resolve the no-performance-recording personalization boundary.
+- [x] Resolve product concierge role.
+- [x] Resolve final conversion emotion.
+- [x] Convert the aligned direction into implementation tasks.
+- [x] Implement a Maestro-led hero with a code-rendered aspirational proof mock for the future prerecorded video.
+- [x] Reorder the page so Maestro leads before the songbook/artifact proof section.
+- [x] Keep stems, chords, tab, lyrics, sheet music, and MIDI/piano-roll visible as reusable songbook surfaces.
+- [x] Add Maestro capability bands for decoding, guitar path, practice, arrangement, and feel transformation.
+- [x] Replace strong public personalization claims with structured guidance from song evidence and user questions.
+- [x] Align Octavia as a product-only concierge in site copy and knowledge-base answers.
+- [x] Add dual access tracks for active beta shaping and release-ready access.
+- [x] Verify with `pnpm typecheck`, `pnpm lint`, and `pnpm build` under Node 22.20.0.
+- [x] Browser-verify the redesigned landing page.
 
 ## Progress Log
 
@@ -168,6 +181,78 @@ The alignment source is the Gemini chat in `/Users/abhiroopprasad/Downloads/Octa
 
 ---
 
+### 2026-06-16 14:32
+
+**Action**: Captured batch alignment answers for the landing redesign.
+**Result**: The page direction is now Maestro-led, narrative, guitar-first, premium/minimal, and honest about product maturity primarily through FAQ/access framing.
+**Notes**: The user approved the narrative arc, capability bands, late feel-transformation wow moment, two-track waitlist, and prerecorded hero video direction with an aspirational mock fallback.
+
+---
+
+### 2026-06-16 14:32
+
+**Action**: Captured the artifact/songbook role.
+**Result**: Stems, chords, tabs, lyrics, sheet music, and MIDI/piano roll must remain visible first-class surfaces. They are trust evidence, but also the user's songbook: material to revisit, repeat, play from, and ask further questions about after Maestro has taught the song.
+**Notes**: Do not force-feed Maestro as the only way to use Octave. Maestro helps the learner understand and chunk these artifacts, but the artifacts remain directly useful.
+
+---
+
+### 2026-06-16 14:32
+
+**Action**: Captured the personalization/maturity boundary.
+**Result**: Do not foreground a personalization claim for now. Without recording the user's playing, "personalized coach" can create the wrong expectation that Maestro listens to and grades performance.
+**Notes**: Instead, say that Maestro understands the music deeply and teaches it in a structured, proactive way. Subtly make clear Octave does not replace a music teacher; it is valuable for self-learners and for teachers guiding students.
+
+---
+
+### 2026-06-16 14:32
+
+**Action**: Captured the product concierge role.
+**Result**: Keep Octavia as the product-only concierge, but align its content and guardrails with the new positioning.
+**Notes**: Octavia must not compete with Maestro. It answers product questions; Maestro is the in-product music coach.
+
+---
+
+### 2026-06-16 14:32
+
+**Action**: Captured the final conversion emotion.
+**Result**: The landing page should end on exclusivity and premium quality, not broad urgency or generic partnership language.
+**Notes**: The design should be reshaped toward minimalist premium quality to support that emotion.
+
+---
+
+### 2026-06-16 14:34
+
+**Action**: Closed the conceptual alignment pass.
+**Result**: Hero copy direction is resolved at the strategic level: Maestro-led invitation, two-beat desire plus rigor, aspirational proof, and premium minimalist tone. Exact copy remains an implementation artifact.
+**Notes**: Next useful step is converting the brief into a concrete page skeleton, draft copy, and redesign tasks.
+
+---
+
+### 2026-06-16 17:04
+
+**Action**: Implemented the first landing-page redesign pass.
+**Result**: The public page now leads with Maestro, uses an aspirational Maestro session mock in the hero, reorders the flow to Maestro before songbook proof, keeps the core artifacts visible, adds capability bands, adds the late feel-transformation callout, and ends with separate beta-shaping and release-access tracks.
+**Notes**: Updated metadata, visible page copy, footer/nav labels, waitlist CTA copy, and Octavia's local product knowledge base. Removed public "personalized coach" framing that could imply performance recording; the FAQ now states that Maestro does not record or grade the learner's playing today.
+
+---
+
+### 2026-06-16 17:04
+
+**Action**: Ran implementation checks.
+**Result**: `pnpm typecheck`, `pnpm lint`, and `pnpm build` passed using Node 22.20.0.
+**Notes**: The default shell Node was 18.20.3 and the bundled Codex Node was 24.14.0; both were rejected by the repo's strict `22.x` engine, so the checks were run with `/Users/abhiroopprasad/.nvm/versions/node/v22.20.0/bin` at the front of `PATH`.
+
+---
+
+### 2026-06-16 17:04
+
+**Action**: Browser-verified the redesigned landing page on the local dev server.
+**Result**: Desktop hero, Maestro section, songbook section, and dual-track access section rendered without console errors or horizontal overflow. Mobile viewport also had no horizontal overflow; the concierge launcher was tightened to icon-only on mobile so it does not cover hero copy.
+**Notes**: The dev server required running outside the sandbox because binding `0.0.0.0:3000` failed with `EPERM` inside the sandbox.
+
+---
+
 ## Decisions Made
 
 1. **Decision**: Maestro leads the landing-page story; Octave is the system that powers the experience.
@@ -237,6 +322,26 @@ The alignment source is the Gemini chat in `/Users/abhiroopprasad/Downloads/Octa
 17. **Decision**: Use feel transformation as a late-page wow moment.
    - **Rationale**: Asking Maestro to change a song's mood through the guitar part is powerful, but it needs prior proof of music understanding and arrangement capability to feel credible.
    - **Alternatives Considered**: Lead the hero with mood transformation; present it as a routine feature beside stems and tabs; omit it until after launch.
+
+18. **Decision**: Keep musical artifacts visible as songbook surfaces and trust proof.
+   - **Rationale**: Octave is not only a Maestro conversation. Stems, chords, tabs, lyrics, sheet music, and MIDI/piano roll are the materials the learner comes back to for repetition, playing, review, and further questions.
+   - **Alternatives Considered**: Hide artifacts behind Maestro; present artifacts only as technical proof; lead with artifacts as the whole product.
+
+19. **Decision**: Avoid a public personalization claim for now.
+   - **Rationale**: Without recording the user's playing, "personalized coach" can imply performance listening/grading. The stronger current claim is that Maestro understands the music deeply and teaches it in a structured, proactive way.
+   - **Alternatives Considered**: Lead with personalized AI coach; imply performance feedback; make profile memory the main differentiator.
+
+20. **Decision**: Position Octave as a complement to teachers, not a replacement.
+   - **Rationale**: Octave is valuable for self-learners and for music teachers guiding students, but claiming to replace teachers would set the wrong expectation and weaken trust.
+   - **Alternatives Considered**: Teacher replacement positioning; self-learner-only positioning.
+
+21. **Decision**: Keep Octavia as a product-only concierge and align its guardrails.
+   - **Rationale**: Octavia can help visitors understand the product, but the page must preserve the distinction between product concierge and in-product music coach.
+   - **Alternatives Considered**: Remove Octavia; blur Octavia with Maestro; leave current content unchanged.
+
+22. **Decision**: End on premium exclusivity.
+   - **Rationale**: The waitlist should feel like access to a carefully shaped, high-quality musical room, not a generic SaaS signup funnel.
+   - **Alternatives Considered**: Urgency; partnership/co-builder emotion only; broad open signup.
 
 ## References
 
