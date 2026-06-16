@@ -11,9 +11,9 @@
 - **Working on:** Maestro **base-agent comprehension = Slice 0** — making the fact pack/agent actually *consume* the per-stem substrate Prep A landed. It's the bridge from Prep A → Slice 1 (Section × Role briefing).
 - **Why:** the base agent didn't use stem info (dropped the precise identity Prep A wrote) and over/under-pulled context. Slice 1's graph is a *deterministic rollup of the fact pack*, so the fact pack must carry the role axis truthfully first.
 - **Done & committed:** pre-req substrate (`04d4f79`); baseline A+B+C agent (`9659032`).
-- **Done, UNCOMMITTED:** Slice 0 **data-core** — 0.1 stem identity · 0.2 per-stem detail + `get_stem` · 0.4 section activity + `get_section_activity` · `get_stems` roster. **14/14 pytest green.**
+- **Done & committed (`d57c69f`):** Slice 0 **data-core** — 0.1 stem identity · 0.2 per-stem detail + `get_stem` · 0.4 section activity + `get_section_activity` · `get_stems` roster. **14/14 pytest green.** (Tree clean; build from here.)
 - **▶ NEXT ACTION:** **0.2b (proposed, awaiting go)** — live test surfaced that a stem with MIDI but no per-stem analysis (the bass) can't be compared to the progression because the fact pack drops note events. Fix: add **dominant pitch classes per section** (12-bin PC histogram in `note_activity_by_window`) to `activity_by_section` + `get_stem`. Then continue: **0.3 trim → 0.5 overview (cache-friendly) → 0.6 prompt + parts specialist → 0.8 next-step CTAs.**
-- **Waiting on the user:** (1) go on 0.2b; (2) whether to commit the data-core as a checkpoint.
+- **Waiting on the user:** go on 0.2b (already greenlit if resuming via the paste-in prompt).
 
 ## Read in this order (the thread)
 
@@ -41,7 +41,7 @@
 - `pytest` (Seam A/B/C) is the deterministic gate; **never call a live LLM in tests**.
 - **Prompt caching matters:** OpenAI auto-caches the static prefix. Keep it stable — the 0.5 overview goes in the system prefix (not per-turn), the agent cache key gains the fact-pack version, and the usage observer must surface **`cached_tokens`** so the trace proves cache hits.
 
-## Files changed in the current (uncommitted) data-core batch
+## Files changed in the data-core batch (committed `d57c69f`)
 
 - `maestro/maestro_agent/werecode_data.py` — `_stem_info` (getStemInfo port) + `list_stems` surfaces id/label/role/tags.
 - `maestro/maestro_agent/fact_pack.py` — per-stem chords/sections, `activity_by_section`, `get_stems`/`get_stem`/`get_section_activity`, `FACT_PACK_VERSION`→3.
