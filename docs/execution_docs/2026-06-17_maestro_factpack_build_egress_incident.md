@@ -5,7 +5,8 @@
 | **Date** | 2026-06-17 |
 | **Branch** | `maestro/agent-buildout` |
 | **Scope** | `maestro/` Python only (no schema/Next changes) |
-| **Status** | 🟢 #1 + #2 implemented (66/66 pytest green) — awaiting agent restart + live verify. Minor follow-ups (MIDI double-parse, double `get_song`) deferred. |
+| **Status** | ✅ #1 + #2 committed `852c8f8` (2026-06-17T23:31:47+05:30) — awaiting agent restart + live verify. Minor follow-ups (MIDI double-parse, double `get_song`) deferred. |
+| **Commit** | `852c8f8` — "Collapse fact-pack Supabase egress: one analysis fetch + a projected status read" (egress-only; 0.7 basic_stats deliberately left uncommitted in the tree, peeled out of the shared `fact_pack.py`/`SESSION_HANDOFF.md`). |
 
 # Problem & Impact
 
