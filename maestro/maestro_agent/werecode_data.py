@@ -60,6 +60,10 @@ class WereCodeSongData:
         # needs); scope DB calls to the `werecode` schema per-call via .schema().
         self.client = create_client(settings.supabase_url, settings.supabase_service_role_key)
         self._asset_cache: dict[str, list[dict[str, Any]]] = {}
+        # Current non-synthetic analysis rows, fetched once per song and indexed by
+        # asset_id (mirrors `_asset_cache`). The build resolves the mix + every stem
+        # from this one map instead of re-pulling all analysis blobs per asset.
+        self._analysis_cache: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
     def _table(self, name: str):
         return self.client.schema(self._schema).table(name)
@@ -216,20 +220,37 @@ class WereCodeSongData:
     ) -> dict[str, Any] | None:
         if not asset_ids:
             return None
+        index = self._current_analyses(song_id)
+        rows: list[dict[str, Any]] = []
+        for asset_id in asset_ids:
+            rows.extend(index.get(asset_id, []))
+        return _analysis_envelope_from_rows(rows, duration_sec=duration_sec)
 
+    def _current_analyses(self, song_id: str) -> dict[str, list[dict[str, Any]]]:
+        """All current, non-synthetic analysis rows for the song — fetched ONCE per
+        process per song (mirrors `_asset_cache`) and indexed by `asset_id`. The
+        fact-pack build resolves the mix analysis plus every stem analysis from this
+        single map, replacing the old `(1 + analyzed-stems)`× full-blob over-fetch
+        (each call previously pulled *every* analysis `data` blob, then kept one)."""
+        if song_id not in self._analysis_cache:
+            self._analysis_cache[song_id] = _index_analyses_by_asset(
+                self._fetch_current_analysis_rows(song_id)
+            )
+        return self._analysis_cache[song_id]
+
+    def _fetch_current_analysis_rows(self, song_id: str) -> list[dict[str, Any]]:
+        """The one network read behind `_current_analyses`. Excludes synthetic
+        analyzers (fact packs / overviews) server-side so their large `data` blobs
+        — the biggest rows in the schema — never cross the wire on a build."""
         resp = (
             self._table("analysis_results")
             .select("asset_id,analyzer_name,analyzer_version,ok,elapsed_sec,error,data,created_at")
             .eq("song_id", song_id)
             .eq("is_current", True)
+            .not_.in_("analyzer_name", list(SYNTHETIC_ANALYZERS))
             .execute()
         )
-        rows = [
-            row
-            for row in (resp.data or [])
-            if row.get("asset_id") in asset_ids
-        ]
-        return _analysis_envelope_from_rows(rows, duration_sec=duration_sec)
+        return resp.data or []
 
     # ---- MIDI blobs --------------------------------------------------------
 
@@ -263,6 +284,10 @@ class WereCodeSongData:
                 "data": pack,
             }
         ).execute()
+        # A build is the natural refresh point: drop the cached analysis index so the
+        # next read re-derives from current rows (a rebuild was triggered precisely
+        # because inputs may have moved).
+        self._analysis_cache.pop(song_id, None)
 
     def get_latest_fact_pack(self, song_id: str) -> dict[str, Any] | None:
         resp = (
@@ -276,6 +301,35 @@ class WereCodeSongData:
         )
         rows = resp.data or []
         return rows[0]["data"] if rows else None
+
+    def get_latest_fact_pack_meta(self, song_id: str) -> dict[str, Any] | None:
+        """Projected metadata for the latest fact pack — `version` / `created_at` /
+        `dependency_fingerprint` only, read via PostgREST JSON-path projection so the
+        whole `data` blob (the largest row in the schema) never transfers. Drives the
+        read-only `status()` freshness poll, hit on every song-select; the full pack
+        still loads through `get_latest_fact_pack` on the build/query path."""
+        resp = (
+            self._table("analysis_results")
+            .select(
+                "pack_version:data->version,"
+                "pack_created_at:data->created_at,"
+                "dependency_fingerprint:data->dependency_fingerprint"
+            )
+            .eq("song_id", song_id)
+            .eq("analyzer_name", FACT_PACK_ANALYZER)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            return None
+        row = rows[0]
+        return {
+            "version": row.get("pack_version"),
+            "created_at": row.get("pack_created_at"),
+            "dependency_fingerprint": row.get("dependency_fingerprint"),
+        }
 
 
 # --- stem identity (Python port of src/lib/music/stem-metadata.ts getStemInfo) ---
@@ -400,6 +454,23 @@ def _stem_info(asset: dict[str, Any]) -> dict[str, Any]:
         if tag.lower() != label.lower()
     ]
     return {"id": stem_id, "role": role, "label": label, "tags": tags}
+
+
+def _index_analyses_by_asset(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Group current analysis rows by `asset_id` — the in-memory half of the
+    single-fetch analysis cache (pure, unit-tested directly). Drops rows that can't
+    be resolved to an asset: synthetic analyzers (fact packs / overviews) and any
+    row with no usable `asset_id`. Defensive against the server-side filter — a
+    synthetic row that still arrives is excluded here too."""
+    index: dict[str, list[dict[str, Any]]] = {}
+    for row in rows or []:
+        name = row.get("analyzer_name")
+        if not isinstance(name, str) or not name or name in SYNTHETIC_ANALYZERS:
+            continue
+        asset_id = row.get("asset_id")
+        if isinstance(asset_id, str) and asset_id:
+            index.setdefault(asset_id, []).append(row)
+    return index
 
 
 def _current_asset_ids(assets: list[dict[str, Any]], kind: str, *, stem_id: str | None = None) -> set[str]:

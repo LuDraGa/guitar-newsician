@@ -78,8 +78,10 @@ class SongFactPackService:
         """Cheap, read-only freshness check: does the latest pack still reflect
         the song's current inputs? Recomputes the dependency fingerprint from
         metadata only (no MIDI, no rebuild) and diffs it against the stored one.
-        Drives the chat-window staleness signal; never triggers a build."""
-        latest = self.data.get_latest_fact_pack(song_id)
+        Drives the chat-window staleness signal; never triggers a build. Reads only
+        the pack's projected metadata (version / created_at / fingerprint) — never
+        the full `data` blob — so a frequent poll stays cheap."""
+        latest = self.data.get_latest_fact_pack_meta(song_id)
         if latest is None:
             return {
                 "song_id": song_id,

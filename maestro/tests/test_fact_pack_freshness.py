@@ -67,8 +67,17 @@ class _FakeData:
         self._latest = latest
         self._current_sig = current_sig
 
-    def get_latest_fact_pack(self, song_id: str) -> dict | None:
-        return self._latest
+    def get_latest_fact_pack_meta(self, song_id: str) -> dict | None:
+        # status() must read the projected metadata (version / created_at /
+        # fingerprint), never the full pack blob — this fake offers ONLY the meta
+        # read, so a regression back to get_latest_fact_pack would AttributeError.
+        if self._latest is None:
+            return None
+        return {
+            "version": self._latest.get("version"),
+            "created_at": self._latest.get("created_at"),
+            "dependency_fingerprint": self._latest.get("dependency_fingerprint"),
+        }
 
     def dependency_signature(self, song_id: str) -> dict:
         return self._current_sig
