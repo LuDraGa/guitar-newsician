@@ -518,15 +518,16 @@ def render_song_overview(overview: dict[str, Any]) -> str:
         "ask what plays where with get_section_activity:"
     )
     lines.append("")
-    lines.append("| id | part | role | midi | analysis | loudness (LUFS) |")
-    lines.append("|----|------|------|:----:|:--------:|----------------:|")
+    lines.append("| id | part | role | tags | midi | analysis | loudness (LUFS) |")
+    lines.append("|----|------|------|------|:----:|:--------:|----------------:|")
     for part in parts:
         loud = part.get("integrated_loudness")
         lines.append(
-            "| {id} | {label} | {role} | {midi} | {analysis} | {loud} |".format(
+            "| {id} | {label} | {role} | {tags} | {midi} | {analysis} | {loud} |".format(
                 id=part.get("stem_id") or "?",
                 label=part.get("label") or "—",
                 role=part.get("role") or "—",
+                tags=", ".join(part.get("tags") or []) or "—",
                 midi="✓" if part.get("has_midi") else "·",
                 analysis="✓" if part.get("has_analysis") else "·",
                 loud=_fmt_num(loud) if loud is not None else "—",

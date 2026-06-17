@@ -11,7 +11,7 @@ import io
 
 import mido
 
-from maestro_agent.agent import _agent_cache_key
+from maestro_agent.agent import _agent_cache_key, _make_subagents, describe_tools
 from maestro_agent.fact_pack import (
     SongFactPackQueries,
     _stem_pitch_class_profile,
@@ -381,6 +381,17 @@ def test_render_song_overview_includes_conflict_and_parts():
     assert "Lead Guitar" in text and "Bass" in text
     assert "get_stem(stem_id)" in text
     assert "Parts (2)" in text
+    # 0.6 — the parts table renders a tags column (comma-joined; "—" when empty).
+    assert "| id | part | role | tags |" in text
+    assert "solo" in text
+
+
+def test_render_song_overview_renders_tags_column_with_empty_fallback():
+    pack = _overview_pack()
+    pack["midi"]["stems"][1]["tags"] = []  # Bass has no tags
+    text = render_song_overview(build_song_overview(pack))
+    bass_row = next(line for line in text.splitlines() if "Bass" in line and "|" in line)
+    assert "| — |" in bass_row  # empty tags render as the em dash fallback
 
 
 def test_render_song_overview_handles_missing_key():
@@ -419,3 +430,54 @@ def test_agent_cache_key_distinguishes_model_and_pack_identity():
     assert key("s1", "m", None) == key("s1", "m", None)
     # Deterministic for the same inputs (the cached prefix must be reused).
     assert key("s1", "m", pack_v5) == key("s1", "m", pack_v5)
+
+
+# --- 0.6: parts specialist + retrieval-discipline docstrings (Seam B) --------
+
+
+class _FakeFactPack:
+    """describe_tools / _make_subagents only inspect — they never read a song. The
+    closures are built with this stub and only have their signatures/docstrings read."""
+
+    def query(self, song_id: str):  # noqa: ARG002 - closures capture but never call it here
+        return object()
+
+
+def _subagents_by_name() -> dict:
+    return {sub["name"]: sub for sub in _make_subagents(model=object())}
+
+
+def _tools_by_name() -> dict:
+    return {tool["name"]: tool for tool in describe_tools(_FakeFactPack())}
+
+
+def test_parts_agent_registered_for_arrangement_and_role():
+    subs = _subagents_by_name()
+    assert "parts_agent" in subs  # new fifth specialist
+    parts = subs["parts_agent"]
+    desc = parts["description"].lower()
+    assert "arrangement" in desc or "role" in desc
+    # Soft prompt-level guidance leads with the per-part tools (no hard tool-locking).
+    assert "get_section_activity" in parts["system_prompt"]
+    assert "get_stem" in parts["system_prompt"]
+
+
+def test_midi_agent_repointed_to_per_part_tools():
+    midi = _subagents_by_name()["midi_agent"]
+    prompt = midi["system_prompt"]
+    # Repointed to the note-level/playability lens over stems...
+    assert "get_stem" in prompt and "get_section_activity" in prompt
+    # ...with get_midi_tracks demoted to the mix-level all_src only.
+    assert "all_src" in prompt
+
+
+def test_get_stems_docstring_demoted_to_thin_use_case():
+    desc = _tools_by_name()["get_stems"]["description"].lower()
+    assert "overview" in desc  # the roster already lives in the seeded overview
+    assert "refresh" in desc and "fallback" in desc  # its two thin remaining jobs
+
+
+def test_pitch_class_fields_named_in_drill_tool_docstrings():
+    tools = _tools_by_name()
+    assert "pitch_class_profile" in tools["get_stem"]["description"]
+    assert "dominant_pitch_classes" in tools["get_section_activity"]["description"]

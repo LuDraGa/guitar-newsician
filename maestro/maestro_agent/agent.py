@@ -53,9 +53,12 @@ Active song: {song_id}
 Use only the provided SongFactPack tools for this song. The SongFactPack is built from WereCode's stored analysis and per-stem MIDI for the song.
 
 Important behavior:
-- Never request raw full analysis JSON. Pull filtered sections, bars, chords, key, MIDI tracks, slices, or transposed previews through the tools.
+- Never request raw full analysis JSON. Pull filtered sections, bars, chords, key, MIDI tracks, parts/stems, slices, or transposed previews through the tools.
 - For key questions, distinguish detected_key from teaching_key. Prefer teaching_key for learner-facing guidance while preserving detected_key as evidence.
-- Call a specialist subagent only if a focused structure, harmony, rhythm, or MIDI pass would improve the answer.
+- Stems are the song's parts — each carries its own identity, key, tempo, chords, loudness, and pitch content. The parts roster and the key headline are ALREADY in the seeded overview above: do not call get_stems or get_key just to restate them.
+- Scope every answer to the roster: pick the relevant part(s), then drill with get_stem(stem_id) or get_section_activity. Compare parts only when the question asks (e.g. lead vs rhythm guitar); never dump all parts.
+- For a per-part or monophonic part's key/harmony, drill the stem and compare its dominant_pitch_classes (per section, on get_section_activity) or pitch_class_profile (whole stem, on get_stem) to the mix chord roots — reconciling teaching vs detected key first. Trust the part's pitch content over a chord label for bass/monophonic parts.
+- Call a specialist subagent only if a focused structure, harmony, rhythm, MIDI/note-level, or parts/arrangement pass would improve the answer.
 - Be honest about confidence and evidence; music analysis is uncertain and sometimes conflicting. Surface confidence when it is low or the detected and teaching keys disagree.
 - Stay guitar-aware: distinguish what the guitar should play from what is happening in the full mix.
 - The UI renders Markdown: use compact tables, inline code, and fenced code blocks when they make the answer clearer.
@@ -210,11 +213,11 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         return _safe_fact_query(query.get_midi_tracks)
 
     def get_stems() -> dict[str, Any]:
-        """Return a lightweight stem/instrument roster (id, label, role, tags, has_midi, has_analysis, loudness). Start here before drilling into one part."""
+        """Return a lightweight stem/instrument roster (id, label, role, tags, has_midi, has_analysis, loudness). The parts roster (incl. tags) is already in your seeded overview — don't call this to list parts. Use only to refresh the roster live after a song change mid-conversation, or as a fallback if the overview is unavailable."""
         return _safe_fact_query(query.get_stems)
 
     def get_stem(stem_id: str) -> dict[str, Any]:
-        """Return full detail for ONE stem/part by id: identity, MIDI summary, its own key/tempo/chords/sections, and per-section activity."""
+        """Return full detail for ONE stem/part by id: identity, MIDI summary, its own key/tempo/chords/sections, and per-section activity. Includes pitch_class_profile (the part's whole-song pitch-class lean) — compare it to the mix chord roots for monophonic/per-part key and harmony questions."""
         return _safe_fact_query(query.get_stem, stem_id)
 
     def get_section_activity(
@@ -222,7 +225,7 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         start_sec: float | None = None,
         end_sec: float | None = None,
     ) -> dict[str, Any]:
-        """Return which stems are active (and a compact per-part summary) in a section, by section_index or a time range. Use for 'what is each instrument doing here / what should the guitar play in this section'."""
+        """Return which stems are active (and a compact per-part summary) in a section, by section_index or a time range. Use for 'what is each instrument doing here / what should the guitar play in this section'. Each active part carries dominant_pitch_classes for that section — compare to the mix chord roots when reconciling a part's key or harmony."""
         return _safe_fact_query(query.get_section_activity, section_index, start_sec, end_sec)
 
     def get_song_slice(start_sec: float, end_sec: float) -> dict[str, Any]:
@@ -304,12 +307,25 @@ def _make_subagents(model: Any) -> list[dict[str, Any]]:
             ),
         },
         {
-            "name": "midi_agent",
-            "description": "Use for MIDI parts, playable phrases, note ranges, instruments, and stem summaries.",
+            "name": "parts_agent",
+            "description": "Use for arrangement and per-part role questions: which part plays what and where, comparing two parts (e.g. lead vs rhythm guitar), and how the parts layer across sections.",
             "model": model,
             "system_prompt": (
-                "You are Maestro's MIDI specialist. Use get_midi_tracks and get_song_slice. "
-                "Keep findings tied to MIDI channels, programs, pitch ranges, and stems."
+                "You are Maestro's parts/arrangement specialist. Lead with get_section_activity "
+                "(what each part does per section) and get_stem(stem_id) (one part's full detail). "
+                "The parts roster is already in the seeded overview — scope to it and drill the relevant "
+                "part(s); never dump every part. For a part's harmony, compare its dominant_pitch_classes / "
+                "pitch_class_profile to the mix chord roots rather than restating the global key."
+            ),
+        },
+        {
+            "name": "midi_agent",
+            "description": "Use for MIDI note-level and playability questions: note ranges, phrasing, programs/channels, and how a part sits on the fretboard.",
+            "model": model,
+            "system_prompt": (
+                "You are Maestro's MIDI/note-level specialist. Drill one part with get_stem(stem_id) and "
+                "use get_section_activity for where notes fall; reach for get_midi_tracks only for the "
+                "mix-level all_src MIDI. Keep findings tied to pitch ranges, programs/channels, and playability."
             ),
         },
     ]
