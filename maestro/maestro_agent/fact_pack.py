@@ -9,6 +9,7 @@ as an `analysis_results` row instead of a JSON file beside the track.
 
 from __future__ import annotations
 
+import math
 import re
 import statistics
 import time
@@ -18,6 +19,11 @@ from maestro_agent.midi import dominant_pitch_classes, note_activity_by_window, 
 from maestro_agent.werecode_data import AnalysisUnavailable, WereCodeSongData
 
 FACT_PACK_SCHEMA = "maestro.song_fact_pack.v1"
+# v6 (Slice 0.7): the pack reads the `basic_stats` analyzer (previously listed in
+# analysis_keys but never consumed) into a `mix_dynamics` block — peak/RMS/crest in
+# dBFS + a coarse band + a zcr brightness hint — and each analyzed stem gains the
+# same derived `dynamics` inside its analysis. Bumping rebuilds packs once so the
+# field is present.
 # v5 (2026-06-16, Freshness): the pack stores a `dependency_fingerprint` (asset
 # checksums + current analysis-row identities) so a re-analysis is detectable for
 # the staleness signal. Bumping rebuilds every pack once so the field is present.
@@ -26,7 +32,7 @@ FACT_PACK_SCHEMA = "maestro.song_fact_pack.v1"
 # v3: stems carry precise identity (label/tags), their own bounded chord
 # progression + sections, and per-section activity. Bumping forces ensure_current
 # to rebuild older packs so the role axis is populated.
-FACT_PACK_VERSION = 5
+FACT_PACK_VERSION = 6
 MAX_TOOL_CHORDS = 64
 MAX_TRANSPOSE_PREVIEW = 96
 MAX_STEM_PROGRESSION = 64
@@ -128,6 +134,9 @@ class SongFactPackService:
         chords = _build_chords(analyses)
         tempo = _build_tempo(analyses)
         key = _build_key(analyses, chords)
+        # 0.7 — the mix's whole-track loudness/dynamics picture from basic_stats
+        # (peak/RMS/crest in dBFS + a coarse band). Absent basic_stats → None.
+        mix_dynamics = _build_mix_dynamics(analyses)
         source_hashes = self.data.asset_checksums(song_id)
 
         return {
@@ -168,6 +177,7 @@ class SongFactPackService:
             },
             "tempo": tempo,
             "key": key,
+            "mix_dynamics": mix_dynamics,
             "sections": sections,
             "bar_grid": bar_grid,
             "chords": chords,
@@ -230,6 +240,10 @@ class SongFactPackService:
                 "chords": stem_chords["progression"][:MAX_STEM_PROGRESSION],
                 "chords_truncated": stem_chords["progression_count"] > MAX_STEM_PROGRESSION,
                 "sections": _build_sections(analyses),
+                # 0.7 — this part's own loudness/dynamics from its basic_stats. A
+                # whole-stem crest/peak/RMS picture, distinct from integrated_loudness
+                # (LUFS): None when the stem has no basic_stats.
+                "dynamics": _build_mix_dynamics(analyses),
             }
         return summary
 
@@ -401,6 +415,9 @@ class SongFactPackQueries:
             "range": {"start_sec": start, "end_sec": end},
             "tempo": pack.get("tempo", {}),
             "key": pack.get("key", {}),
+            # 0.7 — whole-mix loudness/dynamics (peak/RMS/crest); global like
+            # tempo/key, so the same readout regardless of the requested range.
+            "mix_dynamics": pack.get("mix_dynamics"),
             "sections": _filter_range(pack.get("sections", []), start, end),
             "bars": _filter_range(pack.get("bar_grid", {}).get("bars", []), start, end),
             "chords": self.get_chords(start, end, limit=MAX_TOOL_CHORDS),
@@ -477,6 +494,8 @@ def build_song_overview(pack: dict[str, Any]) -> dict[str, Any]:
         "section_count": len(pack.get("sections", [])),
         "overall_confidence": confidence.get("overall"),
         "available_analyses": list(pack.get("evidence", {}).get("analysis_keys", [])),
+        # 0.7 — whole-mix loudness/dynamics (None when basic_stats is absent).
+        "mix_dynamics": pack.get("mix_dynamics"),
         "parts": [_stem_roster_entry(stem) for stem in stems],
         "fact_pack_version": pack.get("version"),
     }
@@ -510,6 +529,9 @@ def render_song_overview(overview: dict[str, Any]) -> str:
         lines.append(f"- Song: {title}" + (f" — {artist}" if artist else ""))
     lines.append("- " + " · ".join(summary_bits))
     lines.append("- " + _render_key_line(overview))
+    dynamics_line = _render_dynamics_line(overview.get("mix_dynamics"))
+    if dynamics_line:
+        lines.append("- " + dynamics_line)
     analyses = overview.get("available_analyses") or []
     if analyses:
         lines.append("- Mix analyses available: " + ", ".join(str(name) for name in analyses))
@@ -558,6 +580,39 @@ def _render_key_line(overview: dict[str, Any]) -> str:
     if teaching and detected:
         return f"Key: **{label}** (teaching and detected agree)."
     return f"Key: **{label}**."
+
+
+def _render_dynamics_line(dynamics: dict[str, Any] | None) -> str | None:
+    """One compact mix-dynamics line for the seeded overview, or None when the
+    pack has no basic_stats. Honest about the coarse measure (16 kHz mono downmix,
+    not a gated LUFS/LRA). zcr is a soft brightness hint, not a hard claim."""
+    if not dynamics:
+        return None
+    bits: list[str] = []
+    peak = dynamics.get("peak_dbfs")
+    if peak is not None:
+        bits.append(f"peak {_fmt_db(peak)} dBFS")
+    rms = dynamics.get("rms_dbfs")
+    if rms is not None:
+        bits.append(f"avg {_fmt_db(rms)} dBFS")
+    crest = dynamics.get("crest_db")
+    if crest is not None:
+        band = dynamics.get("dynamics")
+        bits.append(f"crest {_float(crest):.1f} dB" + (f" ({band})" if band else ""))
+    zcr = dynamics.get("zcr")
+    if isinstance(zcr, (int, float)):
+        bits.append(f"brightness(zcr) {zcr:.2f}")
+    if not bits:
+        return None
+    return "Mix dynamics: " + " · ".join(bits) + " — coarse (16 kHz mono)."
+
+
+def _fmt_db(value: Any) -> str:
+    # dB values read naturally with an explicit sign (−1.0 dBFS, +0.0 dBFS).
+    number = _float(value)
+    if number == 0:
+        number = 0.0  # avoid a "-0.0" string
+    return f"{number:+.1f}"
 
 
 def _fmt_seconds(value: Any) -> str:
@@ -688,6 +743,69 @@ def _build_tempo(analyses: dict[str, Any]) -> dict[str, Any]:
         "downbeat_count": len(data.get("downbeats_sec") or []),
         "tempo_map_count": len(data.get("tempo_map_bpm") or []),
     }
+
+
+def _build_mix_dynamics(analyses: dict[str, Any]) -> dict[str, Any] | None:
+    """Derive a coarse loudness/dynamics picture from the `basic_stats` analyzer.
+
+    basic_stats (v0.1.0) computes whole-track linear `rms` + `peak_abs` (and `zcr`)
+    over a 16 kHz mono downmix — it carries NO LUFS / loudness-range / true-peak. So
+    this is deliberately coarse: peak/RMS converted to dBFS, their difference as a
+    crest factor (a dynamics proxy — punchy vs squashed), a 3-band label, and zcr as
+    a soft brightness hint. Returns None when basic_stats is absent, failed, or has
+    no usable rms/peak — never raises, so a missing analyzer can't break the build.
+    Works for both the mix and an analyzed stem (same envelope shape)."""
+    report = analyses.get("basic_stats")
+    if not isinstance(report, dict) or report.get("ok") is False:
+        return None
+    data = report.get("data")
+    if not isinstance(data, dict):
+        return None
+    rms = data.get("rms")
+    peak = data.get("peak_abs")
+    if not _is_positive(rms) or not _is_positive(peak):
+        return None
+    rms_dbfs = round(20.0 * math.log10(float(rms)), 1)
+    peak_dbfs = round(20.0 * math.log10(float(peak)), 1)
+    crest_db = round(peak_dbfs - rms_dbfs, 1)
+    dynamics: dict[str, Any] = {
+        "source": "basic_stats",
+        "coarse": True,
+        "rms": rms,
+        "peak_abs": peak,
+        "rms_dbfs": rms_dbfs,
+        "peak_dbfs": peak_dbfs,
+        "crest_db": crest_db,
+        "dynamics": _crest_descriptor(crest_db),
+    }
+    zcr = data.get("zcr")
+    if _is_number(zcr):
+        dynamics["zcr"] = zcr
+    sample_rate = data.get("sr")
+    if _is_number(sample_rate):
+        dynamics["sample_rate"] = sample_rate
+    channels = data.get("channels")
+    if _is_number(channels):
+        dynamics["channels"] = channels
+    return dynamics
+
+
+def _crest_descriptor(crest_db: float) -> str:
+    """Coarse 3-band reading of the crest factor (peak − RMS). Rough, genre- and
+    measurement-dependent — paired with the `coarse` caveat, never asserted hard."""
+    if crest_db < 12.0:
+        return "compressed"
+    if crest_db < 18.0:
+        return "moderate"
+    return "dynamic"
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_positive(value: Any) -> bool:
+    return _is_number(value) and float(value) > 0.0
 
 
 def _build_key(analyses: dict[str, Any], chords: dict[str, Any] | None = None) -> dict[str, Any]:

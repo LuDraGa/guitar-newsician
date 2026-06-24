@@ -217,7 +217,7 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         return _safe_fact_query(query.get_stems)
 
     def get_stem(stem_id: str) -> dict[str, Any]:
-        """Return full detail for ONE stem/part by id: identity, MIDI summary, its own key/tempo/chords/sections, and per-section activity. Includes pitch_class_profile (the part's whole-song pitch-class lean) — compare it to the mix chord roots for monophonic/per-part key and harmony questions."""
+        """Return full detail for ONE stem/part by id: identity, MIDI summary, its own key/tempo/chords/sections, and per-section activity. Includes pitch_class_profile (the part's whole-song pitch-class lean) — compare it to the mix chord roots for monophonic/per-part key and harmony questions. An analyzed part also carries analysis.dynamics (peak/RMS/crest in dBFS, a coarse band) — its own loudness/dynamics, distinct from integrated_loudness (LUFS)."""
         return _safe_fact_query(query.get_stem, stem_id)
 
     def get_section_activity(
@@ -229,7 +229,7 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         return _safe_fact_query(query.get_section_activity, section_index, start_sec, end_sec)
 
     def get_song_slice(start_sec: float, end_sec: float) -> dict[str, Any]:
-        """Return sections, bars, chords, key, and tempo overlapping a time range, plus a lightweight roster of the parts (has_midi flags which carry MIDI). For what each part plays in the range, call get_section_activity; for one part's detail, get_stem(stem_id)."""
+        """Return sections, bars, chords, key, and tempo overlapping a time range, plus a lightweight roster of the parts (has_midi flags which carry MIDI). Also carries mix_dynamics (whole-mix peak/RMS/crest in dBFS, a coarse band) — global like key/tempo, the same readout for any range. For what each part plays in the range, call get_section_activity; for one part's detail, get_stem(stem_id)."""
         return _safe_fact_query(query.get_song_slice, start_sec, end_sec)
 
     def transpose_song(semitones: int | None = None, target_key: str | None = None) -> dict[str, Any]:

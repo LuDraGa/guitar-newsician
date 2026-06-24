@@ -14,6 +14,8 @@ import mido
 from maestro_agent.agent import _agent_cache_key, _make_subagents, describe_tools
 from maestro_agent.fact_pack import (
     SongFactPackQueries,
+    _build_mix_dynamics,
+    _crest_descriptor,
     _stem_pitch_class_profile,
     build_song_overview,
     render_song_overview,
@@ -159,6 +161,11 @@ def test_stem_pitch_class_profile_handles_empty_activity():
 
 def _pack() -> dict:
     return {
+        "mix_dynamics": {
+            "source": "basic_stats", "coarse": True, "rms": 0.1003, "peak_abs": 0.8884,
+            "rms_dbfs": -20.0, "peak_dbfs": -1.0, "crest_db": 19.0, "dynamics": "dynamic",
+            "zcr": 0.118, "sample_rate": 16000, "channels": 1,
+        },
         "sections": [
             {"index": 0, "label": "intro", "section": "intro", "start_sec": 0.0, "end_sec": 4.0},
             {"index": 1, "label": "chorus", "section": "chorus", "start_sec": 4.0, "end_sec": 8.0},
@@ -181,6 +188,11 @@ def _pack() -> dict:
                         "chord_progression_count": 8,
                         "chords": [{"start_sec": 0.0, "end_sec": 2.0, "chord": "Bbm"}],
                         "sections": [],
+                        "dynamics": {
+                            "source": "basic_stats", "coarse": True, "rms": 0.047, "peak_abs": 0.398,
+                            "rms_dbfs": -26.5, "peak_dbfs": -8.0, "crest_db": 18.5, "dynamics": "dynamic",
+                            "zcr": 0.012, "sample_rate": 16000, "channels": 1,
+                        },
                     },
                     "activity_by_section": [
                         {"section_index": 0, "active": False, "note_count": 0, "pitch_range": {"min": None, "max": None}, "mean_velocity": None, "pitch_class_histogram": [0] * 12, "dominant_pitch_classes": []},
@@ -340,6 +352,11 @@ def _overview_pack() -> dict:
         },
         "sections": [{"index": 0}, {"index": 1}, {"index": 2}, {"index": 3}],
         "evidence": {"analysis_keys": ["chords", "tonal_key", "tempo_beats", "structure_msaf"]},
+        "mix_dynamics": {
+            "source": "basic_stats", "coarse": True, "rms": 0.1003, "peak_abs": 0.8884,
+            "rms_dbfs": -20.0, "peak_dbfs": -1.0, "crest_db": 19.0, "dynamics": "dynamic",
+            "zcr": 0.118, "sample_rate": 16000, "channels": 1,
+        },
         "midi": {
             "stems": [
                 {
@@ -481,3 +498,104 @@ def test_pitch_class_fields_named_in_drill_tool_docstrings():
     tools = _tools_by_name()
     assert "pitch_class_profile" in tools["get_stem"]["description"]
     assert "dominant_pitch_classes" in tools["get_section_activity"]["description"]
+
+
+# --- 0.7: mix (and analyzed-stem) dynamics from basic_stats ------------------
+
+
+def _basic_stats_analyses(*, rms=0.1003, peak_abs=0.8884, zcr=0.118, ok=True, with_data=True) -> dict:
+    """The real basic_stats envelope shape (analyzer v0.1.0): a report dict with an
+    `ok` flag + a `data` blob of whole-track linear measures. No LUFS by design."""
+    report: dict = {"ok": ok, "version": "0.1.0", "error": None}
+    if with_data:
+        report["data"] = {
+            "sr": 16000, "rms": rms, "zcr": zcr, "channels": 1, "peak_abs": peak_abs,
+            "codec": "pcm_s16le", "bit_rate": 256001, "byte_size": 7729876, "duration_sec": 241.5,
+        }
+    return {"basic_stats": report, "tempo_beats": {"data": {}}}
+
+
+def test_build_mix_dynamics_converts_peak_rms_to_dbfs_and_crest():
+    dyn = _build_mix_dynamics(_basic_stats_analyses())
+    assert dyn is not None
+    assert dyn["source"] == "basic_stats" and dyn["coarse"] is True
+    # 20*log10(0.8884) ≈ -1.0 ; 20*log10(0.1003) ≈ -20.0 ; crest = peak - rms.
+    assert dyn["peak_dbfs"] == -1.0
+    assert dyn["rms_dbfs"] == -20.0
+    assert dyn["crest_db"] == 19.0
+    assert dyn["dynamics"] == "dynamic"  # crest >= 18 dB
+    assert dyn["zcr"] == 0.118 and dyn["sample_rate"] == 16000 and dyn["channels"] == 1
+    # Raw linear amplitudes are kept as evidence...
+    assert dyn["rms"] == 0.1003 and dyn["peak_abs"] == 0.8884
+    # ...but the non-musical format trivia is dropped.
+    assert "codec" not in dyn and "bit_rate" not in dyn and "byte_size" not in dyn
+
+
+def test_build_mix_dynamics_absent_or_failed_returns_none():
+    assert _build_mix_dynamics({"tempo_beats": {"data": {}}}) is None  # basic_stats absent
+    assert _build_mix_dynamics(_basic_stats_analyses(ok=False)) is None  # analyzer failed
+    assert _build_mix_dynamics(_basic_stats_analyses(with_data=False)) is None  # no data blob
+
+
+def test_build_mix_dynamics_guards_nonpositive_amplitudes():
+    # log10(0) is undefined — a silent/degenerate track must not crash the build.
+    assert _build_mix_dynamics(_basic_stats_analyses(rms=0.0)) is None
+    assert _build_mix_dynamics(_basic_stats_analyses(peak_abs=0.0)) is None
+
+
+def test_build_mix_dynamics_omits_zcr_when_missing():
+    analyses = _basic_stats_analyses()
+    del analyses["basic_stats"]["data"]["zcr"]
+    dyn = _build_mix_dynamics(analyses)
+    assert dyn is not None and "zcr" not in dyn
+
+
+def test_crest_descriptor_bands():
+    assert _crest_descriptor(8.0) == "compressed"
+    assert _crest_descriptor(11.9) == "compressed"
+    assert _crest_descriptor(12.0) == "moderate"
+    assert _crest_descriptor(17.9) == "moderate"
+    assert _crest_descriptor(18.0) == "dynamic"
+    assert _crest_descriptor(25.0) == "dynamic"
+
+
+def test_get_song_slice_carries_whole_mix_dynamics():
+    # mix_dynamics is global like key/tempo — present on the slice regardless of range.
+    result = _queries().get_song_slice(0.0, 8.0)
+    dyn = result["mix_dynamics"]
+    assert dyn["crest_db"] == 19.0 and dyn["dynamics"] == "dynamic"
+
+
+def test_get_stem_surfaces_its_own_dynamics_when_analyzed():
+    stem = _queries().get_stem("S05")["stem"]
+    dyn = stem["analysis"]["dynamics"]
+    assert dyn["source"] == "basic_stats" and dyn["crest_db"] == 18.5
+    # The part's own dynamics is distinct from its LUFS loudness — no conflation.
+    assert stem["integrated_loudness"] == -14.2
+
+
+def test_get_stem_without_analysis_has_no_dynamics_and_does_not_crash():
+    stem = _queries().get_stem("S02")["stem"]
+    assert stem["analysis"] == {"status": "missing"}
+    assert "dynamics" not in stem["analysis"]
+
+
+def test_build_song_overview_carries_mix_dynamics():
+    overview = build_song_overview(_overview_pack())
+    assert overview["mix_dynamics"]["crest_db"] == 19.0
+
+
+def test_render_song_overview_includes_mix_dynamics_line():
+    text = render_song_overview(build_song_overview(_overview_pack()))
+    assert "Mix dynamics:" in text
+    assert "peak -1.0 dBFS" in text and "avg -20.0 dBFS" in text
+    assert "crest 19.0 dB (dynamic)" in text
+    assert "brightness(zcr) 0.12" in text
+    assert "coarse (16 kHz mono)" in text
+
+
+def test_render_song_overview_omits_dynamics_line_when_absent():
+    pack = _overview_pack()
+    pack["mix_dynamics"] = None  # a pack built before basic_stats existed
+    text = render_song_overview(build_song_overview(pack))
+    assert "Mix dynamics:" not in text
