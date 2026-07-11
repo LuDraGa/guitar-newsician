@@ -77,6 +77,7 @@
 
 ## How to resume / run
 
+- 🔒 **Branch + remote discipline (all map-ticket work):** everything happens on **`maestro/agent-buildout`** — never `main`. Commit when the user asks (holistic message, no AI attribution), then **push to `origin` immediately after every commit** — a ticket isn't resolved until its commit is on the remote.
 - ⚠️ **Restart the local agent after ANY `maestro/` code change** — a running `:8000` process holds stale code:
   ```bash
   cd maestro && uv run uvicorn maestro_agent.app:app --port 8000
