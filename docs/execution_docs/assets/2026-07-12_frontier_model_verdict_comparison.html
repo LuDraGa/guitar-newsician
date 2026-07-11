@@ -1,0 +1,473 @@
+<title>Frontier-model verdict — nano vs 5.5 side by side</title>
+<style>
+:root {
+  --paper: oklch(0.945 0.006 75); --card: oklch(0.985 0.004 80); --card-2: oklch(0.965 0.005 78);
+  --ink: oklch(0.205 0.006 60); --ink-2: oklch(0.27 0.008 60); --muted: oklch(0.52 0.008 65);
+  --line: oklch(0.205 0.006 60 / 0.1); --hair: oklch(0.205 0.006 60 / 0.16);
+  --accent: oklch(0.63 0.135 55); --accent-soft: oklch(0.63 0.135 55 / 0.12); --accent-ink: oklch(0.42 0.12 50);
+  --live: oklch(0.62 0.12 165); --live-soft: oklch(0.62 0.12 165 / 0.14); --live-ink: oklch(0.42 0.1 165);
+  --danger: oklch(0.55 0.16 28); --danger-soft: oklch(0.55 0.16 28 / 0.12);
+  --radius: 14px; --radius-sm: 10px;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --shadow: 0 1px 2px oklch(0.2 0.01 60 / 0.05), 0 8px 24px oklch(0.2 0.01 60 / 0.06);
+}
+@media (prefers-color-scheme: dark) { :root {
+  --paper: oklch(0.19 0.008 60); --card: oklch(0.235 0.009 62); --card-2: oklch(0.26 0.009 62);
+  --ink: oklch(0.93 0.005 75); --ink-2: oklch(0.86 0.006 72); --muted: oklch(0.67 0.008 70);
+  --line: oklch(0.93 0.005 75 / 0.12); --hair: oklch(0.93 0.005 75 / 0.2);
+  --accent: oklch(0.72 0.13 55); --accent-soft: oklch(0.72 0.13 55 / 0.16); --accent-ink: oklch(0.8 0.1 55);
+  --live: oklch(0.7 0.11 165); --live-soft: oklch(0.7 0.11 165 / 0.16); --live-ink: oklch(0.78 0.09 165);
+  --danger: oklch(0.68 0.15 28); --danger-soft: oklch(0.68 0.15 28 / 0.16);
+  --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 8px 24px oklch(0 0 0 / 0.25);
+} }
+:root[data-theme="dark"] {
+  --paper: oklch(0.19 0.008 60); --card: oklch(0.235 0.009 62); --card-2: oklch(0.26 0.009 62);
+  --ink: oklch(0.93 0.005 75); --ink-2: oklch(0.86 0.006 72); --muted: oklch(0.67 0.008 70);
+  --line: oklch(0.93 0.005 75 / 0.12); --hair: oklch(0.93 0.005 75 / 0.2);
+  --accent: oklch(0.72 0.13 55); --accent-soft: oklch(0.72 0.13 55 / 0.16); --accent-ink: oklch(0.8 0.1 55);
+  --live: oklch(0.7 0.11 165); --live-soft: oklch(0.7 0.11 165 / 0.16); --live-ink: oklch(0.78 0.09 165);
+  --danger: oklch(0.68 0.15 28); --danger-soft: oklch(0.68 0.15 28 / 0.16);
+  --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 8px 24px oklch(0 0 0 / 0.25);
+}
+:root[data-theme="light"] {
+  --paper: oklch(0.945 0.006 75); --card: oklch(0.985 0.004 80); --card-2: oklch(0.965 0.005 78);
+  --ink: oklch(0.205 0.006 60); --ink-2: oklch(0.27 0.008 60); --muted: oklch(0.52 0.008 65);
+  --line: oklch(0.205 0.006 60 / 0.1); --hair: oklch(0.205 0.006 60 / 0.16);
+  --accent: oklch(0.63 0.135 55); --accent-soft: oklch(0.63 0.135 55 / 0.12); --accent-ink: oklch(0.42 0.12 50);
+  --live: oklch(0.62 0.12 165); --live-soft: oklch(0.62 0.12 165 / 0.14); --live-ink: oklch(0.42 0.1 165);
+  --danger: oklch(0.55 0.16 28); --danger-soft: oklch(0.55 0.16 28 / 0.12);
+  --shadow: 0 1px 2px oklch(0.2 0.01 60 / 0.05), 0 8px 24px oklch(0.2 0.01 60 / 0.06);
+}
+body { background: var(--paper); color: var(--ink); font-family: var(--sans); margin: 0;
+  -webkit-font-smoothing: antialiased; line-height: 1.55; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 32px 20px 80px; }
+h1 { font-size: 1.7rem; letter-spacing: -0.02em; margin: 0 0 6px; text-wrap: balance; }
+.sub { color: var(--muted); margin: 0 0 20px; max-width: 68ch; }
+.banner { display: flex; gap: 10px; align-items: baseline; background: var(--danger-soft);
+  border: 1px solid var(--danger); border-radius: var(--radius); padding: 12px 16px; margin: 0 0 14px; }
+.banner strong { color: var(--danger); font-family: var(--mono); font-size: 0.85rem;
+  text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; }
+.banner span { color: var(--ink-2); font-size: 0.95rem; }
+.totals { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 36px; }
+.total { flex: 1 1 240px; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px 16px; box-shadow: var(--shadow); }
+.total .who { font-family: var(--mono); font-size: 0.72rem; text-transform: uppercase;
+  letter-spacing: 0.08em; }
+.total.nano .who { color: var(--live-ink); } .total.best .who { color: var(--accent-ink); }
+.total .num { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1.25rem; }
+.total .note { color: var(--muted); font-size: 0.8rem; }
+section { margin: 0 0 44px; }
+.promptrow { display: flex; gap: 14px; align-items: baseline; margin: 0 0 14px; }
+.pid { font-family: var(--mono); font-size: 0.8rem; background: var(--ink); color: var(--paper);
+  border-radius: 999px; padding: 3px 11px; flex: none; }
+h2 { font-size: 1.18rem; letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+.probe { color: var(--muted); font-size: 0.85rem; margin: 2px 0 0; }
+.duel { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+@media (max-width: 880px) { .duel { grid-template-columns: 1fr; } }
+.run { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); overflow: hidden; }
+.run--nano { border-top: 3px solid var(--live); }
+.run--best { border-top: 3px solid var(--accent); }
+.run header { padding: 12px 16px 10px; border-bottom: 1px solid var(--line); background: var(--card-2); }
+.model { font-family: var(--mono); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.07em;
+  display: block; margin-bottom: 8px; }
+.run--nano .model { color: var(--live-ink); } .run--best .model { color: var(--accent-ink); }
+.chiprow, .statrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.statrow { margin-top: 6px; }
+.chip, .stat { font-family: var(--mono); font-size: 0.72rem; border-radius: 999px; padding: 2px 9px;
+  font-variant-numeric: tabular-nums; }
+.chip--tool { background: var(--card); border: 1px solid var(--hair); color: var(--ink-2); }
+.chip--none { background: var(--live-soft); color: var(--live-ink); border: 1px solid var(--live); }
+.chip--nodeleg { background: var(--danger-soft); color: var(--danger); border: 1px solid transparent; }
+.chip--deleg { background: var(--live-soft); color: var(--live-ink); border: 1px solid var(--live); }
+.stat { color: var(--muted); border: 1px dashed var(--hair); }
+.answer { padding: 6px 18px 14px; font-size: 0.92rem; }
+.answer h1, .answer h2, .answer h3, .answer h4 { font-size: 0.95rem; letter-spacing: 0;
+  margin: 16px 0 6px; color: var(--ink); }
+.answer p, .answer li { color: var(--ink-2); }
+.answer code { font-family: var(--mono); font-size: 0.84em; background: var(--accent-soft);
+  border-radius: 5px; padding: 1px 5px; }
+.tblwrap { overflow-x: auto; margin: 10px 0; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.answer table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+.answer th, .answer td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums; }
+.answer thead th { font-family: var(--mono); font-size: 0.7rem; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--muted); background: var(--card-2); }
+.answer tbody tr:last-child td { border-bottom: 0; }
+.read { border-top: 1px solid var(--line); background: var(--card-2); padding: 10px 18px 12px; }
+.read summary { cursor: pointer; font-family: var(--mono); font-size: 0.72rem; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--muted); }
+.read summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.read ul { margin: 10px 0 2px; padding: 0 0 0 2px; list-style: none; display: grid; gap: 6px; }
+.read li { font-size: 0.86rem; color: var(--ink-2); padding-left: 22px; position: relative; }
+.read li::before { position: absolute; left: 0; font-family: var(--mono); font-weight: 700; }
+.read li.plus::before { content: "+"; color: var(--live-ink); }
+.read li.minus::before { content: "\2212"; color: var(--danger); }
+.callout { margin-top: 14px; background: var(--accent-soft); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: 12px 16px; font-size: 0.92rem; color: var(--ink-2); }
+.callout code { font-family: var(--mono); font-size: 0.84em; }
+.foot { color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); padding-top: 16px;
+  max-width: 75ch; }
+</style>
+<div class="wrap">
+<h1>Frontier-model verdict: nano vs 5.5, every raw answer</h1>
+<p class="sub">Ticket #7 · BabySlakh Track00001 · each prompt ran as a fresh chat against local
+<code style="font-family:var(--mono)">:8000/chat</code> on 2026-07-12. Raw answers untouched —
+my annotations are folded below each one, closed by default.</p>
+<div class="banner"><strong>Delegation 0 / 10</strong><span>No specialist ever fired — on either
+model. gpt-5.5 answers the arrangement bait directly with tools, exactly like nano. The 5-specialist
+roster question is model-independent.</span></div>
+<div class="totals">
+  <div class="total nano"><span class="who">Nano · gpt-5.4-nano — 5 turns</span>
+    <div class="num">$0.0133</div>
+    <span class="note">4–11s per turn</span></div>
+  <div class="total best"><span class="who">Best · gpt-5.5 — 5 turns</span>
+    <div class="num">$0.3452+</div>
+    <span class="note">5–22s per turn · lower bound — the usage observer lost some final-call
+    records (race; feeds ticket #8)</span></div>
+</div>
+<section id="P1"><div class="promptrow"><span class="pid">P1</span><div><h2>“What key is this song in — is it separate for different instruments?”</h2><p class="probe">0.3 retrieval discipline · per-stem drill vs gesture</p></div></div><div class="duel"><article class="run run--nano"><header><span class="model">Nano · gpt-5.4-nano</span><div class="chiprow"><span class="chip chip--nodeleg">no delegation</span><span class="chip chip--tool">get_key</span><span class="chip chip--tool">get_stem ×2</span></div><div class="statrow"><span class="stat">2 LLM calls</span><span class="stat">$0.0038</span><span class="stat">cached 6,784</span><span class="stat">6.6s</span></div></header><div class="answer"><ul>
+<li><strong>Overall / song key (teaching guidance):</strong> <strong>Ab major</strong>.  </li>
+<li><strong>Detected key (from the audio analysis):</strong> <strong>Bb major</strong>.  </li>
+<li><strong>So yes, there’s some “key conflict” in the analysis</strong> (they don’t fully agree), with only <strong>medium confidence</strong>.</li>
+</ul>
+<h2>Is it separate per instrument?</h2>
+<p>It’s <em>not</em> really separate in the musical sense—most instruments follow the same harmonic center. But <strong>analysis can estimate different keys per stem</strong> because each instrument emphasizes different pitch areas (bass root vs. guitar riffs vs. melodic notes), so the algorithm can “lean” different ways.</p>
+<p>For example, the <strong>Bass</strong> stem’s analysis even reports a different detected key on that part (it showed <strong>F major</strong> vs the teaching <strong>Ab major</strong>, with low confidence for Ab on that part), which is consistent with “part-specific” pitch emphasis rather than different songwriting keys.</p></div><details class="read"><summary>Claude’s read — judge the raw answer above first</summary><ul><li class="plus">Correct on the Ab-teaching vs Bb-detected conflict, with confidence named</li><li class="plus">Honest framing: not separate keys, but analysis can lean per stem (bass F-major example)</li><li class="minus">Thinner evidence — drilled only 2 stems</li><li class="minus">No practical takeaway (no scale/chords to play)</li></ul></details></article><article class="run run--best"><header><span class="model">Best · gpt-5.5</span><div class="chiprow"><span class="chip chip--nodeleg">no delegation</span><span class="chip chip--tool">get_stem ×4</span></div><div class="statrow"><span class="stat">2 LLM calls</span><span class="stat">$0.1937</span><span class="stat">cached 0</span><span class="stat">22.4s</span></div></header><div class="answer"><p>The best learner-facing answer: <strong>treat the song as being in Ab major</strong>, but with a real analysis conflict.</p>
+<div class="tblwrap"><table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Key evidence</th>
+<th>Confidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Teaching key</td>
+<td><strong>Ab major</strong></td>
+<td>medium</td>
+</tr>
+<tr>
+<td>Full-mix detected key</td>
+<td><strong>Bb major</strong></td>
+<td>medium/conflicting</td>
+</tr>
+<tr>
+<td>Some stem-level detectors</td>
+<td>e.g. bass/guitar stems lean toward <strong>F major</strong> or default MIDI <code>C</code></td>
+<td>lower usefulness</td>
+</tr>
+</tbody>
+</table></div>
+<h3>Is the key separate for different instruments?</h3>
+<p><strong>Usually, no.</strong> The instruments are playing in the same overall harmonic world; they do <strong>not</strong> each have their own independent key. What differs is <strong>which notes each part emphasizes</strong>.</p>
+<p>For example, in the MIDI pitch content:</p>
+<div class="tblwrap"><table>
+<thead>
+<tr>
+<th>Part</th>
+<th>Dominant pitch classes</th>
+<th>What that means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bass <code>S03</code></td>
+<td>G, C, D</td>
+<td>Bass is emphasizing roots/fifths/passing tones, not necessarily declaring the song key</td>
+</tr>
+<tr>
+<td>Guitar <code>S00</code></td>
+<td>G, D, E</td>
+<td>Guitar line favors certain chord tones/melodic tones</td>
+</tr>
+<tr>
+<td>Guitar <code>S07</code></td>
+<td>F, E, D</td>
+<td>Another guitar part has a different melodic/harmonic color</td>
+</tr>
+<tr>
+<td>Guitar <code>S08</code></td>
+<td>G, D, C</td>
+<td>More root/fifth-style emphasis</td>
+</tr>
+</tbody>
+</table></div>
+<p>Those differences are <strong>part roles</strong>, not separate keys.</p>
+<h3>Practical guitar guidance</h3>
+<p>Use <strong>Ab major</strong> as your home key for learning:</p>
+<p><code>Ab Bb C Db Eb F G</code></p>
+<p>Core diatonic chords:</p>
+<p><code>Ab</code> · <code>Bbm</code> · <code>Cm</code> · <code>Db</code> · <code>Eb</code> · <code>Fm</code> · <code>Gdim</code></p>
+<p>But expect non-diatonic/borrowed colors because the analysis also sees chords like <strong>Eb, Ab, Fm, Db/C#</strong>, and the detected key disagrees. So if a guitar or bass note looks “outside Ab,” don’t immediately assume the instrument changed key — it may be a chord tone, passing tone, or detection artifact.</p>
+<p>Bottom line: <strong>learn the song as Ab major; don’t assign separate keys to guitar, bass, piano, etc.</strong></p></div><details class="read"><summary>Claude’s read — judge the raw answer above first</summary><ul><li class="plus">Drilled 4 stems; per-part dominant-pitch-class table</li><li class="plus">Clean “part roles, not separate keys” framing</li><li class="plus">Practical close: Ab scale + diatonic chords + don't-panic-on-outside-notes advice</li><li class="minus">Cold cache made this the priciest turn: $0.194, 22.4s</li><li class="minus">Stem-key mentions (F major / “default MIDI C”) drift speculative</li></ul></details></article></div></section><section id="P2"><div class="promptrow"><span class="pid">P2</span><div><h2>“Compare the lead vs rhythm guitar.”</h2><p class="probe">0.6 arrangement question — the delegation bait for parts_agent</p></div></div><div class="duel"><article class="run run--nano"><header><span class="model">Nano · gpt-5.4-nano</span><div class="chiprow"><span class="chip chip--nodeleg">no delegation</span><span class="chip chip--tool">get_section_activity ×4</span><span class="chip chip--tool">get_stem ×3</span></div><div class="statrow"><span class="stat">3 LLM calls</span><span class="stat">$0.0053</span><span class="stat">cached 27,520</span><span class="stat">10.8s</span></div></header><div class="answer"><p>Here’s how the <strong>lead vs rhythm guitar</strong> parts differ in <em>BabySlakh Track00001 — Slakh2100</em>.</p>
+<h2>Which “guitar” stems are which?</h2>
+<ul>
+<li><strong>Lead guitar:</strong> <strong>S00</strong></li>
+<li><strong>Rhythm guitar:</strong> <strong>S07</strong><br />
+(They’re both labeled “Guitar”, but their musical roles are pretty different—S00 is higher/spotty; S07 is lower/busier and more pattern-like.)</li>
+</ul>
+<h2>Quick comparison (by what the notes do)</h2>
+<div class="tblwrap"><table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Lead (S00)</th>
+<th>Rhythm (S07)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Typical pitch height</td>
+<td>Higher: pitch range <strong>min 43 max 81</strong></td>
+<td>More mid/low: pitch range <strong>min 48 max 81</strong></td>
+</tr>
+<tr>
+<td>Part density (how busy)</td>
+<td>Fewer notes overall (e.g., <strong>108 notes</strong> total)</td>
+<td>Much busier: <strong>208 notes</strong> total</td>
+</tr>
+<tr>
+<td>Dominant pitch-classes (whole part)</td>
+<td>Strong on <strong>G, D, E</strong> (pc counts show G &amp; D &amp; E are the “center”)</td>
+<td>Strongest on <strong>F, E, D</strong> (pc profile heavily weights F/E/D)</td>
+</tr>
+<tr>
+<td>Section behavior</td>
+<td>Plays very clearly in more “event” moments; often absent in some sections</td>
+<td>Keeps going through the song; supports harmony rhythmically</td>
+</tr>
+</tbody>
+</table></div>
+<h2>What to listen/play in each role</h2>
+<h3>Lead guitar (S00): “answer lines / melodic accents”</h3>
+<p>Evidence from S00:
+- In <strong>chorus</strong> it’s focused on pitches like <strong>D, E, A</strong> (dominant pitch classes in chorus slice: D/E/A).
+- In <strong>verse</strong> it shows up with smaller bursts (e.g., verse slice has only <strong>7 notes</strong> in that example slice), centered around <strong>E and C/D</strong>.</p>
+<p><strong>Coach cue:</strong> treat S00 like a <em>melody</em>—pick out a few notes per phrase and let them ring/voice clearly, instead of strumming continuously.</p>
+<h3>Rhythm guitar (S07): “chord-driven motion”</h3>
+<p>Evidence from S07:
+- In <strong>verse/chorus/bridge</strong> it’s consistently active and has many more notes.
+- Its pitch-class profile is dominated by <strong>F, E, D</strong>, meaning it’s strongly shaping the harmony/riff content underneath.</p>
+<p><strong>Coach cue:</strong> treat S07 like the <em>groove engine</em>—strumming/picking a repeating pattern that stays attached to the chord feel.</p>
+<h2>Practical next step (so you can drill it)</h2>
+<p>Tell me which you want to learn right now:
+1) <strong>Lead (S00)</strong>: I’ll extract the most common note targets and suggest the best 2–3 short phrases to practice per section.<br />
+2) <strong>Rhythm (S07)</strong>: I’ll map what chord-tone targets it’s orbiting and give you a strum/picking pattern plan.</p>
+<p>Which one are you working on first: <strong>lead or rhythm</strong>?</p></div><details class="read"><summary>Claude’s read — judge the raw answer above first</summary><ul><li class="plus">Evidence-based: note counts, PC profiles, per-section bursts</li><li class="plus">Actionable coach cues + offers a concrete drill next step</li><li class="minus">Ignored S08 entirely — compared only 2 of the 3 guitars</li><li class="minus">Range evidence is shaky: claims S00 (43–81) is “higher” than S07 (48–81)</li></ul></details></article><article class="run run--best"><header><span class="model">Best · gpt-5.5</span><div class="chiprow"><span class="chip chip--nodeleg">no delegation</span><span class="chip chip--tool">get_stem ×3</span><span class="chip chip--tool">get_sections</span></div><div class="statrow"><span class="stat">2 LLM calls</span><span class="stat">$0.1353</span><span class="stat">cached 6,784</span><span class="stat">20.5s</span></div></header><div class="answer"><h3>Lead vs rhythm guitar — inferred roles</h3>
+<p>The song has <strong>three guitar stems</strong> (<code>S00</code>, <code>S07</code>, <code>S08</code>) but none are explicitly labeled “lead” or “rhythm,” so this is an evidence-based read from MIDI range, note density, and section activity.</p>
+<div class="tblwrap"><table>
+<thead>
+<tr>
+<th>Stem</th>
+<th>Likely role</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>S07</code> Guitar</td>
+<td><strong>Lead / upper melodic guitar</strong></td>
+<td>Most notes: <strong>208</strong>, wide range <strong>C3–A5</strong>, active through most sections, more upper-register movement</td>
+</tr>
+<tr>
+<td><code>S08</code> Guitar</td>
+<td><strong>Rhythm / low riff guitar</strong></td>
+<td>Lower range <strong>C2–F6</strong>, strongly centered on <strong>G–D–C</strong>, active in riff-heavy chorus/bridge areas, likely root/power-shape support</td>
+</tr>
+<tr>
+<td><code>S00</code> Guitar</td>
+<td><strong>Secondary hook / supporting guitar</strong></td>
+<td>Fewer notes: <strong>108</strong>, alternates between mid-register phrases and lower hits; overlaps both roles depending on section</td>
+</tr>
+</tbody>
+</table></div>
+<h3>Main comparison</h3>
+<div class="tblwrap"><table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Lead-ish guitar <code>S07</code></th>
+<th>Rhythm-ish guitar <code>S08</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Note count</td>
+<td><strong>208</strong> — busiest guitar</td>
+<td><strong>130</strong> — more selective</td>
+</tr>
+<tr>
+<td>Pitch range</td>
+<td><strong>48–81</strong> MIDI = C3–A5</td>
+<td><strong>36–89</strong> MIDI = C2–F6, but mostly low/mid</td>
+</tr>
+<tr>
+<td>Dominant notes</td>
+<td>F, E, D</td>
+<td>G, D, C</td>
+</tr>
+<tr>
+<td>Feel</td>
+<td>More melodic fills / movement</td>
+<td>More root-based riffing or power-guitar support</td>
+</tr>
+<tr>
+<td>Best practice focus</td>
+<td>Phrasing, bends/slides/vibrato-style expression</td>
+<td>Tight timing, muted picking, power-chord/root accuracy</td>
+</tr>
+</tbody>
+</table></div>
+<h3>Where they show up</h3>
+<ul>
+<li><strong><code>S07</code> lead guitar</strong> is active from the early chorus onward and stays present through verses, choruses, and bridges. It is especially busy in:</li>
+<li>Verse <code>16.5–72.0s</code></li>
+<li>Chorus <code>72.0–151.5s</code></li>
+<li>
+<p>Bridge <code>151.5–241.5s</code></p>
+</li>
+<li>
+<p><strong><code>S08</code> rhythm guitar</strong> enters later and is more section-specific:</p>
+</li>
+<li>Active in verse <code>16.5–46.5s</code></li>
+<li>Strong in chorus <code>72.0–127.5s</code></li>
+<li>Strong again in bridge <code>151.5–241.5s</code></li>
+<li>Silent in some middle chorus space <code>127.5–151.5s</code></li>
+</ul>
+<h3>Guitar-learning takeaway</h3>
+<p>If you want to learn the <strong>rhythm part first</strong>, focus on <code>S08</code>: treat it like a low-register riff/power-chord part, especially around <strong>G–D–C</strong> shapes.</p>
+<p>If you want the <strong>lead flavor</strong>, study <code>S07</code>: it has more melodic motion and sits higher, so practice it with cleaner phrasing and controlled note endings.</p>
+<p>One caution: the song’s teaching key is <strong>Ab major</strong>, but the guitar MIDI pitch content leans heavily toward <strong>G/D/C/F/E</strong>, so I’d learn the actual guitar shapes from the stem evidence rather than forcing everything into Ab major theory.</p></div><details class="read"><summary>Claude’s read — judge the raw answer above first</summary><ul><li class="plus">Weighed all three guitars and assigned each a role</li><li class="plus">Evidence table per stem: range, density, dominant PCs, practice focus</li><li class="plus">Section-presence timeline for both roles</li><li class="minus">Calls S08 (range 36–89, the widest) the “low riff” guitar — glossed</li><li class="minus">$0.135 and 20.5s for one chat turn</li></ul></details></article></div><aside class="callout"><strong>They disagree.</strong> Same evidence (S00 = 108 notes, S07 = 208, S08 = 130): nano calls <code>S00</code> lead / <code>S07</code> rhythm; 5.5 calls <code>S07</code> lead / <code>S08</code> rhythm. All three guitars are generically tagged, so neither claim is checkable — this is the concrete case for the stem-tag editing UI (ticket #9).</aside></section><section id="P3"><div class="promptrow"><span class="pid">P3</span><div><h2>“How dynamic is this mix?”</h2><p class="probe">0.7 seeded mix-dynamics line — zero tool calls is the designed behavior</p></div></div><div class="duel"><article class="run run--nano"><header><span class="model">Nano · gpt-5.4-nano</span><div class="chiprow"><span class="chip chip--nodeleg">no delegation</span><span class="chip chip--tool">get_song_slice</span></div><div class="statrow"><span class="stat">1 LLM call</span><span class="stat">$0.0003</span><span class="stat">cached 6,784</span><span class="stat">5.5s</span></div></header><div class="answer"><p>This mix is <strong>moderately dynamic</strong> (not super compressed, but also not huge “jump” contrasts).</p>
+<p><strong>Whole-song mix dynamics (0–241.6s):</strong>
+- <strong>Peak:</strong> ~<code>-1.0 dBFS</code>
+- <strong>Average (RMS):</strong> ~<code>-20.0 dBFS</code>
+- <strong>Crest (peak-to-average):</strong> ~<code>19.0 dB</code> → indicates noticeable transients
+- <strong>Overall loudness feel:</strong> dynamic (from mix stats)</p>
+<p><strong>How to interpret that for performance:</strong>
+- Expect <strong>strong percussive/attack moments</strong> (drums/strums) that briefly spike toward -1 dBFS,
+- while the <strong>body of the song sits much lower</strong> around -20 dBFS, meaning the mix has room for contrast between accents and sustained parts.</p>
+<p>If you want, I can break it down by <strong>section (verse vs chorus vs bridge)</strong> to show where the dynamics get bigger or smaller.</p></div><details class="read"><summary>Claude’s read — judge the raw answer above first</summary><ul><li class="plus">Numbers correct (peak −1.0 / RMS −20.0 / crest 19.0)</li><li class="plus">Offers a per-section follow-up</li><li class="minus">Re-fetched get_song_slice even though the same line is baked into its prompt prefix</li><li class="minus">Hedged label (“moderately dynamic… not huge contrasts”) sits oddly against crest 19 dB + the pack's own “dynamic” label</li></ul></details></article><article class="run run--best"><header><span class="model">Best · gpt-5.5</span><div class="chiprow"><span class="chip chip--nodeleg">no delegation</span><span class="chip chip--none">no tools — prefix only</span></div><div class="statrow"><span class="stat">0 LLM calls</span><span class="stat">$0 (lost)</span><span class="stat">cached 0</span><span class="stat">5.1s</span></div></header><div class="answer"><p>The mix is <strong>fairly dynamic</strong>.</p>
+<div class="tblwrap"><table>
+<thead>
+<tr>
+<th>Metric</th>
+<th style="text-align: right;">Value</th>
+<th>What it suggests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Peak level</td>
+<td style="text-align: right;"><code>-1.0 dBFS</code></td>
+<td>Peaks come close to full scale, but not clipping</td>
+</tr>
+<tr>
+<td>Average level</td>
+<td style="text-align: right;"><code>-20.0 dBFS</code></td>
+<td>Overall level is relatively low compared with the peaks</td>
+</tr>
+<tr>
+<td>Crest factor</td>
+<td style="text-align: right;"><code>19.0 dB</code></td>
+<td><strong>High dynamic range</strong> — strong contrast between transients/peaks and average loudness</td>
+</tr>
+</tbody>
+</table></div>
+<p>So for guitar practice: expect some parts to feel much softer than the hits or accents. If you’re playing along, set your volume so the loudest mix moments don’t overpower you, then use touch dynamics to match the quieter sections.</p>
+<p>Confidence: <strong>coarse but useful</strong> — this comes from the available 16 kHz mono mix analysis, so it’s good for a broad read, not mastering-level precision.</p></div><details class="read"><summary>Claude’s read — judge the raw answer above first</summary><ul><li class="plus">ZERO tool calls — answered from the seeded overview, the designed 0.7 behavior</li><li class="plus">Consistent read (“high dynamic range”) + play-along advice + coarse-analysis caveat</li><li class="minus">Its usage record was lost entirely (observer race) — cost shown as $0 is wrong, roughly ~$0.01</li></ul></details></article></div></section><section id="P4"><div class="promptrow"><span class="pid">P4</span><div><h2>“How loud is the bass, and what's its dynamic range?”</h2><p class="probe">0.7 LUFS-vs-crest honesty · get_stem drill</p></div></div><div class="duel"><article class="run run--nano"><header><span class="model">Nano · gpt-5.4-nano</span><div class="chiprow"><span class="chip chip--nodeleg">no delegation</span><span class="chip chip--tool">get_stem</span></div><div class="statrow"><span class="stat">1 LLM call</span><span class="stat">$0.0003</span><span class="stat">cached 6,784</span><span class="stat">3.9s</span></div></header><div class="answer"><p>For the <strong>Bass</strong> part (<strong>S03</strong>) :</p>
+<ul>
+<li><strong>How loud is it?</strong>  </li>
+<li><strong>Peak level:</strong> about <strong>-8.0 dBFS</strong>  </li>
+<li>
+<p><strong>Average level (RMS):</strong> about <strong>-26.5 dBFS</strong></p>
+</li>
+<li>
+<p><strong>Dynamic range:</strong>  </p>
+</li>
+<li>Using peak vs RMS, the bass’s dynamic range is about <strong>18.5 dB</strong> (crest_db ≈ <strong>18.5 dB</strong>)  </li>
+</ul>
+<p>(Values come from the bass stem’s <code>basic_stats</code> analysis.)</p></div><details class="read"><summary>Claude’s read — judge the raw answer above first</summary><ul><li class="plus">Correct peak/RMS/crest; names basic_stats as the source</li><li class="minus">Never mentions LUFS — doesn't flag that integrated loudness is unavailable for this stem</li><li class="minus">Bare numbers; no interpretation</li></ul></details></article><article class="run run--best"><header><span class="model">Best · gpt-5.5</span><div class="chiprow"><span class="chip chip--nodeleg">no delegation</span><span class="chip chip--tool">get_stem</span></div><div class="statrow"><span class="stat">1 LLM call</span><span class="stat">$0.0073</span><span class="stat">cached 6,784</span><span class="stat">5.6s</span></div></header><div class="answer"><p>Bass part <code>S03</code>:</p>
+<div class="tblwrap"><table>
+<thead>
+<tr>
+<th>Measure</th>
+<th style="text-align: right;">Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Peak level</td>
+<td style="text-align: right;"><code>-8.0 dBFS</code></td>
+</tr>
+<tr>
+<td>RMS / average level</td>
+<td style="text-align: right;"><code>-26.5 dBFS</code></td>
+</tr>
+<tr>
+<td>Crest / dynamic range</td>
+<td style="text-align: right;"><code>18.5 dB</code></td>
+</tr>
+<tr>
+<td>Dynamics label</td>
+<td style="text-align: right;"><code>dynamic</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>So the bass is <strong>not especially hot in peak level</strong>—it tops out around <strong>-8 dBFS</strong>—but it has a <strong>wide dynamic range</strong>: about <strong>18.5 dB</strong> between average energy and peaks. That means the bass has strong transients/variation rather than being heavily compressed.</p>
+<p>Note: this is a coarse 16 kHz mono stem analysis, not an integrated LUFS reading; the stem’s integrated loudness field is unavailable.</p></div><details class="read"><summary>Claude’s read — judge the raw answer above first</summary><ul><li class="plus">Same numbers plus the exact honesty 0.7 was built for: “not an integrated LUFS reading; the stem's integrated loudness field is unavailable”</li><li class="plus">Interprets: strong transients rather than compression</li><li class="minus">Final-answer usage partially lost — $0.0073 is a lower bound</li></ul></details></article></div></section><section id="turn2"><div class="promptrow"><span class="pid">T2</span><div><h2>“And how does the bass compare to the mix's dynamics? (turn 2, after P3)”</h2><p class="probe">prompt-cache check — cached_tokens > 0 on turn 2 closes the 0.5 carry-over</p></div></div><div class="duel"><article class="run run--nano"><header><span class="model">Nano · gpt-5.4-nano</span><div class="chiprow"><span class="chip chip--nodeleg">no delegation</span><span class="chip chip--tool">get_stem</span><span class="chip chip--tool">get_song_slice</span></div><div class="statrow"><span class="stat">2 LLM calls</span><span class="stat">$0.0037</span><span class="stat">cached 13,568</span><span class="stat">6.2s</span></div></header><div class="answer"><p>Bass dynamics are <strong>also fairly dynamic</strong>, but <strong>a bit less “spiky” than the full mix</strong>.</p>
+<h3>Mix (whole song)</h3>
+<ul>
+<li><strong>Peak:</strong> <code>-1.0 dBFS</code></li>
+<li><strong>Avg/RMS:</strong> <code>-20.0 dBFS</code></li>
+<li><strong>Crest:</strong> <code>~19.0 dB</code>  → noticeable transient contrast</li>
+</ul>
+<h3>Bass (stem S03)</h3>
+<ul>
+<li><strong>Peak:</strong> <code>-8.0 dBFS</code> (peak-to-average absolute level is lower than the mix)</li>
+<li><strong>RMS:</strong> <code>~ -26.5 dBFS</code></li>
+<li><strong>Crest:</strong> <code>~18.5 dB</code></li>
+<li><strong>Dynamics label (analysis):</strong> <code>dynamic</code></li>
+</ul>
+<p><strong>Comparison:</strong> Both crest values are close (<strong>19.0 dB mix vs 18.5 dB bass</strong>), but because the bass’s absolute peaks are much lower than the mix’s peak (<code>-8</code> vs <code>-1 dBFS</code>), <strong>the biggest mix spikes are likely coming from drums/other transient-heavy parts</strong>, while the <strong>bass contributes steady low-end movement with some transient contrast</strong>.</p>
+<p>If you want, I can zoom into <strong>verse vs chorus vs bridge</strong> to see whether the bass gets more/less dynamic in specific sections.</p></div><details class="read"><summary>Claude’s read — judge the raw answer above first</summary><ul><li class="plus">Correct mix-vs-bass comparison; attributes mix spikes to drums</li><li class="plus">cached_tokens 13,568 ✓ — prefix cache confirmed</li><li class="minus">Re-pulled get_song_slice again for numbers already in context</li></ul></details></article><article class="run run--best"><header><span class="model">Best · gpt-5.5</span><div class="chiprow"><span class="chip chip--nodeleg">no delegation</span><span class="chip chip--tool">get_stem</span></div><div class="statrow"><span class="stat">1 LLM call</span><span class="stat">$0.0089</span><span class="stat">cached 6,784</span><span class="stat">8.0s</span></div></header><div class="answer"><p>The <strong>bass is also dynamic</strong>, but it sits <strong>much quieter than the full mix peaks</strong>.</p>
+<div class="tblwrap"><table>
+<thead>
+<tr>
+<th>Dynamics metric</th>
+<th style="text-align: right;">Full mix</th>
+<th style="text-align: right;">Bass stem S03</th>
+<th style="text-align: right;">Difference</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Peak</td>
+<td style="text-align: right;"><code>-1.0 dBFS</code></td>
+<td style="text-align: right;"><code>-8.0 dBFS</code></td>
+<td style="text-align: right;">Bass peaks are ~<code>7 dB</code> lower</td>
+</tr>
+<tr>
+<td>Average/RMS</td>
+<td style="text-align: right;"><code>-20.0 dBFS</code></td>
+<td style="text-align: right;"><code>-26.5 dBFS</code></td>
+<td style="text-align: right;">Bass average is ~<code>6.5 dB</code> lower</td>
+</tr>
+<tr>
+<td>Crest factor</td>
+<td style="text-align: right;"><code>19.0 dB</code></td>
+<td style="text-align: right;"><code>18.5 dB</code></td>
+<td style="text-align: right;">Very similar dynamic range</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Interpretation:</strong> the bass has almost the same peak-to-average shape as the mix — <code>18.5 dB</code> vs <code>19.0 dB</code> crest — so it’s not heavily flattened or compressed relative to the song. It’s just <strong>levelled lower in the arrangement</strong>, leaving headroom for drums, guitars, piano/organ, and other mix elements.</p>
+<p>For playing along on bass or guitar: match the bass’s <strong>consistent strong attack</strong>, but don’t overplay volume-wise; it supports the groove rather than dominating the mix.</p>
+<p>Confidence: <strong>coarse</strong> — based on 16 kHz mono stem/mix stats, good for broad dynamics comparison rather than mastering precision.</p></div><details class="read"><summary>Claude’s read — judge the raw answer above first</summary><ul><li class="plus">Tight difference table + the level-vs-compression distinction</li><li class="plus">cached_tokens 6,784 ✓ — prefix cache confirmed</li><li class="minus">Only 1 LLM call logged (race) — cost is a lower bound</li></ul></details></article></div></section>
+<p class="foot">Prompt-cache check passed on both models (turn-2 <span style="font-family:var(--mono)">cached_tokens</span>:
+nano 13,568 · 5.5 6,784) — the 0.5 carry-over is closed. Cost figures are lower bounds where the
+observer race dropped the final completion's record (nano P3/P4, 5.5 P3/P4/T2). Full JSON traces:
+session scratchpad <span style="font-family:var(--mono)">frontier_run/runs/</span>.</p>
+</div>
