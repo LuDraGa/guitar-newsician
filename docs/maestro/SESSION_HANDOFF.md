@@ -2,6 +2,8 @@
 
 > **Living pointer, maintained every working step.** Read this first, then the linked plan doc. It is the always-current overlay; the detailed progress log lives in the execution doc below.
 >
+> **🗺️ Wayfinder map (2026-07-12):** the road from Slice-0-complete to **cohort-ready** is tracked on GitHub — **[map issue #6](https://github.com/LuDraGa/guitar-newsician/issues/6)**, with the grilled **maestro-brief-drill** issues #1–#5 (brief → graph store → surface → light drill → earned harness, PRD at `.scratch/maestro-brief-drill/PRD.md`) absorbed as its core lane, then S2 sequencer → full S3 → gate (Modal, gating) → gate walk. Work its frontier one ticket per session (`/wayfinder` + the map URL). Frontier right now: **[#7 Frontier-model verdict](https://github.com/LuDraGa/guitar-newsician/issues/7)** and the parallel **[#8 Traceability lane](https://github.com/LuDraGa/guitar-newsician/issues/8)**.
+>
 > **Last updated:** 2026-06-24 (**0.7 basic_stats COMMITTED + live-verified** — mix + analyzed-stem dynamics from a live-inspected real `basic_stats` row; 66/66 pytest green. Live try-it passed both prompts: mix answered from the seeded dynamics line (peak −1.1 / avg −21.5 / crest 20.4 dB → "punchy, not squashed"), bass drilled `get_stem` and kept real LUFS (−18.29) distinct from coarse crest (15.6 dB) — the LUFS-vs-dynamics honesty held. **This closes Slice 0. → Slice 1 (Section × Role briefing) is next.**) · **Branch:** `maestro/agent-buildout` (off `main`)
 
 ---
@@ -68,6 +70,8 @@
    - **[agent-stack-capabilities.md](agent-stack-capabilities.md)** — agent-stack capability ledger (using / have-but-unused / need / aspire / don't-need). Home of the 0.6 "document the DeepAgents surplus instead of trimming the static prompt" decision. Maintain it whenever you wire a capability or spot framework surplus.
 2. [maestro-coach-prd.md](maestro-coach-prd.md) — product ladder: Baseline → S1 brief → S2 sequence → S3 drill → S4 adapt → S5 arrange.
 3. [maestro-agent-architecture.md](maestro-agent-architecture.md) — compounding contract, the 3 stores, the S1–S5 roadmap, testing seams.
+   - **[maestro-domain-model.md](maestro-domain-model.md)** — the behind-the-scenes conceptual model + terminology (active/passive × generic/specific → HOW/WHAT/WITH-WHAT; Task/Model/Harness; the four growth axes; capabilities-as-formulas; curated vs emergent workflows; proactive cue; grounding/citation/abstention/scope invariants). Read it to keep the vocabulary straight.
+   - **[../adr/0001-emergent-operator-workflows-hitl.md](../adr/0001-emergent-operator-workflows-hitl.md)** — ADR-0001: Maestro may compose emergent effectful workflows behind mandatory HITL + instrumentation (the safety spine for the agency/initiative axes).
 4. [maestro-build-flow.md](maestro-build-flow.md) — Prep A/B grounding in the `werecode` schema.
 5. [../execution_docs/2026-06-14_maestro-baseline-build.md](../execution_docs/2026-06-14_maestro-baseline-build.md) — how the working baseline (A+B+C) was built.
 
