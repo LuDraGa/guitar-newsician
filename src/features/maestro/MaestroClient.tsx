@@ -27,6 +27,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { PillIcon, ReadinessChips } from '@/components/werecode/WereCodePrimitives';
+import { BriefCard, extractBriefNodes } from '@/features/maestro/BriefCard';
 import { JsonViewer } from '@/features/maestro/JsonViewer';
 import { useWereCodeDataCache } from '@/lib/client-cache/werecode-data-cache';
 import type { MaestroFactPack, MaestroFactPackStatus, MaestroTool, SongSummary } from '@/types/werecode-client';
@@ -979,8 +980,21 @@ export function MaestroClient() {
               const traceId = message.trace ? stringValue((message.trace as Record<string, unknown>).trace_id) : null;
               const isDrafting = feedbackDraft?.index === index;
               const footerVisible = Boolean(message.feedback || isDrafting);
+              // Structure first, narration second: a turn that briefed a region
+              // renders the stored node as cards above the loop's prose.
+              const briefNodes = extractBriefNodes(message.trace);
               return (
                 <div key={index} className="group flex flex-col gap-1">
+                  {briefNodes.map((node, nodeIndex) => (
+                    <BriefCard
+                      key={nodeIndex}
+                      node={node}
+                      currentPack={factPack}
+                      packStatus={factPackStatus}
+                      onOpen={setDrawer}
+                      defaultOpen={index === messages.length - 1}
+                    />
+                  ))}
                   <div
                     className="markdown max-w-[94%] rounded-lg px-1 text-[14px] leading-7 [&_a]:underline [&_code]:rounded [&_code]:bg-[var(--card)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[12px] [&_h1]:mt-2 [&_h1]:text-[16px] [&_h2]:mt-2 [&_h2]:text-[15px] [&_li]:my-0.5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_pre]:my-2 [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-[var(--card)] [&_pre]:p-3 [&_pre]:text-[12px] [&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-[var(--hair)] [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-[var(--hair)] [&_th]:bg-[var(--card)] [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
                     style={isActive ? { boxShadow: 'inset 2px 0 0 var(--accent)' } : undefined}
