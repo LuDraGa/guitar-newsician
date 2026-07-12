@@ -104,10 +104,7 @@ export function BriefCard({
             event.preventDefault();
             onOpen({ title: 'brief node', subtitle: `${regionTitle(region)} · evidence per claim`, detail: node });
           }}
-          className="ml-auto flex items-center gap-1 bg-transparent hover:underline"
-          // The unlayered `button { font: inherit; color: inherit }` reset in
-          // globals.css beats Tailwind's utility layer, so size/color go inline.
-          style={{ fontSize: '11px', color: 'var(--muted)' }}
+          className="ml-auto flex items-center gap-1 bg-transparent text-[11px] text-[var(--muted)] hover:underline"
           title="Inspect the full stored node, including per-claim evidence paths"
         >
           <FileJson className="h-3.5 w-3.5" />
@@ -224,8 +221,7 @@ function BriefSection({
                 detail: section,
               })
             }
-            className="mono tnum self-start bg-transparent hover:underline"
-            style={{ fontSize: '11px', color: 'var(--muted)' }}
+            className="mono tnum self-start bg-transparent text-[11px] text-[var(--muted)] hover:underline"
             title="Inspect this section's chord progression and part rows"
           >
             {String(numberValue(chords.count) ?? '?')} chords · conf {stringValue(chords.confidence) ?? '?'}

@@ -78,12 +78,14 @@ a {
   text-decoration: none;
 }
 
-button {
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
+@layer base {
+  button {
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
 }
 
 input,
