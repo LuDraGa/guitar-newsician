@@ -1,7 +1,7 @@
 # Maestro Traceability Lane — Langfuse + Feedback Capture + Cost Guard
 
 **Ticket:** [#8 Traceability lane](https://github.com/LuDraGa/guitar-newsician/issues/8) on the [cohort-ready map (#6)](https://github.com/LuDraGa/guitar-newsician/issues/6)
-**Branch:** `maestro/agent-buildout` · **Status:** 🟢 LIVE-VERIFIED (agent-driven try-it 2026-07-12) — 83/83 pytest, tsc + eslint clean; UI thumbs click + Langfuse UI eyeball left to the user; ready to commit
+**Branch:** `maestro/agent-buildout` · **Status:** ✅ RESOLVED — committed `91b70f1` (pushed 2026-07-12); live-verified incl. user's real turns + budget over-flag ($0.0011 > $0.001 test) reconciled against Langfuse server costs
 **Why:** the capability ledger's own words — "the signal exists; the feedback loop doesn't." Before a cohort teaches us anything, every turn must leave a trace we can read, a user reaction we can join to it, and a cost number we can trust. The #7 duel also proved the current cost numbers are *lower bounds* (observer race, evidence on the ticket) — the guard can't sit on a racy path.
 
 ---
