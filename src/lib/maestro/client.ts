@@ -169,6 +169,10 @@ export function chatWithMaestro(input: {
   history: MaestroChatHistoryMessage[];
   /** LiteLLM `provider/model` (e.g. `openai/gpt-5.4-nano`); omitted = agent default. */
   model?: string;
+  /** Conversation id — Langfuse groups the whole conversation as one session. */
+  sessionId?: string;
+  /** Song owner's user id — Langfuse per-user view for cohort observation. */
+  userId?: string;
 }): Promise<MaestroChatResult> {
   return maestroFetch<MaestroChatResult>('/chat', {
     method: 'POST',
@@ -177,6 +181,28 @@ export function chatWithMaestro(input: {
       message: input.message,
       history: input.history,
       model: input.model,
+      session_id: input.sessionId,
+      user_id: input.userId,
+    }),
+  });
+}
+
+/**
+ * Forward a user verdict to the agent so it lands as a Langfuse score on the
+ * turn's trace. Best-effort by design: the durable record is the
+ * `werecode.maestro_feedback` row the route writes first.
+ */
+export function sendFeedbackScore(input: {
+  traceId: string;
+  verdict: 'up' | 'down';
+  comment?: string;
+}): Promise<{ ok: boolean; langfuse_recorded: boolean }> {
+  return maestroFetch<{ ok: boolean; langfuse_recorded: boolean }>('/feedback', {
+    method: 'POST',
+    body: JSON.stringify({
+      trace_id: input.traceId,
+      verdict: input.verdict,
+      comment: input.comment,
     }),
   });
 }

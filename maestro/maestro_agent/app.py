@@ -32,6 +32,16 @@ class ChatRequest(BaseModel):
     message: str
     history: list[ChatHistoryMessage] = Field(default_factory=list)
     model: str | None = None
+    # Traceability lane: Langfuse groups turns by session (the client's
+    # conversation id) and user (the song owner, from the Next route).
+    session_id: str | None = Field(default=None, max_length=128)
+    user_id: str | None = Field(default=None, max_length=128)
+
+
+class FeedbackRequest(BaseModel):
+    trace_id: str = Field(min_length=1, max_length=64)
+    verdict: str = Field(pattern="^(up|down)$")
+    comment: str | None = Field(default=None, max_length=2000)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -99,6 +109,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 request.song_id,
                 [item.model_dump() for item in request.history],
                 request.model,
+                session_id=request.session_id,
+                user_id=request.user_id,
             )
         except ModelNotAllowed as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -106,6 +118,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except FactPackUnavailable as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/feedback")
+    def feedback(request: FeedbackRequest) -> dict[str, Any]:
+        # Observability-side copy of a user verdict: attach it to the Langfuse
+        # trace as a score. The durable record is the Supabase row the Next
+        # route writes first — this call is best-effort and never fails hard.
+        from maestro_agent.tracing import record_feedback_score
+
+        recorded = record_feedback_score(request.trace_id, request.verdict, request.comment)
+        return {"ok": True, "langfuse_recorded": recorded}
 
     return app
 

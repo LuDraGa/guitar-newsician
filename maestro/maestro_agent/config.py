@@ -24,6 +24,16 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     supabase_url: str
@@ -33,6 +43,9 @@ class Settings:
     artifacts_bucket: str
     agent_model: str
     agent_enabled: bool
+    # Soft per-turn cost ceiling in USD; 0 disables the check. The guard flags
+    # over-budget turns in the trace — it never blocks a turn.
+    turn_budget_usd: float = 0.50
 
     def public_dict(self) -> dict[str, object]:
         # Never expose the service-role key.
@@ -43,6 +56,7 @@ class Settings:
             "artifacts_bucket": self.artifacts_bucket,
             "agent_model": self.agent_model,
             "agent_enabled": self.agent_enabled,
+            "turn_budget_usd": self.turn_budget_usd,
         }
 
 
@@ -63,4 +77,5 @@ def load_settings() -> Settings:
         artifacts_bucket=os.getenv("WERECODE_ARTIFACTS_BUCKET", "werecode-artifacts"),
         agent_model=os.getenv("MAESTRO_AGENT_MODEL", "openai/gpt-5.5"),
         agent_enabled=_env_bool("MAESTRO_AGENT_ENABLED", True),
+        turn_budget_usd=_env_float("MAESTRO_TURN_BUDGET_USD", 0.50),
     )

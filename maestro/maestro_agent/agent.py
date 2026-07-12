@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -24,6 +25,10 @@ from maestro_agent.fact_pack import (
     render_song_overview,
 )
 from maestro_agent.llm import make_chat_model, normalize_model, usage_observer
+from maestro_agent.tracing import build_handler, new_trace_id, set_turn_io, turn_context
+from maestro_agent.tracing import flush as flush_traces
+
+logger = logging.getLogger("maestro.agent")
 
 MAX_HISTORY_MESSAGES = 16
 MAX_HISTORY_CHARS = 6000
@@ -110,6 +115,8 @@ def invoke_agent(
     song_id: str,
     history: list[dict[str, Any]] | None = None,
     model: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     if not settings.agent_enabled:
         return {"content": "Agent is disabled by MAESTRO_AGENT_ENABLED=0.", "raw": None}
@@ -130,27 +137,83 @@ def invoke_agent(
 
     messages = _build_agent_messages(song_id, message, history or [])
     observer = usage_observer()
-    observer.drain()  # isolate this request's calls
+    observer.reset()  # isolate this request's calls (and clear any stale in-flight count)
+
+    # Every turn gets a trace id — Langfuse's when enabled, a local uuid otherwise —
+    # so feedback rows can key on it regardless of the observability backend.
+    trace_id = new_trace_id()
+    handler = build_handler()
+    config = _invoke_config(handler)
+    # pack_version/pack_created_at is also the seam where #1's fresh-vs-graph-recall
+    # flag will land (brief-drill PRD story 14) — one more metadata key.
+    turn_metadata = {
+        key: value
+        for key, value in {
+            "song_id": song_id,
+            "model": resolved_model,
+            "pack_version": pack.get("version") if pack else None,
+            "pack_created_at": pack.get("created_at") if pack else None,
+        }.items()
+        if value is not None
+    }
+
     started_at = _now_iso()
     started = time.perf_counter()
-    result = agent.invoke({"messages": messages})
+    with turn_context(trace_id, session_id=session_id, user_id=user_id, metadata=turn_metadata) as span:
+        result = agent.invoke({"messages": messages}, config=config) if config else agent.invoke({"messages": messages})
+        content = _last_message_content(result)
+        set_turn_io(span, question=message, answer=content)
     elapsed_ms = round((time.perf_counter() - started) * 1000)
     usage_records = observer.drain()
+    flush_traces()
 
-    content = _last_message_content(result)
+    usage = usage_observer().summarize(usage_records)
     trace = _agent_trace(result) or {}
     trace.update(
         {
+            "trace_id": trace_id,
             "request": {"song_id": song_id, "message": message, "history_messages": len(messages) - 1},
             "model": resolved_model,
-            "usage": usage_observer().summarize(usage_records),
+            "usage": usage,
             "usage_calls": usage_records,
+            "budget": _budget_status(usage.get("cost_usd"), settings.turn_budget_usd),
             "started_at": started_at,
             "finished_at": _now_iso(),
             "elapsed_ms": elapsed_ms,
         }
     )
+    if trace["budget"].get("over"):
+        logger.warning(
+            "turn over budget: spent $%s > limit $%s (song=%s model=%s trace=%s)",
+            trace["budget"]["spent_usd"],
+            trace["budget"]["limit_usd"],
+            song_id,
+            resolved_model,
+            trace_id,
+        )
     return {"content": content, "raw": trace}
+
+
+def _invoke_config(handler: Any | None) -> dict[str, Any] | None:
+    """LangChain config for the turn — None when there is nothing to attach, so
+    monkeypatched fakes without a config kwarg keep working."""
+    if handler is None:
+        return None
+    return {"callbacks": [handler]}
+
+
+def _budget_status(cost_usd: Any, limit_usd: float) -> dict[str, Any]:
+    """The soft per-turn cost guard: compare the fenced observer total against
+    the configured ceiling. Flags, never blocks. limit<=0 disables; a missing
+    cost (unpriced model) can't be judged and reports over=False."""
+    enabled = isinstance(limit_usd, (int, float)) and limit_usd > 0
+    spent = float(cost_usd) if isinstance(cost_usd, (int, float)) else None
+    return {
+        "enabled": enabled,
+        "limit_usd": round(float(limit_usd), 6) if enabled else None,
+        "spent_usd": round(spent, 6) if spent is not None else None,
+        "over": bool(enabled and spent is not None and spent > float(limit_usd)),
+    }
 
 
 def _safe_overview_pack(fact_pack: SongFactPackService, song_id: str) -> dict[str, Any] | None:

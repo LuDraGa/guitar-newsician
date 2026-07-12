@@ -24,6 +24,9 @@ const bodySchema = z.object({
     .default([]),
   // LiteLLM `provider/model`; the agent validates it against its allowlist.
   model: z.string().min(1).max(64).optional(),
+  // Client conversation id — becomes the Langfuse session so a learner's whole
+  // conversation reads as one thread in the trace UI.
+  sessionId: z.string().min(1).max(128).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -31,11 +34,13 @@ export async function POST(request: NextRequest) {
     return jsonError('Maestro is not enabled', { status: 404, code: 'maestro_disabled' });
   }
   try {
-    const { songId, message, history, model } = bodySchema.parse(await request.json().catch(() => null));
+    const { songId, message, history, model, sessionId } = bodySchema.parse(
+      await request.json().catch(() => null)
+    );
     const { user, supabase } = await getWereCodeRequestContext();
     await requireOwnedSong(supabase, user.id, songId);
 
-    const result = await chatWithMaestro({ songId, message, history, model });
+    const result = await chatWithMaestro({ songId, message, history, model, sessionId, userId: user.id });
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof MaestroAgentError) {

@@ -32,8 +32,11 @@
 | **Prompt caching** of the stable prefix | OpenAI auto, preserved by us | 0.5 seeded overview rides it (baked at agent creation, not re-sent per turn); `cached_tokens` proves hits in the trace. The whole "keep the prefix stable" discipline exists to protect this. |
 | **Subagents + `task` routing** (mechanism) | `_make_subagents` | structure / harmony / rhythm / **parts** / midi specialists (5). Soft prompt-level tool guidance, not hard tool-locking. *Mechanism is load-bearing; current utilization is low — see (c).* |
 | **System-prompt assembly + tool-calling loop** | `create_deep_agent` | the core agent behavior; the 10 bounded `SongFactPack` tools hang off it. |
-| **Per-request usage trace** | `MaestroUsageObserver` | tokens incl. `cached_tokens`, per call + summarized, ride the chat trace. |
+| **Per-request usage trace** | `MaestroUsageObserver` | tokens incl. `cached_tokens`, per call + summarized, ride the chat trace. **In-flight fence** (#8) closed the drain race the #7 duel exposed — the numbers are no longer lower bounds. |
 | **Per-(song, model, pack) agent cache** | `_agent_cache` | so a model switch or pack rebuild doesn't reuse a stale baked-in overview. |
+| **Langfuse tracing** (#8) | `maestro_agent.tracing` + `CallbackHandler` on `agent.invoke` | full run tree per turn (generations, tool calls, specialist hops) under a per-turn `trace_id`; session = conversation id, user = song owner; pack version/created_at in metadata (the story-14 fresh-vs-recall seam). Keys in `maestro/.env`; degrades to a no-op without them. |
+| **User feedback loop** (#8) | `werecode.maestro_feedback` (RLS'd) + `/api/maestro/feedback` + thumbs UI | thumbs + optional note keyed to `trace_id`; durable row first, best-effort `user-thumbs` Langfuse score second. |
+| **Per-turn cost guard** (#8) | `_budget_status` on the fenced observer totals | soft: `MAESTRO_TURN_BUDGET_USD` (default $0.50, `0` disables) flags over-budget turns in `trace.budget` + the Runtime rail; never blocks. |
 
 ## (b) 🟠 Underusing — we touch it, but don't exploit it
 
@@ -41,8 +44,8 @@
 
 | Capability | How we use it now | The unexploited reach |
 |---|---|---|
-| **LiteLLM chokepoint** (`maestro_agent.llm`) | one OpenAI call per turn; observer records tokens/cost. | Built to be the seam for **multi-provider routing, ensemble/voting, and richer instrumentation (Langfuse)** — all single-line opt-ins later. Today it's a thin pass-through. |
-| **The usage trace / `cached_tokens`** | captured + displayed in the Runtime rail. | Pure telemetry today — nothing *acts* on it (no cache-hit alerting, no per-tool cost attribution, no budget guard). The signal exists; the feedback loop doesn't. |
+| **LiteLLM chokepoint** (`maestro_agent.llm`) | one OpenAI call per turn; observer records tokens/cost (fenced). | Built to be the seam for **multi-provider routing and ensemble/voting** — still single-line opt-ins later. ~~Richer instrumentation (Langfuse)~~ → **wired at #8** (via the LangChain handler on `agent.invoke`, the seam that sees the whole run tree). |
+| **The usage trace / `cached_tokens`** | captured + displayed in the Runtime rail; the **#8 budget guard acts on it** (per-turn `trace.budget` flag). | Remaining reach: cache-hit alerting and per-tool cost attribution (Langfuse now carries the raw data for both). |
 | **Subagent routing** | 5 specialists registered; soft guidance. | Delegation **rarely fires** on nano single-turn QnA (0.6 live finding: the main agent answered directly). We have the routing graph but exercise ~none of it — the *orchestration* value (decompose → delegate → merge) is untapped until the verbs that need it (S2+). |
 | **System prompt as the only output contract** | prose instructions; Markdown answers. | We shape behavior through the prompt but take **unstructured prose** out. `response_format` would let the same agent emit *machine-checkable structured retrieval* — the QnA-node job (see "Where this is heading"). Underused because today's surface is a chat box, not a consumer. |
 

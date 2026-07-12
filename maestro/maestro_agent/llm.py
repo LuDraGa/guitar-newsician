@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any
 
 import litellm
@@ -31,11 +32,39 @@ def normalize_model(model: str) -> str:
 
 
 class MaestroUsageObserver(CustomLogger):
-    """Records model / tokens / cost / latency for every LiteLLM completion."""
+    """Records model / tokens / cost / latency for every LiteLLM completion.
+
+    LiteLLM fires success callbacks on a background thread, so a `drain()`
+    immediately after `agent.invoke()` used to race them and drop the final
+    call's usage (observed live in the #7 model duel — recorded costs were
+    lower bounds). The in-flight fence closes that: `log_pre_api_call`
+    registers each call, the success/failure handlers retire it, and `drain`
+    waits for the count to reach zero before snapshotting."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._pending_changed = threading.Condition(self._lock)
+        self._pending = 0
         self._records: list[dict[str, Any]] = []
+
+    def log_pre_api_call(self, model, messages, kwargs) -> None:  # noqa: ANN001
+        with self._pending_changed:
+            self._pending += 1
+
+    def _retire_pending(self) -> None:
+        with self._pending_changed:
+            if self._pending > 0:
+                self._pending -= 1
+            self._pending_changed.notify_all()
+
+    def log_failure_event(self, kwargs, response_obj, start_time, end_time) -> None:  # noqa: ANN001
+        self._retire_pending()
+
+    async def async_log_success_event(self, kwargs, response_obj, start_time, end_time) -> None:  # noqa: ANN001
+        self.log_success_event(kwargs, response_obj, start_time, end_time)
+
+    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time) -> None:  # noqa: ANN001
+        self._retire_pending()
 
     def log_success_event(self, kwargs, response_obj, start_time, end_time) -> None:  # noqa: ANN001
         try:
@@ -81,9 +110,29 @@ class MaestroUsageObserver(CustomLogger):
             logger.info("llm.call %s", record)
         except Exception as exc:  # never let observability break a call
             logger.warning("usage observe failed: %s", exc)
+        finally:
+            self._retire_pending()
 
-    def drain(self) -> list[dict[str, Any]]:
-        with self._lock:
+    def reset(self) -> None:
+        """Start-of-request isolation: clear stale records AND any in-flight
+        count a prior request's timeout left behind, so it can't poison this
+        turn's fence."""
+        with self._pending_changed:
+            self._pending = 0
+            self._records.clear()
+            self._pending_changed.notify_all()
+
+    def drain(self, wait_pending_s: float = 2.0) -> list[dict[str, Any]]:
+        """Snapshot + clear the records, first waiting (bounded) for in-flight
+        callbacks so the final completion's usage isn't dropped."""
+        deadline = time.monotonic() + max(wait_pending_s, 0.0)
+        with self._pending_changed:
+            while self._pending > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.warning("usage drain timed out with %d call(s) in flight", self._pending)
+                    break
+                self._pending_changed.wait(timeout=remaining)
             records = list(self._records)
             self._records.clear()
             return records

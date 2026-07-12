@@ -16,6 +16,8 @@ import {
   Search,
   Send,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   Users,
   Wrench,
@@ -43,10 +45,17 @@ import type { MaestroFactPack, MaestroFactPackStatus, MaestroTool, SongSummary }
 
 type ChatTrace = Record<string, unknown> | null;
 
+type MessageFeedback = {
+  verdict: 'up' | 'down';
+  comment?: string;
+};
+
 type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
   trace?: ChatTrace;
+  /** The user's thumbs verdict on this answer (persisted with the conversation). */
+  feedback?: MessageFeedback;
 };
 
 type ChatConversation = {
@@ -211,6 +220,8 @@ export function MaestroClient() {
 
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  // Open optional-note editor for a just-thumbed message (index into messages).
+  const [feedbackDraft, setFeedbackDraft] = useState<{ index: number; text: string } | null>(null);
   const conversationsRef = useRef<ChatConversation[]>([]);
   const [costLedger, setCostLedger] = useState<CostLedgerEntry[]>([]);
 
@@ -289,6 +300,7 @@ export function MaestroClient() {
       setChatError(null);
       setPinnedTurn(null);
       setDrawer(null);
+      setFeedbackDraft(null);
       // New song context: forget any prior staleness acknowledgement.
       setAckedReasons(null);
       setPendingStaleSend(null);
@@ -384,6 +396,7 @@ export function MaestroClient() {
     setPinnedTurn(null);
     setDrawer(null);
     setChatError(null);
+    setFeedbackDraft(null);
   }
 
   function newChat() {
@@ -393,6 +406,7 @@ export function MaestroClient() {
     setPinnedTurn(null);
     setDrawer(null);
     setChatError(null);
+    setFeedbackDraft(null);
   }
 
   // Upsert + persist a conversation. Called from the send handler (not an effect)
@@ -501,7 +515,15 @@ export function MaestroClient() {
       const response = await fetch('/api/maestro/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ songId: selectedSongId, message: text, history, model: `${PROVIDER.id}/${modelId}` }),
+        body: JSON.stringify({
+          songId: selectedSongId,
+          message: text,
+          history,
+          model: `${PROVIDER.id}/${modelId}`,
+          // Conversation id doubles as the Langfuse session id, so a whole
+          // conversation reads as one thread in the trace UI.
+          sessionId: convId,
+        }),
       });
       if (!response.ok) throw new Error(await readError(response, 'Could not reach Maestro'));
       const body = await response.json();
@@ -517,6 +539,41 @@ export function MaestroClient() {
       setChatError(error instanceof Error ? error.message : 'Could not reach Maestro');
     } finally {
       setChatBusy(false);
+    }
+  }
+
+  // Thumbs verdict + optional note, keyed to the turn's trace id. Optimistic:
+  // the verdict paints immediately and persists with the conversation; the row
+  // lands in werecode.maestro_feedback (RLS'd) and the route forwards a
+  // best-effort Langfuse score. A failed POST rolls the verdict back.
+  async function sendFeedback(index: number, verdict: 'up' | 'down', comment?: string) {
+    const message = messages[index];
+    const trace = message?.trace as Record<string, unknown> | null | undefined;
+    const traceId = trace ? stringValue(trace.trace_id) : null;
+    if (!message || !traceId || !selectedSongId || !activeConvId) return;
+    const previous = message.feedback;
+    const feedback: MessageFeedback = { verdict, ...(comment?.trim() ? { comment: comment.trim() } : {}) };
+    const next = messages.map((m, i) => (i === index ? { ...m, feedback } : m));
+    setMessages(next);
+    upsertConversation(activeConvId, selectedSongId, next);
+    try {
+      const response = await fetch('/api/maestro/feedback', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          songId: selectedSongId,
+          traceId,
+          verdict,
+          comment: feedback.comment,
+          model: stringValue(trace?.model) ?? undefined,
+        }),
+      });
+      if (!response.ok) throw new Error(await readError(response, 'Could not record feedback'));
+    } catch (error) {
+      const rolledBack = next.map((m, i) => (i === index ? { ...m, feedback: previous } : m));
+      setMessages(rolledBack);
+      upsertConversation(activeConvId, selectedSongId, rolledBack);
+      setChatError(error instanceof Error ? error.message : 'Could not record feedback');
     }
   }
 
@@ -919,6 +976,9 @@ export function MaestroClient() {
                 );
               }
               const isActive = index === activeTurn;
+              const traceId = message.trace ? stringValue((message.trace as Record<string, unknown>).trace_id) : null;
+              const isDrafting = feedbackDraft?.index === index;
+              const footerVisible = Boolean(message.feedback || isDrafting);
               return (
                 <div key={index} className="group flex flex-col gap-1">
                   <div
@@ -927,15 +987,96 @@ export function MaestroClient() {
                   >
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                   </div>
-                  {message.trace && !isActive && (
-                    <button
-                      type="button"
-                      onClick={() => setPinnedTurn(index)}
-                      className="max-h-0 self-start overflow-hidden text-[11px] text-[var(--muted)] opacity-0 transition-[max-height,opacity] duration-150 hover:text-[var(--ink)] focus-visible:max-h-6 focus-visible:opacity-100 group-hover:max-h-6 group-hover:opacity-100 group-focus-within:max-h-6 group-focus-within:opacity-100"
-                    >
-                      View runtime →
-                    </button>
-                  )}
+                  <div
+                    className={`flex items-center gap-1.5 self-start overflow-hidden transition-[max-height,opacity] duration-150 ${
+                      footerVisible
+                        ? 'max-h-8 opacity-100'
+                        : 'max-h-0 opacity-0 focus-within:max-h-8 focus-within:opacity-100 group-hover:max-h-8 group-hover:opacity-100 group-focus-within:max-h-8 group-focus-within:opacity-100'
+                    }`}
+                  >
+                    {traceId && (
+                      <>
+                        <button
+                          type="button"
+                          aria-label="Good answer"
+                          title="Good answer"
+                          onClick={() => {
+                            void sendFeedback(index, 'up', message.feedback?.comment);
+                            setFeedbackDraft({ index, text: message.feedback?.comment ?? '' });
+                          }}
+                          className={`rounded-full p-1 transition-colors ${
+                            message.feedback?.verdict === 'up'
+                              ? 'bg-[var(--ink)] text-[var(--paper)]'
+                              : 'bg-transparent text-[var(--muted)] hover:text-[var(--ink)]'
+                          }`}
+                        >
+                          <ThumbsUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Bad answer"
+                          title="Bad answer"
+                          onClick={() => {
+                            void sendFeedback(index, 'down', message.feedback?.comment);
+                            setFeedbackDraft({ index, text: message.feedback?.comment ?? '' });
+                          }}
+                          className={`rounded-full p-1 transition-colors ${
+                            message.feedback?.verdict === 'down'
+                              ? 'bg-[var(--ink)] text-[var(--paper)]'
+                              : 'bg-transparent text-[var(--muted)] hover:text-[var(--ink)]'
+                          }`}
+                        >
+                          <ThumbsDown className="h-3.5 w-3.5" />
+                        </button>
+                        {isDrafting && message.feedback ? (
+                          <form
+                            className="flex items-center gap-1"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              void sendFeedback(index, message.feedback!.verdict, feedbackDraft.text);
+                              setFeedbackDraft(null);
+                            }}
+                          >
+                            <input
+                              type="text"
+                              autoFocus
+                              value={feedbackDraft.text}
+                              onChange={(e) => setFeedbackDraft({ index, text: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') setFeedbackDraft(null);
+                              }}
+                              placeholder="What happened? (optional)"
+                              maxLength={2000}
+                              className="w-56 rounded-full border border-[var(--hair)] bg-[var(--paper)] px-2.5 py-1 text-[11px] outline-none focus:border-[var(--accent)]"
+                            />
+                            <button type="submit" className="text-[11px] text-[var(--muted)] hover:text-[var(--ink)]">
+                              Save
+                            </button>
+                          </form>
+                        ) : (
+                          message.feedback?.comment && (
+                            <button
+                              type="button"
+                              title={message.feedback.comment}
+                              onClick={() => setFeedbackDraft({ index, text: message.feedback?.comment ?? '' })}
+                              className="max-w-56 truncate bg-transparent text-[11px] italic text-[var(--muted)] hover:text-[var(--ink)]"
+                            >
+                              “{message.feedback.comment}”
+                            </button>
+                          )
+                        )}
+                      </>
+                    )}
+                    {message.trace && !isActive && (
+                      <button
+                        type="button"
+                        onClick={() => setPinnedTurn(index)}
+                        className="bg-transparent text-[11px] text-[var(--muted)] hover:text-[var(--ink)]"
+                      >
+                        View runtime →
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1091,6 +1232,10 @@ function RuntimeRail({
   const usage = asRecord(trace?.usage);
   const model = stringValue(trace?.model);
   const elapsed = typeof trace?.elapsed_ms === 'number' ? (trace.elapsed_ms as number) : null;
+  // Soft cost guard: the agent flags a turn whose cost exceeded MAESTRO_TURN_BUDGET_USD.
+  const budget = asRecord(trace?.budget);
+  const overBudget = budget?.over === true;
+  const budgetLimit = typeof budget?.limit_usd === 'number' ? (budget.limit_usd as number) : null;
 
   return (
     <aside className="surface flex min-h-0 flex-1 flex-col p-0">
@@ -1104,7 +1249,24 @@ function RuntimeRail({
             {usage?.total_tokens != null && (
               <span className="chip">{Number(usage.total_tokens).toLocaleString()} tok</span>
             )}
-            {usage?.cost_usd != null && <span className="chip">{formatUsd(Number(usage.cost_usd))}</span>}
+            {usage?.cost_usd != null && (
+              <span
+                className="chip"
+                style={
+                  overBudget
+                    ? { borderColor: 'var(--danger)', color: 'var(--danger)' }
+                    : undefined
+                }
+                title={
+                  overBudget && budgetLimit != null
+                    ? `Over the ${formatUsd(budgetLimit)} per-turn budget (MAESTRO_TURN_BUDGET_USD)`
+                    : undefined
+                }
+              >
+                {formatUsd(Number(usage.cost_usd))}
+                {overBudget && budgetLimit != null ? ` · over ${formatUsd(budgetLimit)} budget` : ''}
+              </span>
+            )}
             {elapsed != null && <span className="chip">{(elapsed / 1000).toFixed(1)}s</span>}
           </div>
         ) : (
