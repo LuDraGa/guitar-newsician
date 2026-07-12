@@ -11,7 +11,7 @@ import io
 
 import mido
 
-from maestro_agent.agent import _agent_cache_key, _make_subagents, describe_tools
+from maestro_agent.agent import _agent_cache_key, create_agent_runner, describe_tools
 from maestro_agent.fact_pack import (
     SongFactPackQueries,
     _build_mix_dynamics,
@@ -449,43 +449,40 @@ def test_agent_cache_key_distinguishes_model_and_pack_identity():
     assert key("s1", "m", pack_v5) == key("s1", "m", pack_v5)
 
 
-# --- 0.6: parts specialist + retrieval-discipline docstrings (Seam B) --------
+# --- 0.6 + #17: retrieval-discipline docstrings, no subagent surface (Seam B) --
 
 
 class _FakeFactPack:
-    """describe_tools / _make_subagents only inspect — they never read a song. The
+    """describe_tools / create_agent_runner only wire — they never read a song. The
     closures are built with this stub and only have their signatures/docstrings read."""
 
     def query(self, song_id: str):  # noqa: ARG002 - closures capture but never call it here
         return object()
 
 
-def _subagents_by_name() -> dict:
-    return {sub["name"]: sub for sub in _make_subagents(model=object())}
-
-
 def _tools_by_name() -> dict:
     return {tool["name"]: tool for tool in describe_tools(_FakeFactPack())}
 
 
-def test_parts_agent_registered_for_arrangement_and_role():
-    subs = _subagents_by_name()
-    assert "parts_agent" in subs  # new fifth specialist
-    parts = subs["parts_agent"]
-    desc = parts["description"].lower()
-    assert "arrangement" in desc or "role" in desc
-    # Soft prompt-level guidance leads with the per-part tools (no hard tool-locking).
-    assert "get_section_activity" in parts["system_prompt"]
-    assert "get_stem" in parts["system_prompt"]
+def test_no_task_tool_after_roster_trim():
+    """#17: the specialist roster is removed and the DeepAgents default
+    general-purpose subagent is disabled via the litellm harness profile, so no
+    `task` tool may be bound. A deepagents upgrade that silently re-adds the
+    default must fail here. (settings is only consulted when model is omitted,
+    and building the graph never calls the LLM.)"""
+    runner = create_agent_runner(None, _FakeFactPack(), "song-x", model="openai/gpt-5.4-nano")
+    bound_tools = set(runner.nodes["tools"].bound.tools_by_name)
+    assert "task" not in bound_tools
+    # The 7 fact-pack tools (+ get_stems/get_stem) must still be bound.
+    assert {"get_sections", "get_bar_grid", "get_stem"} <= bound_tools
 
 
-def test_midi_agent_repointed_to_per_part_tools():
-    midi = _subagents_by_name()["midi_agent"]
-    prompt = midi["system_prompt"]
-    # Repointed to the note-level/playability lens over stems...
-    assert "get_stem" in prompt and "get_section_activity" in prompt
-    # ...with get_midi_tracks demoted to the mix-level all_src only.
-    assert "all_src" in prompt
+def test_bar_grid_docstring_carries_meter_provenance():
+    """The rhythm specialist's one unique instruction survives the trim as
+    tool-docstring guidance: bar provenance must be stated in answers."""
+    desc = _tools_by_name()["get_bar_grid"]["description"].lower()
+    assert "meter.source" in desc
+    assert "downbeats" in desc and "beat grouping" in desc
 
 
 def test_get_stems_docstring_demoted_to_thin_use_case():

@@ -10,18 +10,19 @@
 > "fight the framework vs. live with it" calls are made once, on the record, not re-litigated.
 >
 > **Created:** 2026-06-17 (Slice 0.6 — in lieu of trimming the DeepAgents static prompt, we *document* the surplus).
-> **Expanded:** 2026-06-17 (added the (b) underusing / (c) overusing lenses, the workflow-as-agents axis, and the "QnA node in a larger flow" framing). **Owner:** Maestro build.
+> **Expanded:** 2026-06-17 (added the (b) underusing / (c) overusing lenses, the workflow-as-agents axis, and the "QnA node in a larger flow" framing).
+> **Revised:** 2026-07-12 ([#17](https://github.com/LuDraGa/guitar-newsician/issues/17) — specialist roster + `task` routing **removed**; delegation fired 0/10 on nano AND gpt-5.5 in the [#7 duel](../execution_docs/2026-07-12_maestro_frontier_model_verdict.md)). **Owner:** Maestro build.
 
 ---
 
 ## The stack (what Maestro runs on)
 
-- **DeepAgents** (`create_deep_agent`) — the agent loop, subagent (`task`) routing, middleware, and system-prompt assembly. The static system prefix it builds is what OpenAI prompt-caches. Full constructor surface (params we *do* and *don't* pass) is the audit basis below.
+- **DeepAgents** (`create_deep_agent`) — the agent loop, middleware, and system-prompt assembly. The static system prefix it builds is what OpenAI prompt-caches. Subagent (`task`) routing is deliberately **off** since #17 (roster removed, general-purpose disabled via the `litellm` harness profile). Full constructor surface (params we *do* and *don't* pass) is the audit basis below.
 - **LangChain / LangGraph** underneath (state graph, tool nodes, message types) — the substrate for any future multi-node *workflow* (routing / orchestration / parallelization / chaining).
 - **LiteLLM-backed chat model** (`maestro_agent.llm`) — OpenAI via the Responses API; model pinned through our `openai/*` allowlist. Single chokepoint for tokens/cost/instrumentation and provider switching.
-- **Our wiring** (`maestro_agent.agent`) — the bounded `SongFactPack` tools, the specialists, the usage observer (`cached_tokens` surfaced), and the per-(song, model, pack-identity) agent cache.
+- **Our wiring** (`maestro_agent.agent`) — the bounded `SongFactPack` tools, the usage observer (`cached_tokens` surfaced), the per-(song, model, pack-identity) agent cache, and the `litellm` harness-profile registration (general-purpose subagent off).
 
-> **The `create_deep_agent` constructor surface** (so the audit names real knobs): `model`, `tools`, `system_prompt`, `subagents`, `name` — **we pass these**. `middleware`, `skills`, `memory`, `permissions`, `backend`, `interrupt_on`, `response_format`, `state_schema`, `context_schema`, `checkpointer`, `store`, `cache`, `debug` — **we don't**. On the shelf as middleware: `AsyncSubAgentMiddleware`, `RubricMiddleware`, `MemoryMiddleware`, `FilesystemMiddleware`, `SkillsMiddleware`, `SummarizationMiddleware`.
+> **The `create_deep_agent` constructor surface** (so the audit names real knobs): `model`, `tools`, `system_prompt`, `name` — **we pass these** (`subagents` dropped at #17). `middleware`, `skills`, `memory`, `permissions`, `backend`, `interrupt_on`, `response_format`, `state_schema`, `context_schema`, `checkpointer`, `store`, `cache`, `debug` — **we don't**. Via `register_harness_profile("litellm", ...)`: `general_purpose_subagent` disabled. On the shelf as middleware: `AsyncSubAgentMiddleware`, `RubricMiddleware`, `MemoryMiddleware`, `FilesystemMiddleware`, `SkillsMiddleware`, `SummarizationMiddleware`.
 
 ---
 
@@ -30,11 +31,10 @@
 | Capability | Where | Notes |
 |---|---|---|
 | **Prompt caching** of the stable prefix | OpenAI auto, preserved by us | 0.5 seeded overview rides it (baked at agent creation, not re-sent per turn); `cached_tokens` proves hits in the trace. The whole "keep the prefix stable" discipline exists to protect this. |
-| **Subagents + `task` routing** (mechanism) | `_make_subagents` | structure / harmony / rhythm / **parts** / midi specialists (5). Soft prompt-level tool guidance, not hard tool-locking. *Mechanism is load-bearing; current utilization is low — see (c).* |
 | **System-prompt assembly + tool-calling loop** | `create_deep_agent` | the core agent behavior; the 10 bounded `SongFactPack` tools hang off it. |
 | **Per-request usage trace** | `MaestroUsageObserver` | tokens incl. `cached_tokens`, per call + summarized, ride the chat trace. **In-flight fence** (#8) closed the drain race the #7 duel exposed — the numbers are no longer lower bounds. |
 | **Per-(song, model, pack) agent cache** | `_agent_cache` | so a model switch or pack rebuild doesn't reuse a stale baked-in overview. |
-| **Langfuse tracing** (#8) | `maestro_agent.tracing` + `CallbackHandler` on `agent.invoke` | full run tree per turn (generations, tool calls, specialist hops) under a per-turn `trace_id`; session = conversation id, user = song owner; pack version/created_at in metadata (the story-14 fresh-vs-recall seam). Keys in `maestro/.env`; degrades to a no-op without them. |
+| **Langfuse tracing** (#8) | `maestro_agent.tracing` + `CallbackHandler` on `agent.invoke` | full run tree per turn (generations, tool calls) under a per-turn `trace_id`; session = conversation id, user = song owner; pack version/created_at in metadata (the story-14 fresh-vs-recall seam). Keys in `maestro/.env`; degrades to a no-op without them. |
 | **User feedback loop** (#8) | `werecode.maestro_feedback` (RLS'd) + `/api/maestro/feedback` + thumbs UI | thumbs + optional note keyed to `trace_id`; durable row first, best-effort `user-thumbs` Langfuse score second. |
 | **Per-turn cost guard** (#8) | `_budget_status` on the fenced observer totals | soft: `MAESTRO_TURN_BUDGET_USD` (default $0.50, `0` disables) flags over-budget turns in `trace.budget` + the Runtime rail; never blocks. |
 
@@ -46,7 +46,6 @@
 |---|---|---|
 | **LiteLLM chokepoint** (`maestro_agent.llm`) | one OpenAI call per turn; observer records tokens/cost (fenced). | Built to be the seam for **multi-provider routing and ensemble/voting** — still single-line opt-ins later. ~~Richer instrumentation (Langfuse)~~ → **wired at #8** (via the LangChain handler on `agent.invoke`, the seam that sees the whole run tree). |
 | **The usage trace / `cached_tokens`** | captured + displayed in the Runtime rail; the **#8 budget guard acts on it** (per-turn `trace.budget` flag). | Remaining reach: cache-hit alerting and per-tool cost attribution (Langfuse now carries the raw data for both). |
-| **Subagent routing** | 5 specialists registered; soft guidance. | Delegation **rarely fires** on nano single-turn QnA (0.6 live finding: the main agent answered directly). We have the routing graph but exercise ~none of it — the *orchestration* value (decompose → delegate → merge) is untapped until the verbs that need it (S2+). |
 | **System prompt as the only output contract** | prose instructions; Markdown answers. | We shape behavior through the prompt but take **unstructured prose** out. `response_format` would let the same agent emit *machine-checkable structured retrieval* — the QnA-node job (see "Where this is heading"). Underused because today's surface is a chat box, not a consumer. |
 
 ## (c) 🟡 Overusing — we carry it, but don't yet need it
@@ -55,9 +54,9 @@
 
 | Carried | Why it's overuse *today* | Disposition |
 |---|---|---|
-| **5 specialist subagent definitions** in every prefix | On nano + single-turn QnA, delegation seldom fires (0.6), so we pay prefix weight for routing machinery that mostly doesn't route. | **Keep** — it's intentional scaffolding for the orchestration verbs (S2 sequence, S3 drill, S5 arrange). Re-evaluate the *count* if the larger default model still doesn't delegate. |
-| **Auto general-purpose subagent** | Auto-added (we pass no `general_purpose_subagent=...`); a competing route alongside our specialists that we never want to win. | **Documented, left on** — clean off-switch exists (`GeneralPurposeSubagentProfile(enabled=False)`) but low payoff; flip it if it ever steals a route. |
-| **Default file/shell tools** (`write_todos`, `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `execute`) | Maestro touches no files/shell → dead tools in the cached prefix. | **Document, don't strip** (0.6 call) — no clean knob (PlanningMiddleware/FilesystemMiddleware surgery is fragile across upgrades); cost is one-time cached tokens. |
+| **Default file/shell tools** (`write_todos`, `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `execute`) | Maestro touches no files/shell → dead tools in the cached prefix. | **Document, don't strip** (0.6 call, reaffirmed at #17's roster-only scope) — no clean knob (TodoList/FilesystemMiddleware surgery is fragile across upgrades); cost is one-time cached tokens. |
+
+> **Resolved out of this table at #17 (2026-07-12):** the **5 specialist subagent definitions** and the **auto general-purpose subagent** are gone. The #7 duel showed delegation fires 0/10 on nano AND gpt-5.5 — the "re-evaluate if the larger model still doesn't delegate" condition hit, so the roster was deleted (prompts live in git history) and the general-purpose default disabled via `register_harness_profile("litellm", HarnessProfile(general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False)))`. The `task` tool and its ~1K-token schema no longer ship. A regression test (`test_no_task_tool_after_roster_trim`) guards against an upgrade re-adding it. The seam stays one `subagents=` argument away.
 
 ## (d) ⚪ Unused / untouched — future value
 
@@ -82,7 +81,7 @@
 
 | Pattern | What it is | DeepAgents/LangGraph primitive | Our status → where it lands |
 |---|---|---|---|
-| **Routing** | pick the right specialist/path for a request | `task` + subagent descriptions | **Partially used** (soft, rarely fires on nano). The only workflow pattern we touch. |
+| **Routing** | pick the right specialist/path for a request | `task` + subagent descriptions | **Removed at #17** (soft routing fired 0/10 on both nano and gpt-5.5). If a future verb needs dispatch (S3 orchestrator–workers), design purpose-built workers with *hard* routing there — don't resurrect the chat roster. |
 | **Chaining** (prompt-chaining) | fixed multi-step pipeline: comprehend → select → brief → check | a LangGraph sequence / staged prompts | **Unused.** Slice 1's brief verb is the first real chain (architecture §6 names prompt-chaining as its primitive). |
 | **Orchestration** (orchestrator–workers) | a lead agent decomposes a goal, spins workers, merges results | nested subagents / a lead graph node | **Unused.** S3 drill generator, S5 arrangement capstone. |
 | **Parallelization** | run independent sub-plans concurrently (e.g. per-section) | **`AsyncSubAgentMiddleware` / `AsyncSubAgent`** | **Unused** — the framework already ships the async-subagent middleware. S2/S3 parallel section sub-plans. |
@@ -98,7 +97,7 @@ As the agentic capability ladder climbs (S1 brief → S2 sequence → S3 drill �
 That reframes its mandate. The node's job is **not** "nicer chat prose" — it's **capture → filter → structure-richly**: pull the right slice of the fact pack, drop the noise, and hand back a **dense, structured, machine-consumable** answer that an orchestrator (or a brief/sequence/drill step) can build on. Concretely:
 
 - It pushes **`response_format`** (currently (b) underused → (d) unused) toward load-bearing: the node should emit structured retrieval, not free text, once it's feeding another step rather than a human chat box.
-- It recasts some of today's **(c) overuse** as *premature orchestration*: the specialist/routing machinery is provisioned for verbs that don't exist yet; when they do, that machinery moves **up** (into the orchestrator) and the QnA node underneath gets *simpler and more disciplined*, not more agentic.
+- It recasts some of the former **(c) overuse** as *premature orchestration*: the specialist/routing machinery was provisioned for verbs that don't exist yet. **#17 executed this lens** — the dormant roster is gone; when the orchestration verbs arrive (S3+), that machinery belongs **up** in the orchestrator, and the QnA node underneath stays *simpler and more disciplined*, not more agentic.
 - It means the highest-value near-term work on the current agent is **sharper capture/filter/structure** (the comprehension discipline Slice 0 has been building), not chat polish (why 0.8's CTA chips were deferred).
 
 *Not scheduled work — a lens.* When Slice 1 lifts `get_section_activity` into the Comprehension Graph with an LLM interpretation step, that interpretation step is the first place this QnA-node shape gets real: structured nodes out, not prose.
@@ -119,7 +118,8 @@ That reframes its mandate. The node's job is **not** "nicer chat prose" — it's
 
 ## 🚫 Don't need — deliberately out, for now
 
-- **File/shell tools + general-purpose subagent** — surplus (see (c)). **Decision (0.6): document, don't strip.** The general-purpose subagent *has* a clean off-switch but we leave it for consistency + low payoff; the file tools have *no* clean switch and the cost is one-time cached-prefix tokens. Revisit only if either competes for routing or the prefix bloats meaningfully.
+- **Specialist subagents + `task` routing** — **removed (#17, 2026-07-12).** Delegation fired 0/10 on both nano and gpt-5.5; the roster and the general-purpose default are gone (see the resolved note under (c)). Reintroduce only as purpose-built workers inside an orchestration verb, never as a soft-routed chat roster.
+- **File/shell tools** (`write_todos` + filesystem/execute schemas) — surplus (see (c)). **Decision (0.6, reaffirmed at #17): document, don't strip** — no clean switch, and the cost is one-time cached-prefix tokens. Revisit only if the prefix bloats meaningfully.
 - **Sandbox/`execute` backend** — no code execution in Maestro.
 - **DeepAgents default model** — we pin OpenAI via the allowlist; never rely on the framework default.
 

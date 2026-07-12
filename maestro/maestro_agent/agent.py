@@ -1,9 +1,11 @@
 """DeepAgents wrapper for the Maestro baseline Q&A agent (ported from the POC).
 
-The wiring, the 7 bounded SongFactPack tools, the 4 specialists, and the trace
-extraction port nearly verbatim. The differences: the model is a LiteLLM-backed
-chat model (`maestro_agent.llm`), the tools read the WereCode SongFactPack
-(per song, not per BabySlakh track), and per-request usage rides the trace.
+The wiring, the 7 bounded SongFactPack tools, and the trace extraction port
+nearly verbatim. The differences: the model is a LiteLLM-backed chat model
+(`maestro_agent.llm`), the tools read the WereCode SongFactPack (per song, not
+per BabySlakh track), and per-request usage rides the trace. The POC's
+specialist subagent roster is gone — delegation never fired live on any model
+(#17), so the agent answers directly with the bounded tools.
 """
 
 from __future__ import annotations
@@ -15,7 +17,12 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from deepagents import create_deep_agent
+from deepagents import (
+    GeneralPurposeSubagentProfile,
+    HarnessProfile,
+    create_deep_agent,
+    register_harness_profile,
+)
 
 from maestro_agent.config import Settings
 from maestro_agent.fact_pack import (
@@ -36,6 +43,15 @@ MAX_HISTORY_CHARS = 6000
 # Per-request model override is dev-only and gated, but we still refuse anything
 # that isn't an OpenAI model so a typo can't quietly bill an unexpected provider.
 ALLOWED_MODEL_PREFIX = "openai/"
+
+# Every Maestro model is a ChatLiteLLM instance, so all agents resolve to the
+# "litellm" harness profile. Without this, DeepAgents auto-adds a general-purpose
+# subagent whose `task` tool ships ~1K tokens of schema on every request — dead
+# surface here, since delegation fired 0/10 live on both nano and gpt-5.5 (#17).
+register_harness_profile(
+    "litellm",
+    HarnessProfile(general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False)),
+)
 
 
 class ModelNotAllowed(ValueError):
@@ -63,7 +79,6 @@ Important behavior:
 - Stems are the song's parts — each carries its own identity, key, tempo, chords, loudness, and pitch content. The parts roster and the key headline are ALREADY in the seeded overview above: do not call get_stems or get_key just to restate them.
 - Scope every answer to the roster: pick the relevant part(s), then drill with get_stem(stem_id) or get_section_activity. Compare parts only when the question asks (e.g. lead vs rhythm guitar); never dump all parts.
 - For a per-part or monophonic part's key/harmony, drill the stem and compare its dominant_pitch_classes (per section, on get_section_activity) or pitch_class_profile (whole stem, on get_stem) to the mix chord roots — reconciling teaching vs detected key first. Trust the part's pitch content over a chord label for bass/monophonic parts.
-- Call a specialist subagent only if a focused structure, harmony, rhythm, MIDI/note-level, or parts/arrangement pass would improve the answer.
 - Be honest about confidence and evidence; music analysis is uncertain and sometimes conflicting. Surface confidence when it is low or the detected and teaching keys disagree.
 - Stay guitar-aware: distinguish what the guitar should play from what is happening in the full mix.
 - The UI renders Markdown: use compact tables, inline code, and fenced code blocks when they make the answer clearer.
@@ -91,7 +106,6 @@ def create_agent_runner(
     return create_deep_agent(
         model=chat_model,
         tools=tools,
-        subagents=_make_subagents(chat_model),
         system_prompt=SYSTEM_PROMPT_TEMPLATE.format(song_id=song_id, overview_block=_overview_block(pack)),
         name="song_qna_agent",
     )
@@ -260,7 +274,7 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         return _safe_fact_query(query.get_sections)
 
     def get_bar_grid(start_sec: float | None = None, end_sec: float | None = None) -> dict[str, Any]:
-        """Return bars/beats for the active song, optionally filtered to a time range in seconds."""
+        """Return bars/beats for the active song, optionally filtered to a time range in seconds. meter.source says whether bars come from MIDI time signatures, analysis downbeats, or beat grouping — state that provenance when answering about bars or timing."""
         return _safe_fact_query(query.get_bar_grid, start_sec, end_sec)
 
     def get_chords(start_sec: float | None = None, end_sec: float | None = None, limit: int = 64) -> dict[str, Any]:
@@ -338,60 +352,6 @@ def describe_tools(fact_pack: SongFactPackService) -> list[dict[str, Any]]:
             )
         described.append({"name": tool.__name__, "description": (tool.__doc__ or "").strip(), "params": params})
     return described
-
-
-def _make_subagents(model: Any) -> list[dict[str, Any]]:
-    return [
-        {
-            "name": "structure_agent",
-            "description": "Use for sections, repeats, intro/verse/chorus-like interpretation, and structure evidence.",
-            "model": model,
-            "system_prompt": (
-                "You are Maestro's structure specialist. Use only SongFactPack tools. "
-                "Summarize sections, repeats, and structure evidence without inventing labels when confidence is weak."
-            ),
-        },
-        {
-            "name": "harmony_agent",
-            "description": "Use for key, chords, cadences, transposition, and chord reliability.",
-            "model": model,
-            "system_prompt": (
-                "You are Maestro's harmony specialist. Use get_key, get_chords, and transpose_song. "
-                "Mention confidence and evidence when chord or key estimates are uncertain."
-            ),
-        },
-        {
-            "name": "rhythm_agent",
-            "description": "Use for BPM, beats, downbeats, bars, timing grid, and rhythm evidence.",
-            "model": model,
-            "system_prompt": (
-                "You are Maestro's rhythm specialist. Use get_bar_grid and get_song_slice. "
-                "Always state whether bars come from MIDI time signatures, analysis downbeats, or beat grouping."
-            ),
-        },
-        {
-            "name": "parts_agent",
-            "description": "Use for arrangement and per-part role questions: which part plays what and where, comparing two parts (e.g. lead vs rhythm guitar), and how the parts layer across sections.",
-            "model": model,
-            "system_prompt": (
-                "You are Maestro's parts/arrangement specialist. Lead with get_section_activity "
-                "(what each part does per section) and get_stem(stem_id) (one part's full detail). "
-                "The parts roster is already in the seeded overview — scope to it and drill the relevant "
-                "part(s); never dump every part. For a part's harmony, compare its dominant_pitch_classes / "
-                "pitch_class_profile to the mix chord roots rather than restating the global key."
-            ),
-        },
-        {
-            "name": "midi_agent",
-            "description": "Use for MIDI note-level and playability questions: note ranges, phrasing, programs/channels, and how a part sits on the fretboard.",
-            "model": model,
-            "system_prompt": (
-                "You are Maestro's MIDI/note-level specialist. Drill one part with get_stem(stem_id) and "
-                "use get_section_activity for where notes fall; reach for get_midi_tracks only for the "
-                "mix-level all_src MIDI. Keep findings tied to pitch ranges, programs/channels, and playability."
-            ),
-        },
-    ]
 
 
 def _safe_fact_query(func, *args: Any) -> dict[str, Any]:
