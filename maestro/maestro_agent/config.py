@@ -46,6 +46,9 @@ class Settings:
     # Soft per-turn cost ceiling in USD; 0 disables the check. The guard flags
     # over-budget turns in the trace — it never blocks a turn.
     turn_budget_usd: float = 0.50
+    # The brief capability's judgment-pass model (#7 verdict: frontier depth
+    # belongs to the brief's single interpretation pass, not the chat seat).
+    brief_model: str = "openai/gpt-5.5"
 
     def public_dict(self) -> dict[str, object]:
         # Never expose the service-role key.
@@ -57,6 +60,7 @@ class Settings:
             "agent_model": self.agent_model,
             "agent_enabled": self.agent_enabled,
             "turn_budget_usd": self.turn_budget_usd,
+            "brief_model": self.brief_model,
         }
 
 
@@ -78,4 +82,5 @@ def load_settings() -> Settings:
         agent_model=os.getenv("MAESTRO_AGENT_MODEL", "openai/gpt-5.5"),
         agent_enabled=_env_bool("MAESTRO_AGENT_ENABLED", True),
         turn_budget_usd=_env_float("MAESTRO_TURN_BUDGET_USD", 0.50),
+        brief_model=os.getenv("MAESTRO_BRIEF_MODEL", "openai/gpt-5.5"),
     )

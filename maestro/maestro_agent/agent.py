@@ -24,6 +24,12 @@ from deepagents import (
     register_harness_profile,
 )
 
+from maestro_agent.brief import (
+    DEFAULT_BRIEF_MODEL,
+    build_brief_node,
+    interpret_skeleton,
+    make_judgment,
+)
 from maestro_agent.config import Settings
 from maestro_agent.fact_pack import (
     FactPackUnavailable,
@@ -81,6 +87,7 @@ Important behavior:
 - For a per-part or monophonic part's key/harmony, drill the stem and compare its dominant_pitch_classes (per section, on get_section_activity) or pitch_class_profile (whole stem, on get_stem) to the mix chord roots — reconciling teaching vs detected key first. Trust the part's pitch content over a chord label for bass/monophonic parts.
 - Be honest about confidence and evidence; music analysis is uncertain and sometimes conflicting. Surface confidence when it is low or the detected and teaching keys disagree.
 - Stay guitar-aware: distinguish what the guitar should play from what is happening in the full mix.
+- For "brief this section / walk me through the chorus / what should I play in <section>" asks, call brief_region(region) ONCE and answer from its returned node — do not re-derive the rollup by chaining other tools. Present the node's interpretation as interpretation, keep evidence and confidence visible, and hedge wherever the node flags generic labels.
 - The UI renders Markdown: use compact tables, inline code, and fenced code blocks when they make the answer clearer.
 - Keep answers concise, evidence-backed, and practical.
 """
@@ -102,7 +109,7 @@ def create_agent_runner(
     `pack` is the current fact pack (None when the song has no analysis yet → no
     overview, but a still-functional agent)."""
     chat_model = make_chat_model(model or settings.agent_model)
-    tools = _make_tools(fact_pack, song_id)
+    tools = _make_tools(fact_pack, song_id, settings)
     return create_deep_agent(
         model=chat_model,
         tools=tools,
@@ -266,8 +273,9 @@ def _build_agent_messages(song_id: str, message: str, history: list[dict[str, An
     return messages
 
 
-def _make_tools(fact_pack: SongFactPackService, song_id: str):
+def _make_tools(fact_pack: SongFactPackService, song_id: str, settings: Settings | None = None):
     query = fact_pack.query(song_id)
+    brief_model = getattr(settings, "brief_model", None) or DEFAULT_BRIEF_MODEL
 
     def get_sections() -> dict[str, Any]:
         """Return the active song's section boundaries and labels from the SongFactPack."""
@@ -313,6 +321,18 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         """Return a transposed key and chord progression preview for the active song."""
         return _safe_fact_query(query.transpose_song, semitones, target_key)
 
+    def brief_region(region: str) -> dict[str, Any]:
+        """Brief a region of the song for a guitarist — the Section×Role briefing tool. region is a section label or index (e.g. 'the chorus', 'verse', '3'); all matching sections are briefed together. Runs the deterministic Section×Role rollup over the fact pack plus one interpretation pass, and returns a structured brief node (data + evidence + confidence + interpretation; parts it cannot analyze are flagged, generic labels are hedged). Call this ONCE for 'brief / walk me through / what should I play in <section>' asks and answer from the node — do not re-derive it by chaining other tools."""
+
+        def _run() -> dict[str, Any]:
+            pack = fact_pack.ensure_current(song_id)
+            judge = make_judgment(brief_model)
+            return build_brief_node(
+                pack, region, lambda skeleton: interpret_skeleton(skeleton, judge, model=brief_model)
+            )
+
+        return _safe_fact_query(_run)
+
     return [
         get_sections,
         get_bar_grid,
@@ -324,6 +344,7 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str):
         get_section_activity,
         get_song_slice,
         transpose_song,
+        brief_region,
     ]
 
 

@@ -37,6 +37,7 @@
 | **Langfuse tracing** (#8) | `maestro_agent.tracing` + `CallbackHandler` on `agent.invoke` | full run tree per turn (generations, tool calls) under a per-turn `trace_id`; session = conversation id, user = song owner; pack version/created_at in metadata (the story-14 fresh-vs-recall seam). Keys in `maestro/.env`; degrades to a no-op without them. |
 | **User feedback loop** (#8) | `werecode.maestro_feedback` (RLS'd) + `/api/maestro/feedback` + thumbs UI | thumbs + optional note keyed to `trace_id`; durable row first, best-effort `user-thumbs` Langfuse score second. |
 | **Per-turn cost guard** (#8) | `_budget_status` on the fenced observer totals | soft: `MAESTRO_TURN_BUDGET_USD` (default $0.50, `0` disables) flags over-budget turns in `trace.budget` + the Runtime rail; never blocks. |
+| **`brief` capability — formula + judgment** (#1) | `maestro_agent.brief` + the `brief_region` tool | the first coaching verb: deterministic Section×Role rollup (pure, Seam-A-tested) + exactly ONE `gpt-5.5` judgment pass (`MAESTRO_BRIEF_MODEL`), returning an ephemeral node `data+evidence+confidence+interpretation` (`source: computed_fresh` — the story-14 seam; durable store is #2). The judgment rides the LiteLLM chokepoint (priced into the turn + budget flag) and lands in the turn's Langfuse trace as `brief-judgment`. |
 
 ## (b) 🟠 Underusing — we touch it, but don't exploit it
 
@@ -82,7 +83,7 @@
 | Pattern | What it is | DeepAgents/LangGraph primitive | Our status → where it lands |
 |---|---|---|---|
 | **Routing** | pick the right specialist/path for a request | `task` + subagent descriptions | **Removed at #17** (soft routing fired 0/10 on both nano and gpt-5.5). If a future verb needs dispatch (S3 orchestrator–workers), design purpose-built workers with *hard* routing there — don't resurrect the chat roster. |
-| **Chaining** (prompt-chaining) | fixed multi-step pipeline: comprehend → select → brief → check | a LangGraph sequence / staged prompts | **Unused.** Slice 1's brief verb is the first real chain (architecture §6 names prompt-chaining as its primitive). |
+| **Chaining** (prompt-chaining) | fixed multi-step pipeline: comprehend → select → brief → check | a LangGraph sequence / staged prompts | **First chain wired at #1 (2026-07-12):** the brief verb's select → rollup → judge steps are code-sequenced inside `brief_region` (plain Python, not a LangGraph sequence — right-sized for two steps). The "check" step is #5's evaluator stub. |
 | **Orchestration** (orchestrator–workers) | a lead agent decomposes a goal, spins workers, merges results | nested subagents / a lead graph node | **Unused.** S3 drill generator, S5 arrangement capstone. |
 | **Parallelization** | run independent sub-plans concurrently (e.g. per-section) | **`AsyncSubAgentMiddleware` / `AsyncSubAgent`** | **Unused** — the framework already ships the async-subagent middleware. S2/S3 parallel section sub-plans. |
 
