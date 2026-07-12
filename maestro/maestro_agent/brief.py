@@ -4,8 +4,9 @@
 rollup over the current fact pack (pure functions, unit-tested, no LLM), plus
 exactly ONE LLM interpretation pass over the assembled skeleton — never a list
 of natural-language sub-queries. The result is a structured node carrying
-`data + evidence + confidence + interpretation`, returned in-memory; the
-durable Comprehension Graph store is ticket #2.
+`data + evidence + confidence + interpretation`, assembled in-memory here; the
+durable Comprehension Graph store (`comprehension_graph.py`, ticket #2)
+persists it and serves warm regions without a second judgment pass.
 
 Every claim row in the skeleton carries its own evidence path and confidence;
 parts the formula cannot analyze are flagged, never dropped; ambiguously
@@ -302,7 +303,8 @@ def build_brief_node(
 
     No section match → an honest error listing what exists (abstain-and-point,
     never fabricate a region). `source` is the story-14 trace seam: always
-    `computed_fresh` here; `graph_recall` arrives with the #2 store."""
+    `computed_fresh` here; the graph service (#2) sets `ephemeral: False` when
+    it persists the node and `source: graph_recall` when it serves a warm one."""
     sections = pack.get("sections", [])
     matched = resolve_region(sections, region)
     if not matched:

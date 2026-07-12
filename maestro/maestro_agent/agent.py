@@ -26,10 +26,10 @@ from deepagents import (
 
 from maestro_agent.brief import (
     DEFAULT_BRIEF_MODEL,
-    build_brief_node,
     interpret_skeleton,
     make_judgment,
 )
+from maestro_agent.comprehension_graph import ComprehensionGraphService
 from maestro_agent.config import Settings
 from maestro_agent.fact_pack import (
     FactPackUnavailable,
@@ -322,13 +322,14 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str, settings: Settings
         return _safe_fact_query(query.transpose_song, semitones, target_key)
 
     def brief_region(region: str) -> dict[str, Any]:
-        """Brief a region of the song for a guitarist — the Section×Role briefing tool. region is a section label or index (e.g. 'the chorus', 'verse', '3'); all matching sections are briefed together. Runs the deterministic Section×Role rollup over the fact pack plus one interpretation pass, and returns a structured brief node (data + evidence + confidence + interpretation; parts it cannot analyze are flagged, generic labels are hedged). Call this ONCE for 'brief / walk me through / what should I play in <section>' asks and answer from the node — do not re-derive it by chaining other tools."""
+        """Brief a region of the song for a guitarist — the Section×Role briefing tool. region is a section label or index (e.g. 'the chorus', 'verse', '3'); all matching sections are briefed together. Runs the deterministic Section×Role rollup over the fact pack plus one interpretation pass, and returns a structured brief node (data + evidence + confidence + interpretation; parts it cannot analyze are flagged, generic labels are hedged). Briefed regions persist in the song's Comprehension Graph: re-asking a warm region serves the stored node (source: graph_recall, no second interpretation pass), and a fact-pack rebuild recomputes it fresh. Call this ONCE for 'brief / walk me through / what should I play in <section>' asks and answer from the node — do not re-derive it by chaining other tools."""
 
         def _run() -> dict[str, Any]:
-            pack = fact_pack.ensure_current(song_id)
+            # Built lazily in the tool body — introspection never touches data.
+            graph = ComprehensionGraphService(fact_pack)
             judge = make_judgment(brief_model)
-            return build_brief_node(
-                pack, region, lambda skeleton: interpret_skeleton(skeleton, judge, model=brief_model)
+            return graph.ensure_current(
+                song_id, region, lambda skeleton: interpret_skeleton(skeleton, judge, model=brief_model)
             )
 
         return _safe_fact_query(_run)

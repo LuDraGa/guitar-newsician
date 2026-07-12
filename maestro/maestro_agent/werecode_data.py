@@ -331,6 +331,68 @@ class WereCodeSongData:
             "dependency_fingerprint": row.get("dependency_fingerprint"),
         }
 
+    # ---- comprehension graph (maestro_comprehension_graph rows) --------------
+    # The durable brief-node store (#2). Not product CRUD: three methods scoped
+    # to one table — exact-key read, upsert, and a meta-only listing for status.
+
+    def get_graph_node(
+        self,
+        song_id: str,
+        node_type: str,
+        region_key: str,
+        pack_key: str,
+        graph_version: int,
+    ) -> dict[str, Any] | None:
+        resp = (
+            self._table("maestro_comprehension_graph")
+            .select("node")
+            .eq("song_id", song_id)
+            .eq("node_type", node_type)
+            .eq("region_key", region_key)
+            .eq("pack_key", pack_key)
+            .eq("graph_version", graph_version)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        return rows[0]["node"] if rows else None
+
+    def save_graph_node(
+        self,
+        song_id: str,
+        owner_id: str,
+        node_type: str,
+        region_key: str,
+        pack_key: str,
+        graph_version: int,
+        node: dict[str, Any],
+    ) -> None:
+        # Upsert on the unique key so a concurrent race converges on one row
+        # instead of erroring.
+        self._table("maestro_comprehension_graph").upsert(
+            {
+                "song_id": song_id,
+                "owner_id": owner_id,
+                "node_type": node_type,
+                "region_key": region_key,
+                "pack_key": pack_key,
+                "graph_version": graph_version,
+                "node": node,
+            },
+            on_conflict="song_id,node_type,region_key,pack_key,graph_version",
+        ).execute()
+
+    def list_graph_node_meta(self, song_id: str) -> list[dict[str, Any]]:
+        """Key columns only — the `node` jsonb blob never crosses the wire, so
+        the graph `status()` freshness view stays cheap."""
+        resp = (
+            self._table("maestro_comprehension_graph")
+            .select("node_type,region_key,pack_key,graph_version,created_at")
+            .eq("song_id", song_id)
+            .execute()
+        )
+        return resp.data or []
+
 
 # --- stem identity (Python port of src/lib/music/stem-metadata.ts getStemInfo) ---
 # The Prep A upload work writes precise stem identity (a nested `stem` object +
