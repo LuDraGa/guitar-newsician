@@ -31,6 +31,7 @@ from maestro_agent.brief import (
 )
 from maestro_agent.comprehension_graph import ComprehensionGraphService
 from maestro_agent.config import Settings
+from maestro_agent.drill import build_drill_node, interpret_plan
 from maestro_agent.fact_pack import (
     FactPackUnavailable,
     SongFactPackService,
@@ -88,6 +89,7 @@ Important behavior:
 - Be honest about confidence and evidence; music analysis is uncertain and sometimes conflicting. Surface confidence when it is low or the detected and teaching keys disagree.
 - Stay guitar-aware: distinguish what the guitar should play from what is happening in the full mix.
 - For "brief this section / walk me through the chorus / what should I play in <section>" asks, call brief_region(region) ONCE and answer from its returned node — do not re-derive the rollup by chaining other tools. Present the node's interpretation as interpretation, keep evidence and confidence visible, and hedge wherever the node flags generic labels.
+- For "give me a drill / an exercise / how should I practice <section>" asks, call drill_region(region) ONCE and answer from its returned node — the drill already stands on the region's stored brief (a cold region populates it first; do not call brief_region separately). Present the loop window, tempo ladder, and steps practically, and keep the node's hedges and abstentions visible.
 - The UI renders Markdown: use compact tables, inline code, and fenced code blocks when they make the answer clearer.
 - Keep answers concise, evidence-backed, and practical.
 """
@@ -334,6 +336,23 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str, settings: Settings
 
         return _safe_fact_query(_run)
 
+    def drill_region(region: str) -> dict[str, Any]:
+        """Generate a practice drill for a region of the song — the light Section×Role drill tool. region is a section label or index (e.g. 'the bridge', 'chorus', '3'); all matching sections are drilled together. Composes on the song's Comprehension Graph: the region's stored brief node is recalled (or populated first via the brief's formula + one interpretation pass if the region is cold), then a deterministic practice plan (loop window, tempo ladder, focus parts, cautions) plus one drill interpretation pass produce a structured drill node (data + evidence + confidence + interpretation; brief_source says whether the underlying comprehension was recalled or computed fresh). Grounded in what's actually happening in the region — flagged or ambiguous parts carry cautions, and missing data yields abstentions, never guesses. Call this ONCE for 'drill / exercise / how do I practice <section>' asks and answer from the node — do not chain brief_region or other tools first."""
+
+        def _run() -> dict[str, Any]:
+            # Built lazily in the tool body — introspection never touches data.
+            graph = ComprehensionGraphService(fact_pack)
+            brief_judge = make_judgment(brief_model)
+            brief_node = graph.ensure_current(
+                song_id, region, lambda skeleton: interpret_skeleton(skeleton, brief_judge, model=brief_model)
+            )
+            drill_judge = make_judgment(brief_model, run_name="drill-judgment")
+            return build_drill_node(
+                brief_node, region, lambda plan: interpret_plan(plan, drill_judge, model=brief_model)
+            )
+
+        return _safe_fact_query(_run)
+
     return [
         get_sections,
         get_bar_grid,
@@ -346,6 +365,7 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str, settings: Settings
         get_song_slice,
         transpose_song,
         brief_region,
+        drill_region,
     ]
 
 

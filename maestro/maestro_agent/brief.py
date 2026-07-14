@@ -260,16 +260,17 @@ def _parse_judgment(raw: str) -> dict[str, Any]:
     return {"summary": str(raw or "").strip()}
 
 
-def make_judgment(model: str) -> Callable[[str], str]:
+def make_judgment(model: str, run_name: str = "brief-judgment") -> Callable[[str], str]:
     """The real judgment callable: one chat completion through the LiteLLM
     chokepoint (so the usage observer prices it into the turn) with the Langfuse
-    handler attached (so the pass lands in the turn's trace as `brief-judgment`)."""
+    handler attached (so the pass lands in the turn's trace under `run_name` —
+    `brief-judgment` here, `drill-judgment` for #4's pass)."""
     from maestro_agent.llm import make_chat_model
     from maestro_agent.tracing import build_handler
 
     def judge(prompt: str) -> str:
         chat = make_chat_model(model)
-        config: dict[str, Any] = {"run_name": "brief-judgment"}
+        config: dict[str, Any] = {"run_name": run_name}
         handler = build_handler()
         if handler is not None:
             config["callbacks"] = [handler]
