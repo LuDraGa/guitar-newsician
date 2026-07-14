@@ -108,6 +108,19 @@ export const createAssetSchema = z.object({
   metadata: jsonRecordSchema.default({}),
 });
 
+/**
+ * Stem identity curation (label + tags). The role is deliberately not editable:
+ * it is encoded in the asset `kind`, so moving it is a different, larger change.
+ */
+export const updateStemIdentitySchema = z
+  .object({
+    label: z.string().trim().min(1).max(60).optional(),
+    tags: z.array(z.string().trim().min(1).max(24)).max(8).optional(),
+  })
+  .refine((body) => body.label !== undefined || body.tags !== undefined, {
+    message: 'Provide a label, tags, or both.',
+  });
+
 export const createJobSchema = z.object({
   song_id: z.string().uuid().nullable().optional(),
   version_id: z.string().uuid().nullable().optional(),

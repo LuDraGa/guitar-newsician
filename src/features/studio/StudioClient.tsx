@@ -19,6 +19,7 @@ import {
   Layers,
   ListMusic,
   Loader2,
+  Pencil,
   Mic,
   Music2,
   Pause,
@@ -86,6 +87,7 @@ import { PitchShift } from 'tone/build/esm/effect/PitchShift.js';
 import { setContext as setToneContext } from 'tone/build/esm/core/Global.js';
 import { connect as connectToneAudioNodes } from 'tone/build/esm/core/context/ToneAudioNode.js';
 import { MusicXmlPreviewPanel } from './MusicXmlPreviewPanel';
+import { StemIdentityEditor } from './StemIdentityEditor';
 import { StudioPicker } from './StudioPicker';
 import { fetchJson, formatBytes, signDownloads } from './studio-utils';
 
@@ -158,6 +160,7 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
   const [stemMix, setStemMix] = useState<Record<string, StemMixState>>({});
   const [stemSignError, setStemSignError] = useState<string | null>(null);
   const [activeStemAnalysisId, setActiveStemAnalysisId] = useState<string | null>(null);
+  const [savingStemIdentityId, setSavingStemIdentityId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<ReadonlySet<string>>(() => new Set<string>());
   // Stages observed as still in flight on the server (e.g. a job started before a
@@ -832,6 +835,48 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
     }
   }
 
+  /**
+   * Curate a stem's identity (label + tags) — the axis Maestro's briefs read to
+   * tell a lead guitar from a rhythm one. The write only moves `assets.metadata`,
+   * never the audio, so Maestro notices it through the stem-identity hash in the
+   * fact pack's fingerprint: the pack rebuilds and its cached comprehension of the
+   * song is re-keyed rather than served stale.
+   */
+  async function saveStemIdentity(asset: AssetSummary, next: { label: string; tags: string[] }): Promise<boolean> {
+    if (!song) {
+      setError('Select a song first');
+      return false;
+    }
+
+    setSavingStemIdentityId(asset.id);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const result = await fetchJson<{ assets: AssetRow[] }>(`/api/songs/${song.id}/assets/${asset.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(next),
+      });
+      const summaries = (result.assets ?? []).map(toAssetSummary);
+      const nextAssets = mergeById(assets, summaries).sort(sortAssetsByCreatedAt);
+      setAssets(nextAssets);
+      upsertCachedStudioAssets(song.id, summaries);
+      for (const summary of summaries) {
+        if (summary.song_id) {
+          upsertCachedAssetForSong(summary.song_id, summary);
+        }
+      }
+      setStemMix((current) => ensureStemMix(nextAssets, current));
+      setMessage(`${next.label} updated — Maestro will re-study this song.`);
+      return true;
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not update the part');
+      return false;
+    } finally {
+      setSavingStemIdentityId(null);
+    }
+  }
+
   const workflowActions = {
     analyze: (options?: { force?: boolean; analyzers?: readonly string[] }) => {
       // Depth toggle drives the analyzer set: full sends the explicit list
@@ -951,6 +996,8 @@ export function StudioClient({ initialSongId }: { initialSongId?: string }) {
                   onSoloStem={soloStem}
                   onOpenAsset={(asset) => void openAsset(asset)}
                   onRunStemAnalysis={(asset, options) => void runStemAnalysis(asset, options)}
+                  savingStemIdentityId={savingStemIdentityId}
+                  onSaveStemIdentity={saveStemIdentity}
                   onRunStems={() => void workflowActions.stems()}
                   onRunAnalyze={() => void workflowActions.analyze()}
                   onFetchLyrics={() => void workflowActions.lyricsFetch()}
@@ -1231,6 +1278,8 @@ function KaraokeProductView({
   onSoloStem,
   onOpenAsset,
   onRunStemAnalysis,
+  savingStemIdentityId,
+  onSaveStemIdentity,
   onRunStems,
   onRunAnalyze,
   onFetchLyrics,
@@ -1261,6 +1310,8 @@ function KaraokeProductView({
   onSoloStem: (assetId: string) => void;
   onOpenAsset: (asset: AssetSummary) => void;
   onRunStemAnalysis: (asset: AssetSummary, options?: { force?: boolean }) => void;
+  savingStemIdentityId: string | null;
+  onSaveStemIdentity: (asset: AssetSummary, next: { label: string; tags: string[] }) => Promise<boolean>;
   onRunStems: () => void;
   onRunAnalyze: () => void;
   onFetchLyrics: () => void;
@@ -1291,6 +1342,8 @@ function KaraokeProductView({
             onSoloStem={onSoloStem}
             onOpenAsset={onOpenAsset}
             onRunStemAnalysis={onRunStemAnalysis}
+            savingStemIdentityId={savingStemIdentityId}
+            onSaveStemIdentity={onSaveStemIdentity}
             onRunStems={onRunStems}
             stale={stemsStale}
             onRerun={onRerunStems}
@@ -1330,6 +1383,8 @@ function StemsPanel({
   onSoloStem,
   onOpenAsset,
   onRunStemAnalysis,
+  savingStemIdentityId,
+  onSaveStemIdentity,
   onRunStems,
   stale,
   onRerun,
@@ -1348,12 +1403,15 @@ function StemsPanel({
   onSoloStem: (assetId: string) => void;
   onOpenAsset: (asset: AssetSummary) => void;
   onRunStemAnalysis: (asset: AssetSummary, options?: { force?: boolean }) => void;
+  savingStemIdentityId: string | null;
+  onSaveStemIdentity: (asset: AssetSummary, next: { label: string; tags: string[] }) => Promise<boolean>;
   onRunStems: () => void;
   stale: boolean;
   onRerun: () => void;
 }) {
   const anySolo = Object.values(stemMix).some((state) => state.solo);
   const analysisBusy = running.has('Analysis');
+  const [editingStemAssetId, setEditingStemAssetId] = useState<string | null>(null);
 
   return (
     <section className="surface flex min-h-0 flex-col overflow-hidden p-4">
@@ -1396,8 +1454,10 @@ function StemsPanel({
             const analysisStatus = stemAnalysisStatus(asset, analysisAsset, activeStemAnalysisId);
             const analysisSummary = stemAnalysisStatusLabel(analysisStatus);
             const canForceAnalysis = analysisStatus === 'ready' || analysisStatus === 'stale';
+            const editing = editingStemAssetId === asset.id;
             return (
-              <div key={asset.id} className={`grid grid-cols-[minmax(104px,136px)_1fr_auto_auto] items-center gap-3 ${silenced ? 'opacity-45' : ''}`}>
+              <div key={asset.id} className="grid gap-1.5">
+              <div className={`grid grid-cols-[minmax(104px,136px)_1fr_auto_auto_auto] items-center gap-3 ${silenced ? 'opacity-45' : ''}`}>
                 <button type="button" onClick={() => onOpenAsset(asset)} className="min-w-0 text-left" title={label}>
                   <span className="flex items-center gap-2 truncate text-[13px] font-bold leading-4">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
@@ -1418,6 +1478,18 @@ function StemsPanel({
                     onChange={(nextLevel) => onUpdateStemMix(asset.id, { level: nextLevel })}
                   />
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingStemAssetId(editing ? null : asset.id)}
+                  aria-label={`Edit the name and tags of ${label}`}
+                  aria-expanded={editing}
+                  className={`grid h-7 w-7 place-items-center rounded-[8px] ${
+                    editing ? 'bg-[var(--accent-soft)] text-[var(--accent-ink)]' : 'bg-[var(--paper-2)] text-[var(--muted)]'
+                  }`}
+                  title={`Name and tag ${label} — how Maestro tells it from the other parts`}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
                 <button
                   type="button"
                   onClick={() => onRunStemAnalysis(asset, { force: canForceAnalysis })}
@@ -1474,6 +1546,21 @@ function StemsPanel({
                     S
                   </button>
                 </div>
+              </div>
+              {editing && (
+                <StemIdentityEditor
+                  info={getStemInfo(asset)}
+                  saving={savingStemIdentityId === asset.id}
+                  onSave={(next) => {
+                    void onSaveStemIdentity(asset, next).then((saved) => {
+                      if (saved) {
+                        setEditingStemAssetId(null);
+                      }
+                    });
+                  }}
+                  onCancel={() => setEditingStemAssetId(null)}
+                />
+              )}
               </div>
             );
           })}

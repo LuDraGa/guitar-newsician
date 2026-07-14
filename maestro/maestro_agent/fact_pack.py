@@ -1114,7 +1114,17 @@ def _fingerprint_reasons(stored: dict[str, Any] | None, current: dict[str, Any])
 
 
 def _asset_change_reason(key: str, was_present: bool, is_present: bool) -> str:
-    label = key.split(":", 1)[0].replace("_", " ")
+    kind, _, scope = key.partition(":")
+    # `identity:<stem_id>` is not an asset — it's the stem's curatable identity
+    # (role/label/tags), hashed into the same fingerprint so a Studio retag rebuilds
+    # the pack. Say what actually happened.
+    if kind == "identity":
+        if not was_present:
+            return f"New part: {scope}."
+        if not is_present:
+            return f"Removed part: {scope}."
+        return f"You renamed or retagged {scope}."
+    label = kind.replace("_", " ")
     if not was_present:
         return f"New asset: {label}."
     if not is_present:

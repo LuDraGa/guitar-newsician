@@ -7,6 +7,8 @@ export type StemInfo = {
   role: StemRole;
   label: string;
   tags: string[];
+  /** True once a human has curated this identity (see `createStemMetadata`). */
+  curated: boolean;
 };
 
 type StemAssetLike = {
@@ -21,6 +23,9 @@ type StemMetadataInput = {
   label?: string | null;
   tags?: Array<string | null | undefined>;
   source?: string | null;
+  /** A human curated this identity: trust `tags` verbatim, never re-derive them. */
+  curated?: boolean;
+  curatedAt?: string;
   extra?: Record<string, Json | undefined>;
 };
 
@@ -51,6 +56,20 @@ export const DEFAULT_STEM_LEVELS: Record<StemRole, number> = {
   drums: 58,
   piano: 62,
   other: 70,
+};
+
+/**
+ * The tag vocabulary the curation UI suggests and Maestro's briefs lean on. Free
+ * text is still allowed — this is the well-worn path, not a cage. Guitar first:
+ * telling a lead from a rhythm part is the axis Section × Role briefs consume.
+ */
+export const SUGGESTED_STEM_TAGS: Record<StemRole, string[]> = {
+  guitar: ['lead', 'rhythm', 'clean', 'distorted', 'acoustic', 'solo', 'riff', 'fills', 'power chords', 'arpeggio'],
+  bass: ['root', 'walking', 'slap', 'fingerstyle', 'pick', 'fills'],
+  drums: ['groove', 'fills', 'percussion', 'cymbals'],
+  piano: ['comping', 'lead', 'pads', 'organ', 'synth', 'arpeggio'],
+  vocals: ['lead', 'harmony', 'backing', 'ad-libs'],
+  other: ['lead', 'rhythm', 'pads', 'strings', 'horns', 'fx'],
 };
 
 export const STEM_ROLE_COLORS: Record<StemRole, string> = {
@@ -133,6 +152,10 @@ export function createStemMetadata(input: StemMetadataInput): Record<string, Jso
     stem.source = input.source;
   }
 
+  if (input.curated) {
+    stem.curated = true;
+  }
+
   const metadata: Record<string, Json | undefined> = {
     ...(input.extra ?? {}),
     stem,
@@ -145,6 +168,11 @@ export function createStemMetadata(input: StemMetadataInput): Record<string, Jso
 
   if (input.source) {
     metadata.stem_source = input.source;
+  }
+
+  if (input.curated) {
+    metadata.stem_identity_curated = true;
+    metadata.stem_identity_curated_at = input.curatedAt ?? new Date().toISOString();
   }
 
   return compactJsonRecord(metadata);
@@ -169,14 +197,23 @@ export function getStemInfo(asset: StemAssetLike): StemInfo {
     labelFromStemValue(id) ??
     labelFromStemValue(rawRole) ??
     'Other';
+  // A curated identity is the human's answer: trust the stored tags verbatim and
+  // skip the pipeline's guesses (inst_class / midi_program_name / plugin_name),
+  // or a tag the user deliberately removed would grow straight back.
+  const curated = metadata?.stem_identity_curated === true || nested?.curated === true;
+  const derived = curated
+    ? []
+    : [
+        firstCleanString(metadata?.inst_class),
+        firstCleanString(metadata?.midi_program_name),
+        firstCleanString(metadata?.plugin_name),
+      ];
   const tags = uniqueStemTags([
     rawRole,
     ...stringArray(nested?.tags),
     ...stringArray(metadata?.stem_tags),
     ...stringArray(metadata?.tags),
-    firstCleanString(metadata?.inst_class),
-    firstCleanString(metadata?.midi_program_name),
-    firstCleanString(metadata?.plugin_name),
+    ...derived,
   ]).filter((tag) => tag.toLowerCase() !== label.toLowerCase());
 
   return {
@@ -184,6 +221,7 @@ export function getStemInfo(asset: StemAssetLike): StemInfo {
     role: rawRole,
     label,
     tags,
+    curated,
   };
 }
 

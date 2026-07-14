@@ -18,6 +18,7 @@ The fact pack persists back as an `analysis_results` row (analyzer
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
 
@@ -136,12 +137,28 @@ class WereCodeSongData:
 
     def asset_checksums(self, song_id: str) -> dict[str, str]:
         """Per-asset checksums keyed by (kind, stem-or-path) — drives fact-pack
-        source-hash invalidation (the analog of the POC's file sha1s)."""
+        source-hash invalidation (the analog of the POC's file sha1s).
+
+        Also carries an `identity:<stem_id>` entry per stem: a hash of the stem's
+        `(role, label, tags)`. Curating a stem's identity in Studio rewrites
+        `assets.metadata` and never the audio bytes, so `checksum_sha256` would not
+        move and the pack would stay cached on the identities the learner just
+        corrected — the graph would keep recalling warm nodes built on the old,
+        hedged roster. Hashing identity here is what makes a retag *reach* Maestro:
+        the pack rebuilds, its `created_at` moves, and every Comprehension Graph node
+        keyed to the old `pack_key` falls out of reach by a key miss (never a delete).
+        Metadata-only, so `status()` stays a cheap poll."""
         hashes: dict[str, str] = {}
         for asset in self._assets(song_id):
             checksum = asset.get("checksum_sha256")
             if checksum:
                 hashes[f"{asset['kind']}:{self._stem_id(asset) or asset['object_path']}"] = checksum
+        for stem in sorted(
+            (a for a in self._assets(song_id) if a["kind"] in STEM_AUDIO_KINDS),
+            key=lambda a: _stem_info(a)["id"],
+        ):
+            info = _stem_info(stem)
+            hashes[f"identity:{info['id']}"] = _identity_hash(info)
         return hashes
 
     def analysis_signatures(self, song_id: str) -> dict[str, str]:
@@ -451,6 +468,14 @@ def _string_list(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str)]
 
 
+def _identity_hash(info: dict[str, Any]) -> str:
+    """Stable fingerprint of a stem's curatable identity — role, label, and tags
+    (order-insensitive, case-insensitive). Pure, so it is unit-tested directly."""
+    tags = "|".join(sorted(str(tag).strip().lower() for tag in info.get("tags") or []))
+    payload = f"{info.get('role')}|{str(info.get('label') or '').strip().lower()}|{tags}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def _unique_tags(values: list[Any]) -> list[str]:
     tags: list[str] = []
     seen: set[str] = set()
@@ -500,6 +525,20 @@ def _stem_info(asset: dict[str, Any]) -> dict[str, Any]:
         or _label_from_value(role)
         or "Other"
     )
+    # A curated identity (a human edited this stem's label/tags in Studio) is the
+    # answer — trust the stored tags verbatim and skip the pipeline's guesses, or a
+    # tag the user deliberately removed would grow back on the next read. Mirrors
+    # `getStemInfo` in `src/lib/music/stem-metadata.ts`.
+    curated = metadata.get("stem_identity_curated") is True or nested.get("curated") is True
+    derived = (
+        []
+        if curated
+        else [
+            _first_clean(metadata.get("inst_class")),
+            _first_clean(metadata.get("midi_program_name")),
+            _first_clean(metadata.get("plugin_name")),
+        ]
+    )
     tags = [
         tag
         for tag in _unique_tags(
@@ -508,14 +547,12 @@ def _stem_info(asset: dict[str, Any]) -> dict[str, Any]:
                 *_string_list(nested.get("tags")),
                 *_string_list(metadata.get("stem_tags")),
                 *_string_list(metadata.get("tags")),
-                _first_clean(metadata.get("inst_class")),
-                _first_clean(metadata.get("midi_program_name")),
-                _first_clean(metadata.get("plugin_name")),
+                *derived,
             ]
         )
         if tag.lower() != label.lower()
     ]
-    return {"id": stem_id, "role": role, "label": label, "tags": tags}
+    return {"id": stem_id, "role": role, "label": label, "tags": tags, "curated": curated}
 
 
 def _index_analyses_by_asset(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
