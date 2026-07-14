@@ -24,14 +24,20 @@ from deepagents import (
     register_harness_profile,
 )
 
-from maestro_agent.brief import (
-    DEFAULT_BRIEF_MODEL,
-    interpret_skeleton,
-    make_judgment,
-)
+from maestro_agent.brief import DEFAULT_BRIEF_MODEL, interpret_skeleton
 from maestro_agent.comprehension_graph import ComprehensionGraphService
 from maestro_agent.config import Settings
 from maestro_agent.drill import build_drill_node, interpret_plan
+from maestro_agent.harness import (
+    SOURCE_COMPREHENSION_GRAPH,
+    SOURCE_FACT_PACK,
+    evaluate_node,
+    ground,
+    make_judgment,
+    route_directive,
+    route_followed,
+    route_message,
+)
 from maestro_agent.fact_pack import (
     FactPackUnavailable,
     SongFactPackService,
@@ -158,7 +164,13 @@ def invoke_agent(
         agent = create_agent_runner(settings, fact_pack, song_id, resolved_model, pack=pack)
         _agent_cache[cache_key] = agent
 
-    messages = _build_agent_messages(song_id, message, history or [])
+    # The harness router (#5): pure classification of the ask, region grounded
+    # in the pack's real section vocabulary. A brief/drill route nudges via a
+    # per-turn directive line (the cached static prefix is untouched); freeform
+    # leaves the turn exactly as before. The model can override a wrong guess.
+    route = route_message(message, (pack or {}).get("sections"))
+    directive = route_directive(route)
+    messages = _build_agent_messages(song_id, message, history or [], directive=directive)
     observer = usage_observer()
     observer.reset()  # isolate this request's calls (and clear any stale in-flight count)
 
@@ -194,6 +206,13 @@ def invoke_agent(
     trace = _agent_trace(result) or {}
     trace.update(
         {
+            # followed=False on a brief/drill route is the measurable mis-route
+            # signal the router was deferred behind — evidence, not anecdote.
+            "router": {
+                **route,
+                "directive": directive,
+                "followed": route_followed(route, trace.get("tool_calls")),
+            },
             "trace_id": trace_id,
             "request": {"song_id": song_id, "message": message, "history_messages": len(messages) - 1},
             "model": resolved_model,
@@ -261,7 +280,12 @@ def _agent_cache_key(song_id: str, resolved_model: str, pack: dict[str, Any] | N
     return f"{song_id}|{resolved_model}|v{pack.get('version')}|{pack.get('created_at')}"
 
 
-def _build_agent_messages(song_id: str, message: str, history: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _build_agent_messages(
+    song_id: str,
+    message: str,
+    history: list[dict[str, Any]],
+    directive: str | None = None,
+) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
     for item in history[-MAX_HISTORY_MESSAGES:]:
         role = str(item.get("role", "")).strip().lower()
@@ -271,7 +295,12 @@ def _build_agent_messages(song_id: str, message: str, history: list[dict[str, An
         if not content:
             continue
         messages.append({"role": role, "content": content[:MAX_HISTORY_CHARS]})
-    messages.append({"role": "user", "content": f"Active song is {song_id}. User request: {message}"})
+    content = f"Active song is {song_id}. User request: {message}"
+    if directive:
+        # The router's nudge rides the per-turn user message, never the cached
+        # static prefix.
+        content = f"{content}\n\n{directive}"
+    messages.append({"role": "user", "content": content})
     return messages
 
 
@@ -279,33 +308,39 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str, settings: Settings
     query = fact_pack.query(song_id)
     brief_model = getattr(settings, "brief_model", None) or DEFAULT_BRIEF_MODEL
 
+    def _dispatch(tool_name: str, source: str, func, *args: Any) -> dict[str, Any]:
+        # The harness grounding seam (#5): every tool response is provenance-
+        # stamped at dispatch, so its source rides by construction — the
+        # capabilities inherit it without per-capability bookkeeping.
+        return ground(_safe_fact_query(func, *args), tool=tool_name, source=source, song_id=song_id)
+
     def get_sections() -> dict[str, Any]:
         """Return the active song's section boundaries and labels from the SongFactPack."""
-        return _safe_fact_query(query.get_sections)
+        return _dispatch("get_sections", SOURCE_FACT_PACK, query.get_sections)
 
     def get_bar_grid(start_sec: float | None = None, end_sec: float | None = None) -> dict[str, Any]:
         """Return bars/beats for the active song, optionally filtered to a time range in seconds. meter.source says whether bars come from MIDI time signatures, analysis downbeats, or beat grouping — state that provenance when answering about bars or timing."""
-        return _safe_fact_query(query.get_bar_grid, start_sec, end_sec)
+        return _dispatch("get_bar_grid", SOURCE_FACT_PACK, query.get_bar_grid, start_sec, end_sec)
 
     def get_chords(start_sec: float | None = None, end_sec: float | None = None, limit: int = 64) -> dict[str, Any]:
         """Return a bounded chord progression slice for the active song."""
-        return _safe_fact_query(query.get_chords, start_sec, end_sec, limit)
+        return _dispatch("get_chords", SOURCE_FACT_PACK, query.get_chords, start_sec, end_sec, limit)
 
     def get_key() -> dict[str, Any]:
         """Return detected key, teaching key, key conflict, confidence, and evidence for the active song."""
-        return _safe_fact_query(query.get_key)
+        return _dispatch("get_key", SOURCE_FACT_PACK, query.get_key)
 
     def get_midi_tracks() -> dict[str, Any]:
         """Return the mix-level MIDI summary plus a lightweight stem roster (no per-stem MIDI by default). To get one part's full MIDI/notes, call get_stem(stem_id)."""
-        return _safe_fact_query(query.get_midi_tracks)
+        return _dispatch("get_midi_tracks", SOURCE_FACT_PACK, query.get_midi_tracks)
 
     def get_stems() -> dict[str, Any]:
         """Return a lightweight stem/instrument roster (id, label, role, tags, has_midi, has_analysis, loudness). The parts roster (incl. tags) is already in your seeded overview — don't call this to list parts. Use only to refresh the roster live after a song change mid-conversation, or as a fallback if the overview is unavailable."""
-        return _safe_fact_query(query.get_stems)
+        return _dispatch("get_stems", SOURCE_FACT_PACK, query.get_stems)
 
     def get_stem(stem_id: str) -> dict[str, Any]:
         """Return full detail for ONE stem/part by id: identity, MIDI summary, its own key/tempo/chords/sections, and per-section activity. Includes pitch_class_profile (the part's whole-song pitch-class lean) — compare it to the mix chord roots for monophonic/per-part key and harmony questions. An analyzed part also carries analysis.dynamics (peak/RMS/crest in dBFS, a coarse band) — its own loudness/dynamics, distinct from integrated_loudness (LUFS)."""
-        return _safe_fact_query(query.get_stem, stem_id)
+        return _dispatch("get_stem", SOURCE_FACT_PACK, query.get_stem, stem_id)
 
     def get_section_activity(
         section_index: int | None = None,
@@ -313,15 +348,17 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str, settings: Settings
         end_sec: float | None = None,
     ) -> dict[str, Any]:
         """Return which stems are active (and a compact per-part summary) in a section, by section_index or a time range. Use for 'what is each instrument doing here / what should the guitar play in this section'. Each active part carries dominant_pitch_classes for that section — compare to the mix chord roots when reconciling a part's key or harmony."""
-        return _safe_fact_query(query.get_section_activity, section_index, start_sec, end_sec)
+        return _dispatch(
+            "get_section_activity", SOURCE_FACT_PACK, query.get_section_activity, section_index, start_sec, end_sec
+        )
 
     def get_song_slice(start_sec: float, end_sec: float) -> dict[str, Any]:
         """Return sections, bars, chords, key, and tempo overlapping a time range, plus a lightweight roster of the parts (has_midi flags which carry MIDI). Also carries mix_dynamics (whole-mix peak/RMS/crest in dBFS, a coarse band) — global like key/tempo, the same readout for any range. For what each part plays in the range, call get_section_activity; for one part's detail, get_stem(stem_id)."""
-        return _safe_fact_query(query.get_song_slice, start_sec, end_sec)
+        return _dispatch("get_song_slice", SOURCE_FACT_PACK, query.get_song_slice, start_sec, end_sec)
 
     def transpose_song(semitones: int | None = None, target_key: str | None = None) -> dict[str, Any]:
         """Return a transposed key and chord progression preview for the active song."""
-        return _safe_fact_query(query.transpose_song, semitones, target_key)
+        return _dispatch("transpose_song", SOURCE_FACT_PACK, query.transpose_song, semitones, target_key)
 
     def brief_region(region: str) -> dict[str, Any]:
         """Brief a region of the song for a guitarist — the Section×Role briefing tool. region is a section label or index (e.g. 'the chorus', 'verse', '3'); all matching sections are briefed together. Runs the deterministic Section×Role rollup over the fact pack plus one interpretation pass, and returns a structured brief node (data + evidence + confidence + interpretation; parts it cannot analyze are flagged, generic labels are hedged). Briefed regions persist in the song's Comprehension Graph: re-asking a warm region serves the stored node (source: graph_recall, no second interpretation pass), and a fact-pack rebuild recomputes it fresh. Call this ONCE for 'brief / walk me through / what should I play in <section>' asks and answer from the node — do not re-derive it by chaining other tools."""
@@ -330,11 +367,12 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str, settings: Settings
             # Built lazily in the tool body — introspection never touches data.
             graph = ComprehensionGraphService(fact_pack)
             judge = make_judgment(brief_model)
-            return graph.ensure_current(
+            node = graph.ensure_current(
                 song_id, region, lambda skeleton: interpret_skeleton(skeleton, judge, model=brief_model)
             )
+            return _evaluated(node)
 
-        return _safe_fact_query(_run)
+        return _dispatch("brief_region", SOURCE_COMPREHENSION_GRAPH, _run)
 
     def drill_region(region: str) -> dict[str, Any]:
         """Generate a practice drill for a region of the song — the light Section×Role drill tool. region is a section label or index (e.g. 'the bridge', 'chorus', '3'); all matching sections are drilled together. Composes on the song's Comprehension Graph: the region's stored brief node is recalled (or populated first via the brief's formula + one interpretation pass if the region is cold), then a deterministic practice plan (loop window, tempo ladder, focus parts, cautions) plus one drill interpretation pass produce a structured drill node (data + evidence + confidence + interpretation; brief_source says whether the underlying comprehension was recalled or computed fresh). Grounded in what's actually happening in the region — flagged or ambiguous parts carry cautions, and missing data yields abstentions, never guesses. Call this ONCE for 'drill / exercise / how do I practice <section>' asks and answer from the node — do not chain brief_region or other tools first."""
@@ -347,11 +385,12 @@ def _make_tools(fact_pack: SongFactPackService, song_id: str, settings: Settings
                 song_id, region, lambda skeleton: interpret_skeleton(skeleton, brief_judge, model=brief_model)
             )
             drill_judge = make_judgment(brief_model, run_name="drill-judgment")
-            return build_drill_node(
+            node = build_drill_node(
                 brief_node, region, lambda plan: interpret_plan(plan, drill_judge, model=brief_model)
             )
+            return _evaluated(node)
 
-        return _safe_fact_query(_run)
+        return _dispatch("drill_region", SOURCE_COMPREHENSION_GRAPH, _run)
 
     return [
         get_sections,
@@ -394,6 +433,17 @@ def describe_tools(fact_pack: SongFactPackService) -> list[dict[str, Any]]:
             )
         described.append({"name": tool.__name__, "description": (tool.__doc__ or "").strip(), "params": params})
     return described
+
+
+def _evaluated(node: dict[str, Any]) -> dict[str, Any]:
+    """Attach the harness evaluator's verdict (#5) to a finished brief/drill
+    node — fresh or recalled — as a NEW dict, never mutating the object the
+    graph service persisted. Error nodes (already honest abstentions) pass
+    through unevaluated; the verdict is never persisted, so checker
+    improvements apply retroactively to every recalled node."""
+    if not isinstance(node, dict) or "error" in node:
+        return node
+    return {**node, "evaluation": evaluate_node(node)}
 
 
 def _safe_fact_query(func, *args: Any) -> dict[str, Any]:

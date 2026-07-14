@@ -16,8 +16,6 @@ judgment hedges instead of inventing a lead/rhythm split.
 
 from __future__ import annotations
 
-import json
-import logging
 from typing import Any, Callable
 
 from maestro_agent.fact_pack import (
@@ -27,8 +25,7 @@ from maestro_agent.fact_pack import (
     _numeric_confidence,
     _overall_confidence,
 )
-
-logger = logging.getLogger("maestro.brief")
+from maestro_agent.harness import run_judgment
 
 NODE_TYPE = "section_role_brief"
 DEFAULT_BRIEF_MODEL = "openai/gpt-5.5"
@@ -227,69 +224,12 @@ def interpret_skeleton(
     judge: Callable[[str], str],
     model: str | None = None,
 ) -> dict[str, Any]:
-    """Run the single interpretation pass over the assembled skeleton.
-
-    `judge` is the injected LLM call (prompt → text) so tests stub it. The
-    output is parsed best-effort; a failure never raises — the formula half of
-    the node stays valuable, so degradation is explicit and honest."""
-    prompt = JUDGMENT_INSTRUCTIONS + json.dumps(skeleton, separators=(",", ":"))
-    base: dict[str, Any] = {"kind": "interpretation"}
-    if model:
-        base["model"] = model
-    try:
-        raw = judge(prompt)
-    except Exception as exc:
-        logger.warning("brief judgment pass failed: %s", exc)
-        return {**base, "status": "unavailable", "error": str(exc)}
-    parsed = _parse_judgment(raw)
-    return {**base, "status": "ok", **parsed}
-
-
-def _parse_judgment(raw: str) -> dict[str, Any]:
-    text = str(raw or "").strip()
-    if text.startswith("```"):
-        text = text.strip("`").strip()
-        if text.lower().startswith("json"):
-            text = text[4:].strip()
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-    return {"summary": str(raw or "").strip()}
-
-
-def make_judgment(model: str, run_name: str = "brief-judgment") -> Callable[[str], str]:
-    """The real judgment callable: one chat completion through the LiteLLM
-    chokepoint (so the usage observer prices it into the turn) with the Langfuse
-    handler attached (so the pass lands in the turn's trace under `run_name` —
-    `brief-judgment` here, `drill-judgment` for #4's pass)."""
-    from maestro_agent.llm import make_chat_model
-    from maestro_agent.tracing import build_handler
-
-    def judge(prompt: str) -> str:
-        chat = make_chat_model(model)
-        config: dict[str, Any] = {"run_name": run_name}
-        handler = build_handler()
-        if handler is not None:
-            config["callbacks"] = [handler]
-        result = chat.invoke(prompt, config=config)
-        return _content_text(getattr(result, "content", result))
-
-    return judge
-
-
-def _content_text(content: Any) -> str:
-    if isinstance(content, list):
-        parts = []
-        for part in content:
-            if isinstance(part, dict) and part.get("type") in {"text", "output_text"}:
-                parts.append(str(part.get("text", "")))
-            elif isinstance(part, str):
-                parts.append(part)
-        return "\n".join(part for part in parts if part).strip()
-    return str(content)
+    """Run the single brief interpretation pass over the assembled skeleton —
+    a thin wrapper over the harness judgment runner (#5 extracted the shared
+    try/parse/degrade shape from this module and drill's deliberate mirror of
+    it). `judge` is the injected LLM call so tests stub it; a failure never
+    raises — the formula half of the node stays valuable."""
+    return run_judgment(JUDGMENT_INSTRUCTIONS, skeleton, judge, model=model, name="brief judgment")
 
 
 # --- the node (composition) -----------------------------------------------------

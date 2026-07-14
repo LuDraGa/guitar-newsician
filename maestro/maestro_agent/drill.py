@@ -13,20 +13,16 @@ parallel rollup path exists (PRD stories 15/16) by construction.
 The exercise node mirrors the brief node's shape (`data + evidence +
 confidence + interpretation`) but stays ephemeral: the persisted artifact is
 the brief node underneath. Persisting drill output is deferred (S3 / the
-map's fog). The judgment-pass shape deliberately mirrors `interpret_skeleton`
-rather than extracting a shared helper — the earned harness (#5) extracts
-from observed duplication, and this is the observation.
+map's fog). The judgment pass runs through the harness's shared runner —
+extracted at #5 from this module's deliberate mirror of `interpret_skeleton`,
+the observed duplication the earned harness was built from.
 """
 
 from __future__ import annotations
 
-import json
-import logging
 from typing import Any, Callable
 
-from maestro_agent.brief import _parse_judgment
-
-logger = logging.getLogger("maestro.drill")
+from maestro_agent.harness import run_judgment
 
 NODE_TYPE = "section_role_drill"
 
@@ -195,23 +191,12 @@ def interpret_plan(
     judge: Callable[[str], str],
     model: str | None = None,
 ) -> dict[str, Any]:
-    """Run the single drill interpretation pass over the assembled plan.
-
-    Mirrors `interpret_skeleton`'s try/parse/degrade shape (deliberately — #5
-    extracts the shared helper from this observed duplication): `judge` is the
-    injected LLM call so tests stub it; a failure never raises — the
-    deterministic plan stays valuable, so degradation is explicit and honest."""
-    prompt = DRILL_JUDGMENT_INSTRUCTIONS + json.dumps(plan, separators=(",", ":"))
-    base: dict[str, Any] = {"kind": "interpretation"}
-    if model:
-        base["model"] = model
-    try:
-        raw = judge(prompt)
-    except Exception as exc:
-        logger.warning("drill judgment pass failed: %s", exc)
-        return {**base, "status": "unavailable", "error": str(exc)}
-    parsed = _parse_judgment(raw)
-    return {**base, "status": "ok", **parsed}
+    """Run the single drill interpretation pass over the assembled plan — a
+    thin wrapper over the harness judgment runner (the shared try/parse/degrade
+    shape #5 extracted from this module's deliberate mirror of
+    `interpret_skeleton`). `judge` is the injected LLM call so tests stub it;
+    a failure never raises — the deterministic plan stays valuable."""
+    return run_judgment(DRILL_JUDGMENT_INSTRUCTIONS, plan, judge, model=model, name="drill judgment")
 
 
 # --- the node (composition) --------------------------------------------------------
